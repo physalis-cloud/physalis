@@ -12,7 +12,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  IMAGE: ghcr.io/argo-web/physalis-vault
+  IMAGE: ghcr.io/physalis-cloud/physalis
 
 jobs:
   test:
