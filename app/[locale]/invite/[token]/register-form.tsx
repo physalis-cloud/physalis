@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { useTranslations } from "next-intl";
 import RateLimitAlert from "@/components/RateLimitAlert";
 
 export default function InvitationRegisterForm({
@@ -20,6 +21,7 @@ export default function InvitationRegisterForm({
   inviterEmail: string;
   role: string;
 }) {
+  const t = useTranslations("invite");
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -32,7 +34,7 @@ export default function InvitationRegisterForm({
     setError(null);
     setRateLimited(false);
     if (password !== confirm) {
-      setError("Les mots de passe ne correspondent pas.");
+      setError(t("passwordsMismatch"));
       return;
     }
     startTransition(async () => {
@@ -45,7 +47,7 @@ export default function InvitationRegisterForm({
         const data = (await res.json().catch(() => null)) as
           | { error?: string }
           | null;
-        setError(data?.error ?? "Création impossible.");
+        setError(data?.error ?? t("createFailed"));
         return;
       }
       // Le compte est créé. Auto-signIn avec les credentials.
@@ -80,9 +82,15 @@ export default function InvitationRegisterForm({
   return (
     <form onSubmit={onSubmit} className="login-form">
       <div className="help" style={{ textAlign: "center" }}>
-        <strong>{inviterEmail}</strong> vous invite à rejoindre{" "}
-        <strong>{organizationName}</strong> avec le rôle{" "}
-        <span className={`role role-${role.toLowerCase()}`}>{role}</span>.
+        {t.rich("invitationLine", {
+          inviter: inviterEmail,
+          organization: organizationName,
+          role,
+          strong: (c) => <strong>{c}</strong>,
+          rolebadge: (c) => (
+            <span className={`role role-${role.toLowerCase()}`}>{c}</span>
+          ),
+        })}
       </div>
       <div
         className="help code-mono"
@@ -97,7 +105,7 @@ export default function InvitationRegisterForm({
       </div>
 
       <div className="field">
-        <label>Mot de passe (12 caractères minimum)</label>
+        <label>{t("passwordLabel")}</label>
         <input
           type="password"
           required
@@ -111,7 +119,7 @@ export default function InvitationRegisterForm({
       </div>
 
       <div className="field">
-        <label>Confirmer le mot de passe</label>
+        <label>{t("confirmPasswordLabel")}</label>
         <input
           type="password"
           required
@@ -132,7 +140,7 @@ export default function InvitationRegisterForm({
         className="btn btn-primary"
         style={{ marginTop: 6, padding: "11px 16px", justifyContent: "center" }}
       >
-        {pending ? "Création..." : "Créer mon compte et accepter"}
+        {pending ? t("creating") : t("createAndAccept")}
       </button>
     </form>
   );

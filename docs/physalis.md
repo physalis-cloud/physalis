@@ -679,7 +679,7 @@ Flux pour collecter un secret auprès d'un tiers externe sans l'exposer en clair
 
 Statuts dérivés (pas stockés en DB) : `pending` → `received` → `imported` / `revoked` / `expired`.
 
-**Sécurité post-quantique** (Phase 1, livrée 2026-06-07) : l'échange de clés est désormais **hybride ECDH P-256 + ML-KEM-768** (combineur HKDF-SHA256 avec binding du transcript, pas de XOR) — résistant à un futur ordinateur quantique. La `privateKey` retournée est **composite** `{v, ecdh, mlkem}`. Rétro-compatible : les demandes pré-PQC (ECDH seul) restent déchiffrables (`hybridVersion=null`). Fichiers : [lib/pqc.ts](../lib/pqc.ts) (ML-KEM-768 via `@noble/post-quantum`), [lib/hybrid-kem.ts](../lib/hybrid-kem.ts), migration `20260605120000_secret_request_pqc` (colonnes `mlkemPublicKey`/`mlkemCiphertext`/`hybridVersion`). Détail : [steps-docs/todo/securite-post-quantique.md](steps-docs/todo/securite-post-quantique.md).
+**Sécurité post-quantique** (Phase 1, livrée 2026-06-07) : l'échange de clés est désormais **hybride ECDH P-256 + ML-KEM-768** (combineur HKDF-SHA256 avec binding du transcript, pas de XOR) — résistant à un futur ordinateur quantique. La `privateKey` retournée est **composite** `{v, ecdh, mlkem}`. Rétro-compatible : les demandes pré-PQC (ECDH seul) restent déchiffrables (`hybridVersion=null`). Fichiers : [lib/pqc.ts](../lib/pqc.ts) (ML-KEM-768 via `@noble/post-quantum`), [lib/hybrid-kem.ts](../lib/hybrid-kem.ts), migration `20260605120000_secret_request_pqc` (colonnes `mlkemPublicKey`/`mlkemCiphertext`/`hybridVersion`). Détail : [steps-docs/done/securite-post-quantique.md](steps-docs/done/securite-post-quantique.md).
 
 ---
 
@@ -911,9 +911,9 @@ Invariants :
 - **Auth tag GCM** vérifié à la lecture (corruption du payload ou du tag → exception au déchiffrement).
 - La clé est lue à chaque appel d'`encrypt`/`decrypt` via `getKey()`, qui valide la longueur 32B avant utilisation. Si `ENCRYPTION_KEY` change entre deux runs, les anciens secrets deviennent illisibles (pas de re-keying automatique).
 
-### 5.1 Backups plateforme — chiffrement par enveloppe (OpenBao, pilote)
+### 5.1 Backups plateforme — chiffrement par enveloppe (OpenBao)
 
-Le backup de Physalis lui-même (primaire → secondaire, `scripts/backup/`) migre du chiffrement **GPG** (clé privée colocalisée avec les archives sur le secondaire) vers un **chiffrement par enveloppe** adossé à un **KMS self-hosté** (OpenBao, moteur `transit`). Pilote **déployé et validé en réel** (2026-06-09/10), **en parallèle du GPG** jusqu'au cutover. Détail : [steps-docs/todo/openbao.md](steps-docs/todo/openbao.md) + [backup-pilote-openbao-plan.md](steps-docs/todo/backup-pilote-openbao-plan.md).
+Le backup de Physalis lui-même (primaire → secondaire, `scripts/backup/`) est passé du chiffrement **GPG** (clé privée colocalisée avec les archives sur le secondaire) à un **chiffrement par enveloppe** adossé à un **KMS self-hosté** (OpenBao, moteur `transit`). **Cutover terminé (2026-06-13)** : physalis + nginx sont chiffrés par enveloppe, la clé GPG est **retirée du secondaire** (en escrow, password manager) — le secondaire ne détient plus aucune clé de déchiffrement sur disque, et le restore-test reste automatique (auth machine OpenBao). Détail : [steps-docs/todo/openbao.md](steps-docs/todo/openbao.md) + [backup-pilote-openbao-plan.md](steps-docs/done/backup-pilote-openbao-plan.md).
 
 - **Principe** : DEK AES-256 aléatoire **par archive** (format `.db.penv` = AES-256-CTR + HMAC-SHA256, *encrypt-then-MAC* — `openssl enc -aes-256-gcm` exclu car tag GCM non géré en CLI), wrappée par OpenBao (`transit/datakey`). Le **primaire** a la capacité `datakey` **seule** → il chiffre **sans pouvoir déchiffrer** ses backups ; le **secondaire** a `decrypt` **seule** → il déchiffre via `transit/decrypt`. La DEK ne touche **jamais** le disque. **PQ-safe** (wrap symétrique AES-256).
 - **Identités** : AppRole CIDR-bound, token TTL court ; `secret_id` en fichier `0600` livré en response-wrapping ; cert OpenBao **épinglé**.

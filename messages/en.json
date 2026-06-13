@@ -1776,5 +1776,48 @@
       "item2": "Automatic deployments are disabled on excess organisations.",
       "btn": "Re-subscribe to a plan"
     }
+  },
+  "invite": {
+    "wrongWorkspace": "This invitation must be opened from your workspace URL (e.g. <code>myworkspace.physalis.cloud/invite/...</code>).",
+    "tagInvalid": "Invalid invitation",
+    "tag": "Invitation",
+    "errors": {
+      "alreadyAccepted": "This invitation has already been accepted.",
+      "expired": "This invitation has expired.",
+      "notFound": "This invitation could not be found."
+    },
+    "back": "← Back",
+    "invitationLine": "<strong>{inviter}</strong> invites you to join <strong>{organization}</strong> with the role <rolebadge>{role}</rolebadge>.",
+    "signInToAccept": "Sign in with the address <strong>{email}</strong> to accept.",
+    "signIn": "Sign in",
+    "emailMismatch": "This invitation was sent to <strong>{invitedEmail}</strong>. You are signed in as <strong>{currentEmail}</strong>.<br></br>Sign out and sign back in with the correct address.",
+    "passwordsMismatch": "The passwords do not match.",
+    "createFailed": "Unable to create account.",
+    "passwordLabel": "Password (12 characters minimum)",
+    "confirmPasswordLabel": "Confirm password",
+    "creating": "Creating...",
+    "createAndAccept": "Create my account and accept"
+  },
+  "secretRequest": {
+    "metaTitle": "Secure sharing — Physalis",
+    "tagInvalid": "Invalid link",
+    "tag": "Secure sharing",
+    "linkInvalid": "This link is no longer valid. It may have expired or already been used. Contact the person who sent it to you to get a new link.",
+    "errors": {
+      "emptySecret": "Enter a secret before continuing.",
+      "tooLong": "Secret too long (max 50,000 characters).",
+      "linkGone": "This link is no longer valid (already used, expired or revoked).",
+      "rateLimit": "Too many attempts, try again in an hour.",
+      "generic": "An error occurred. Try again.",
+      "encryptFailed": "Unable to encrypt the secret. Make sure your browser supports WebCrypto."
+    },
+    "successMessage": "Your secret has been securely sent to <strong>{email}</strong>.",
+    "successNote": "This link is now invalid. You can close this page.",
+    "askLine": "<strong>{email}</strong> asks you to share:",
+    "secretLabel": "Your secret",
+    "sending": "Sending securely…",
+    "sendSecurely": "Send securely",
+    "encryptionNotice": "🔐 Your secret is encrypted in your browser before transmission. Physalis cannot read it.",
+    "expiresOn": "This link expires on {date}."
   }
 }

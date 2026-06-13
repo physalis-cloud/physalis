@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import Image from "next/image";
+import { getTranslations } from "next-intl/server";
 import RequestForm from "./request-form";
 import {
   hashSecretRequestToken,
@@ -9,9 +10,10 @@ import {
 import { basePrisma } from "@/lib/prisma";
 import { isValidClientSlug } from "@/lib/validation";
 
-export const metadata = {
-  title: "Partage sécurisé — Physalis",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("secretRequest");
+  return { title: t("metaTitle") };
+}
 
 type RequestData = {
   label: string;
@@ -46,6 +48,7 @@ export default async function RequestPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+  const t = await getTranslations("secretRequest");
   // headers() touché avant le query pour rester en dynamic rendering.
   await headers();
   const data = await loadRequest(token);
@@ -65,13 +68,11 @@ export default async function RequestPage({
             />
             <div className="login-brand-text">
               <div className="login-brand-name">Physalis</div>
-              <div className="login-brand-tag">Lien invalide</div>
+              <div className="login-brand-tag">{t("tagInvalid")}</div>
             </div>
           </div>
           <p className="help" style={{ textAlign: "center" }}>
-            Ce lien n&apos;est plus valide. Il a peut-être expiré ou déjà été
-            utilisé. Contactez la personne qui vous l&apos;a envoyé pour
-            obtenir un nouveau lien.
+            {t("linkInvalid")}
           </p>
         </div>
       </div>
@@ -92,7 +93,7 @@ export default async function RequestPage({
           />
           <div className="login-brand-text">
             <div className="login-brand-name">Physalis</div>
-            <div className="login-brand-tag">Partage sécurisé</div>
+            <div className="login-brand-tag">{t("tag")}</div>
           </div>
         </div>
         <RequestForm

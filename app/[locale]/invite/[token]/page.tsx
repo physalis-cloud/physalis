@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { getTranslations } from "next-intl/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hashInvitationToken } from "@/lib/invitations";
@@ -12,6 +13,7 @@ export default async function InvitePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+  const t = await getTranslations("invite");
 
   const invitation = await prisma.invitation.findUnique({
     where: { tokenHash: hashInvitationToken(token) },
@@ -42,22 +44,22 @@ export default async function InvitePage({
             />
             <div className="login-brand-text">
               <div className="login-brand-name">Physalis</div>
-              <div className="login-brand-tag">Invitation invalide</div>
+              <div className="login-brand-tag">{t("tagInvalid")}</div>
             </div>
           </div>
           <p className="help" style={{ textAlign: "center" }}>
             {invitation?.acceptedAt
-              ? "Cette invitation a déjà été acceptée."
+              ? t("errors.alreadyAccepted")
               : invitation
-                ? "Cette invitation a expiré."
-                : "Cette invitation est introuvable."}
+                ? t("errors.expired")
+                : t("errors.notFound")}
           </p>
           <Link
             href="/dashboard"
             className="btn btn-ghost btn-sm"
             style={{ alignSelf: "center" }}
           >
-            ← Retour
+            {t("back")}
           </Link>
         </div>
       </div>
@@ -85,7 +87,7 @@ export default async function InvitePage({
               />
               <div className="login-brand-text">
                 <div className="login-brand-name">Physalis</div>
-                <div className="login-brand-tag">Invitation</div>
+                <div className="login-brand-tag">{t("tag")}</div>
               </div>
             </div>
             <InvitationRegisterForm
@@ -116,21 +118,27 @@ export default async function InvitePage({
             />
             <div className="login-brand-text">
               <div className="login-brand-name">Physalis</div>
-              <div className="login-brand-tag">Invitation</div>
+              <div className="login-brand-tag">{t("tag")}</div>
             </div>
           </div>
           <p className="help" style={{ textAlign: "center" }}>
-            <strong>{invitation.invitedBy.email}</strong> vous invite à
-            rejoindre <strong>{invitation.organization.name}</strong> avec le
-            rôle{" "}
-            <span className={`role role-${invitation.role.toLowerCase()}`}>
-              {invitation.role}
-            </span>
-            .
+            {t.rich("invitationLine", {
+              inviter: invitation.invitedBy.email,
+              organization: invitation.organization.name,
+              role: invitation.role,
+              strong: (c) => <strong>{c}</strong>,
+              rolebadge: (c) => (
+                <span className={`role role-${invitation.role.toLowerCase()}`}>
+                  {c}
+                </span>
+              ),
+            })}
           </p>
           <p className="help" style={{ textAlign: "center" }}>
-            Connectez-vous avec l&apos;adresse{" "}
-            <strong>{invitation.email}</strong> pour accepter.
+            {t.rich("signInToAccept", {
+              email: invitation.email,
+              strong: (c) => <strong>{c}</strong>,
+            })}
           </p>
           <Link
             href={`/login?callbackUrl=${encodeURIComponent(callback)}`}
@@ -141,7 +149,7 @@ export default async function InvitePage({
               justifyContent: "center",
             }}
           >
-            Se connecter
+            {t("signIn")}
           </Link>
         </div>
       </div>
@@ -165,16 +173,21 @@ export default async function InvitePage({
           />
           <div className="login-brand-text">
             <div className="login-brand-name">Physalis</div>
-            <div className="login-brand-tag">Invitation</div>
+            <div className="login-brand-tag">{t("tag")}</div>
           </div>
         </div>
         <p className="help" style={{ textAlign: "center" }}>
-          <strong>{invitation.invitedBy.email}</strong> vous invite à rejoindre{" "}
-          <strong>{invitation.organization.name}</strong> avec le rôle{" "}
-          <span className={`role role-${invitation.role.toLowerCase()}`}>
-            {invitation.role}
-          </span>
-          .
+          {t.rich("invitationLine", {
+            inviter: invitation.invitedBy.email,
+            organization: invitation.organization.name,
+            role: invitation.role,
+            strong: (c) => <strong>{c}</strong>,
+            rolebadge: (c) => (
+              <span className={`role role-${invitation.role.toLowerCase()}`}>
+                {c}
+              </span>
+            ),
+          })}
         </p>
 
         {emailMismatch ? (
@@ -188,11 +201,12 @@ export default async function InvitePage({
               color: "var(--fg)",
             }}
           >
-            Cette invitation a été envoyée à{" "}
-            <strong>{invitation.email}</strong>. Vous êtes connecté avec{" "}
-            <strong>{session.user.email}</strong>.
-            <br />
-            Déconnectez-vous puis reconnectez-vous avec la bonne adresse.
+            {t.rich("emailMismatch", {
+              invitedEmail: invitation.email,
+              currentEmail: session.user.email,
+              strong: (c) => <strong>{c}</strong>,
+              br: () => <br />,
+            })}
           </div>
         ) : (
           <AcceptInvitationButton

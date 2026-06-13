@@ -1776,5 +1776,48 @@
     "subtitle": "Guides d'utilisation de Physalis. Choisissez une section ci-dessous ou via la barre latérale.",
     "section": "Section",
     "backLink": "Toute la documentation"
+  },
+  "invite": {
+    "wrongWorkspace": "Cette invitation doit être ouverte depuis l'URL de votre workspace (ex: <code>monworkspace.physalis.cloud/invite/...</code>).",
+    "tagInvalid": "Invitation invalide",
+    "tag": "Invitation",
+    "errors": {
+      "alreadyAccepted": "Cette invitation a déjà été acceptée.",
+      "expired": "Cette invitation a expiré.",
+      "notFound": "Cette invitation est introuvable."
+    },
+    "back": "← Retour",
+    "invitationLine": "<strong>{inviter}</strong> vous invite à rejoindre <strong>{organization}</strong> avec le rôle <rolebadge>{role}</rolebadge>.",
+    "signInToAccept": "Connectez-vous avec l'adresse <strong>{email}</strong> pour accepter.",
+    "signIn": "Se connecter",
+    "emailMismatch": "Cette invitation a été envoyée à <strong>{invitedEmail}</strong>. Vous êtes connecté avec <strong>{currentEmail}</strong>.<br></br>Déconnectez-vous puis reconnectez-vous avec la bonne adresse.",
+    "passwordsMismatch": "Les mots de passe ne correspondent pas.",
+    "createFailed": "Création impossible.",
+    "passwordLabel": "Mot de passe (12 caractères minimum)",
+    "confirmPasswordLabel": "Confirmer le mot de passe",
+    "creating": "Création...",
+    "createAndAccept": "Créer mon compte et accepter"
+  },
+  "secretRequest": {
+    "metaTitle": "Partage sécurisé — Physalis",
+    "tagInvalid": "Lien invalide",
+    "tag": "Partage sécurisé",
+    "linkInvalid": "Ce lien n'est plus valide. Il a peut-être expiré ou déjà été utilisé. Contactez la personne qui vous l'a envoyé pour obtenir un nouveau lien.",
+    "errors": {
+      "emptySecret": "Saisissez un secret avant de continuer.",
+      "tooLong": "Secret trop long (max 50 000 caractères).",
+      "linkGone": "Ce lien n'est plus valide (déjà utilisé, expiré ou révoqué).",
+      "rateLimit": "Trop de tentatives, réessayez dans une heure.",
+      "generic": "Une erreur est survenue. Réessayez.",
+      "encryptFailed": "Impossible de chiffrer le secret. Vérifiez que votre navigateur supporte WebCrypto."
+    },
+    "successMessage": "Votre secret a été transmis en toute sécurité à <strong>{email}</strong>.",
+    "successNote": "Ce lien est maintenant invalide. Vous pouvez fermer cette page.",
+    "askLine": "<strong>{email}</strong> vous demande de partager :",
+    "secretLabel": "Votre secret",
+    "sending": "Envoi sécurisé…",
+    "sendSecurely": "Envoyer de façon sécurisée",
+    "encryptionNotice": "🔐 Votre secret est chiffré dans votre navigateur avant transmission. Physalis ne peut pas le lire.",
+    "expiresOn": "Ce lien expire le {date}."
   }
 }

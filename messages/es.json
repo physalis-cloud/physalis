@@ -1776,5 +1776,48 @@
     "subtitle": "Guías de uso de Physalis. Elija una sección a continuación o use la barra lateral.",
     "section": "Sección",
     "backLink": "Toda la documentación"
+  },
+  "invite": {
+    "wrongWorkspace": "Esta invitación debe abrirse desde la URL de tu espacio de trabajo (ej.: <code>miespacio.physalis.cloud/invite/...</code>).",
+    "tagInvalid": "Invitación no válida",
+    "tag": "Invitación",
+    "errors": {
+      "alreadyAccepted": "Esta invitación ya ha sido aceptada.",
+      "expired": "Esta invitación ha caducado.",
+      "notFound": "No se encuentra esta invitación."
+    },
+    "back": "← Volver",
+    "invitationLine": "<strong>{inviter}</strong> te invita a unirte a <strong>{organization}</strong> con el rol <rolebadge>{role}</rolebadge>.",
+    "signInToAccept": "Inicia sesión con la dirección <strong>{email}</strong> para aceptar.",
+    "signIn": "Iniciar sesión",
+    "emailMismatch": "Esta invitación se envió a <strong>{invitedEmail}</strong>. Has iniciado sesión como <strong>{currentEmail}</strong>.<br></br>Cierra sesión y vuelve a iniciarla con la dirección correcta.",
+    "passwordsMismatch": "Las contraseñas no coinciden.",
+    "createFailed": "No se pudo crear la cuenta.",
+    "passwordLabel": "Contraseña (mínimo 12 caracteres)",
+    "confirmPasswordLabel": "Confirmar contraseña",
+    "creating": "Creando...",
+    "createAndAccept": "Crear mi cuenta y aceptar"
+  },
+  "secretRequest": {
+    "metaTitle": "Compartición segura — Physalis",
+    "tagInvalid": "Enlace no válido",
+    "tag": "Compartición segura",
+    "linkInvalid": "Este enlace ya no es válido. Es posible que haya caducado o que ya se haya utilizado. Contacta con la persona que te lo envió para obtener uno nuevo.",
+    "errors": {
+      "emptySecret": "Introduce un secreto antes de continuar.",
+      "tooLong": "Secreto demasiado largo (máx. 50 000 caracteres).",
+      "linkGone": "Este enlace ya no es válido (ya usado, caducado o revocado).",
+      "rateLimit": "Demasiados intentos, vuelve a intentarlo en una hora.",
+      "generic": "Se ha producido un error. Inténtalo de nuevo.",
+      "encryptFailed": "No se pudo cifrar el secreto. Comprueba que tu navegador es compatible con WebCrypto."
+    },
+    "successMessage": "Tu secreto se ha enviado de forma segura a <strong>{email}</strong>.",
+    "successNote": "Este enlace ya no es válido. Puedes cerrar esta página.",
+    "askLine": "<strong>{email}</strong> te pide que compartas:",
+    "secretLabel": "Tu secreto",
+    "sending": "Enviando de forma segura…",
+    "sendSecurely": "Enviar de forma segura",
+    "encryptionNotice": "🔐 Tu secreto se cifra en tu navegador antes de transmitirse. Physalis no puede leerlo.",
+    "expiresOn": "Este enlace caduca el {date}."
   }
 }

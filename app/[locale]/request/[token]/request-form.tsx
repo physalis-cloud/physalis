@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { RiLockLine } from "@remixicon/react";
+import { useTranslations } from "next-intl";
 import { encryptForRecipient } from "@/lib/secret-request-crypto";
 
 export default function RequestForm({
@@ -19,6 +20,7 @@ export default function RequestForm({
   publicKeyJwk: string;
   expiresAt: string;
 }) {
+  const t = useTranslations("secretRequest");
   const [secret, setSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -28,11 +30,11 @@ export default function RequestForm({
     e.preventDefault();
     setError(null);
     if (!secret || secret.length === 0) {
-      setError("Saisissez un secret avant de continuer.");
+      setError(t("errors.emptySecret"));
       return;
     }
     if (secret.length > 50_000) {
-      setError("Secret trop long (max 50 000 caractères).");
+      setError(t("errors.tooLong"));
       return;
     }
     startTransition(async () => {
@@ -46,15 +48,11 @@ export default function RequestForm({
         });
         if (!res.ok) {
           if (res.status === 410) {
-            setError(
-              "Ce lien n'est plus valide (déjà utilisé, expiré ou révoqué).",
-            );
+            setError(t("errors.linkGone"));
           } else if (res.status === 429) {
-            setError(
-              "Trop de tentatives, réessayez dans une heure.",
-            );
+            setError(t("errors.rateLimit"));
           } else {
-            setError("Une erreur est survenue. Réessayez.");
+            setError(t("errors.generic"));
           }
           return;
         }
@@ -63,9 +61,7 @@ export default function RequestForm({
         setSubmitted(true);
       } catch (err) {
         console.error(err);
-        setError(
-          "Impossible de chiffrer le secret. Vérifiez que votre navigateur supporte WebCrypto.",
-        );
+        setError(t("errors.encryptFailed"));
       }
     });
   }
@@ -75,11 +71,13 @@ export default function RequestForm({
       <div className="login-form" style={{ gap: 12, textAlign: "center" }}>
         <div style={{ fontSize: 32 }}>✅</div>
         <p className="help">
-          Votre secret a été transmis en toute sécurité à{" "}
-          <strong>{requestedByEmail}</strong>.
+          {t.rich("successMessage", {
+            email: requestedByEmail,
+            strong: (c) => <strong>{c}</strong>,
+          })}
         </p>
         <p className="help" style={{ fontSize: 13 }}>
-          Ce lien est maintenant invalide. Vous pouvez fermer cette page.
+          {t("successNote")}
         </p>
       </div>
     );
@@ -92,7 +90,10 @@ export default function RequestForm({
   return (
     <form onSubmit={onSubmit} className="login-form">
       <p className="help" style={{ textAlign: "center" }}>
-        <strong>{requestedByEmail}</strong> vous demande de partager :
+        {t.rich("askLine", {
+          email: requestedByEmail,
+          strong: (c) => <strong>{c}</strong>,
+        })}
       </p>
       <div
         style={{
@@ -119,7 +120,7 @@ export default function RequestForm({
       )}
 
       <div className="field">
-        <label>Votre secret</label>
+        <label>{t("secretLabel")}</label>
         <textarea
           required
           autoFocus
@@ -141,10 +142,10 @@ export default function RequestForm({
         style={{ marginTop: 6, padding: "11px 16px", justifyContent: "center" }}
       >
         {pending ? (
-          "Envoi sécurisé…"
+          t("sending")
         ) : (
           <>
-            <RiLockLine size={14} aria-hidden /> Envoyer de façon sécurisée
+            <RiLockLine size={14} aria-hidden /> {t("sendSecurely")}
           </>
         )}
       </button>
@@ -153,10 +154,9 @@ export default function RequestForm({
         className="help"
         style={{ textAlign: "center", fontSize: 12, marginTop: 6 }}
       >
-        🔐 Votre secret est chiffré dans votre navigateur avant transmission.
-        Physalis ne peut pas le lire.
+        {t("encryptionNotice")}
         <br />
-        Ce lien expire le {expires}.
+        {t("expiresOn", { date: expires })}
       </p>
     </form>
   );
