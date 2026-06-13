@@ -7,7 +7,7 @@ import { prisma } from "./prisma";
 export type TenantTransaction = PrismaTypes.TransactionClient;
 
 export async function withTenantSchema<T>(
-  _slug: string,
+  _slug: string | null,
   fn: (tx: TenantTransaction) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(fn);
