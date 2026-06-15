@@ -306,9 +306,38 @@ COPY --from=build /app/dist /usr/share/nginx/html
 > navigateur. À réserver aux URLs publiques, feature flags, etc. Voir
 > [Secrets & catégories](secrets) pour la convention complète.
 
-> **GitLab / Bitbucket** : si vous devez construire l'image, ajoutez un job
-> de build en amont (qui peut lui aussi fetch les `VITE_*` via le même
-> `/api/deploy`) et publiez sur votre registre avant le job de deploy.
+## Construire et publier l'image (GitLab / Bitbucket)
+
+Les templates GitLab et Bitbucket sont **deploy-only** : ils tirent une image
+déjà publiée. C'est à vous de la **construire et la pousser** sur un registre
+en amont du job de deploy (un job de build qui peut lui aussi fetch les
+`VITE_*` via le même `/api/deploy`). Deux étapes distinctes, **deux jeux de
+credentials** :
+
+| Étape | Où ça tourne | Credentials | Configuré où |
+|---|---|---|---|
+| **Build + push** | dans le CI | accès **écriture** au registre | variables du CI (`$CI_REGISTRY_*` GitLab, *repository variables* Bitbucket) |
+| **Pull** | sur le VPS (`docker compose pull`) | accès **lecture** au registre | champs **Registry** de la Connexion CI/CD |
+
+**Quel registre ?** N'importe lequel :
+
+- **GitLab** — le plus simple est le **Container Registry intégré**
+  (`registry.gitlab.com/<groupe>/<projet>`), avec `$CI_REGISTRY`,
+  `$CI_REGISTRY_USER` et `$CI_JOB_TOKEN` déjà disponibles dans le job —
+  l'équivalent du combo GHCR + `GITHUB_TOKEN` côté GitHub.
+- **Bitbucket** — pas de registre intégré : utilisez un registre externe
+  (Docker Hub `docker.io`, GHCR, AWS ECR…) et stockez les creds de push en
+  *Repository variables*.
+
+> ⚠️ Les champs **Registry** de la Connexion CI/CD (URL / utilisateur / token)
+> ne servent **pas** au build. Ils sont renvoyés dans le bundle `/api/deploy`
+> et utilisés **sur le VPS** pour `docker login` + `docker compose pull`.
+> Renseignez-les **uniquement si l'image est sur un registre privé** ; pour
+> une image publique, laissez-les vides.
+
+Build-push et pull peuvent viser le **même compte** de registre — mais ce sont
+bien deux configurations séparées (côté CI pour pousser, côté Connexion pour
+que le VPS tire).
 
 ## 6. Premier déploiement
 

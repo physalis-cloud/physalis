@@ -302,9 +302,37 @@ COPY --from=build /app/dist /usr/share/nginx/html
 > browser side. Reserve these for public URLs, feature flags, etc. See
 > [Secrets & categories](secrets) for the full convention.
 
-> **GitLab / Bitbucket**: if you need to build the image, add an upstream
-> build job (which can also fetch `VITE_*` via the same `/api/deploy`) and
-> publish to your registry before the deploy job.
+## Building and publishing the image (GitLab / Bitbucket)
+
+The GitLab and Bitbucket templates are **deploy-only**: they pull an
+already-published image. It is up to you to **build and push** it to a registry
+upstream of the deploy job (a build job that can also fetch `VITE_*` via the
+same `/api/deploy`). Two distinct steps, **two sets of credentials**:
+
+| Step | Where it runs | Credentials | Configured where |
+|---|---|---|---|
+| **Build + push** | in CI | **write** access to the registry | CI variables (`$CI_REGISTRY_*` on GitLab, *repository variables* on Bitbucket) |
+| **Pull** | on the VPS (`docker compose pull`) | **read** access to the registry | the **Registry** fields of the CI/CD Connection |
+
+**Which registry?** Any of them:
+
+- **GitLab** — the simplest is the built-in **Container Registry**
+  (`registry.gitlab.com/<group>/<project>`), with `$CI_REGISTRY`,
+  `$CI_REGISTRY_USER` and `$CI_JOB_TOKEN` already available in the job — the
+  equivalent of the GHCR + `GITHUB_TOKEN` combo on GitHub.
+- **Bitbucket** — no built-in registry: use an external one (Docker Hub
+  `docker.io`, GHCR, AWS ECR…) and store the push creds as *Repository
+  variables*.
+
+> ⚠️ The **Registry** fields of the CI/CD Connection (URL / user / token) are
+> **not** used for the build. They are returned in the `/api/deploy` bundle and
+> used **on the VPS** for `docker login` + `docker compose pull`. Fill them in
+> **only if the image is on a private registry**; for a public image, leave
+> them empty.
+
+Build-push and pull can target the **same** registry account — but they remain
+two separate configurations (CI side to push, Connection side for the VPS to
+pull).
 
 ## 6. First deployment
 

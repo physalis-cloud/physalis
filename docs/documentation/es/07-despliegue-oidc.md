@@ -304,9 +304,38 @@ COPY --from=build /app/dist /usr/share/nginx/html
 > feature flags, etc. Consulta [Secretos y categorías](secrets) para la
 > convención completa.
 
-> **GitLab / Bitbucket**: si necesitas construir la imagen, añade un job de
-> build previo (que también puede obtener los `VITE_*` mediante el mismo
-> `/api/deploy`) y publica en tu registro antes del job de deploy.
+## Construir y publicar la imagen (GitLab / Bitbucket)
+
+Las plantillas de GitLab y Bitbucket son **deploy-only**: tiran una imagen ya
+publicada. Eres tú quien debe **construirla y publicarla** en un registro antes
+del job de deploy (un job de build que también puede obtener los `VITE_*`
+mediante el mismo `/api/deploy`). Dos etapas distintas, **dos juegos de
+credenciales**:
+
+| Etapa | Dónde se ejecuta | Credenciales | Configurado en |
+|---|---|---|---|
+| **Build + push** | en el CI | acceso de **escritura** al registro | variables del CI (`$CI_REGISTRY_*` en GitLab, *repository variables* en Bitbucket) |
+| **Pull** | en el VPS (`docker compose pull`) | acceso de **lectura** al registro | los campos **Registry** de la Conexión CI/CD |
+
+**¿Qué registro?** Cualquiera:
+
+- **GitLab** — lo más sencillo es el **Container Registry integrado**
+  (`registry.gitlab.com/<grupo>/<proyecto>`), con `$CI_REGISTRY`,
+  `$CI_REGISTRY_USER` y `$CI_JOB_TOKEN` ya disponibles en el job — el
+  equivalente del combo GHCR + `GITHUB_TOKEN` de GitHub.
+- **Bitbucket** — sin registro integrado: usa uno externo (Docker Hub
+  `docker.io`, GHCR, AWS ECR…) y guarda las credenciales de push como
+  *Repository variables*.
+
+> ⚠️ Los campos **Registry** de la Conexión CI/CD (URL / usuario / token)
+> **no** se usan para el build. Se devuelven en el bundle `/api/deploy` y se
+> usan **en el VPS** para `docker login` + `docker compose pull`. Rellénalos
+> **solo si la imagen está en un registro privado**; para una imagen pública,
+> déjalos vacíos.
+
+Build-push y pull pueden apuntar a la **misma** cuenta de registro — pero
+siguen siendo dos configuraciones separadas (lado CI para publicar, lado
+Conexión para que el VPS tire).
 
 ## 6. Primer despliegue
 
