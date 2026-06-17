@@ -124,7 +124,7 @@ A connection holds:
 |-----------------------|---------------------------------------------------------------------|
 | **Provider**          | `github` \| `gitlab` \| `bitbucket`                                 |
 | **OIDC issuer**       | see below — determines which signing authority is accepted          |
-| **Redeploy token**    | PAT for the "Redeploy" button (dispatch) — *GitHub only*            |
+| **Redeploy token**    | Provider API token — "Redeploy" button (GitHub/GitLab/Bitbucket) **and** reading the **project docs**. Must have **repo read** access |
 | **Registry — URL**    | defaults to `ghcr.io`                                                |
 | **Registry — user/token** | for `docker login` on the VPS (private registry)                |
 
@@ -151,6 +151,31 @@ encrypted (AES-256-GCM) and never shown again.
 > **Migration**: the old reserved `OrgSecret`s (`GITHUB_DISPATCH_TOKEN`,
 > `REGISTRY_PAT/USER/URL`) are automatically converted into a "GitHub"
 > connection on upgrade — nothing to re-enter.
+
+### Which token, which scopes?
+
+The **redeploy token** does **two** things: trigger the "Redeploy" button **and**
+read the repo to display the **project docs** (README, technical, security) in the
+*Info* tab. It therefore needs **repo read** access — a token that can only
+*trigger a pipeline* is not enough (the docs would come back `404`).
+
+| Provider | Token type | Scopes |
+|---|---|---|
+| **GitHub** | Fine-grained PAT | **Contents: Read** + **Actions: Write** |
+| **GitLab** | PAT / Project / Group token | **`api`** (or granular: **Repository** read + **Projects** read + **CI/CD** pipeline) |
+| **Bitbucket** | Repository / Workspace Access Token (`ATCTT…`, **Bearer**) | **Repositories: Read** (+ **Pipelines: Write** for redeploy) |
+
+> **Bitbucket on the free plan** — *Workspace Access Tokens* are **Premium**.
+> Two free options:
+> - **Repository Access Token** (`ATCTT…`) → paste it alone, **leave the
+>   *Email/username* field empty** (sent as **Bearer**).
+> - **Atlassian API token** (`ATATT…`, created on your account) **or app password**
+>   → paste it **+ your Atlassian email (or Bitbucket username)** in the
+>   *Bitbucket email/username* field of the connection (sent as **Basic auth**).
+>
+> ⚠️ An `ATATT…` / app password **without** the email fails with `401`. And only
+> fill the email **for** these Basic tokens — an `ATCTT…` must stay on Bearer
+> (email empty).
 
 Once the connection is created, link it to the project and set the **repo**
 in the format expected by the provider (see the reference table): project →
