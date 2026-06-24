@@ -115,5 +115,14 @@
       "fr": { "file": "13-synchronisation-sortante.md", "slug": "synchronisation-sortante" },
       "es": { "file": "13-sincronizacion-saliente.md",  "slug": "sincronizacion-saliente" }
     }
+  },
+  {
+    "order": 14,
+    "icon": "RiDatabase2Line",
+    "translations": {
+      "en": { "file": "14-backups.md",                  "slug": "backups" },
+      "fr": { "file": "14-sauvegardes.md",              "slug": "sauvegardes" },
+      "es": { "file": "14-copias-de-seguridad.md",      "slug": "copias-de-seguridad" }
+    }
   }
 ]
