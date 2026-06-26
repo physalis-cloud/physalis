@@ -124,5 +124,14 @@
       "fr": { "file": "14-sauvegardes.md",              "slug": "sauvegardes" },
       "es": { "file": "14-copias-de-seguridad.md",      "slug": "copias-de-seguridad" }
     }
+  },
+  {
+    "order": 15,
+    "icon": "RiShieldKeyholeLine",
+    "translations": {
+      "en": { "file": "15-sso.md",                      "slug": "sso" },
+      "fr": { "file": "15-sso.md",                      "slug": "sso" },
+      "es": { "file": "15-sso.md",                      "slug": "sso" }
+    }
   }
 ]

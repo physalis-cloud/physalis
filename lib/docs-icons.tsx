@@ -23,6 +23,7 @@ import {
   RiRocketLine,
   RiSafe2Line,
   RiShareForward2Line,
+  RiShieldKeyholeLine,
   RiTeamLine,
   type RemixiconComponentType,
 } from "@remixicon/react";
@@ -40,6 +41,7 @@ const ICONS: Record<string, RemixiconComponentType> = {
   RiRocketLine,
   RiSafe2Line,
   RiShareForward2Line,
+  RiShieldKeyholeLine,
   RiTeamLine,
 };
 
