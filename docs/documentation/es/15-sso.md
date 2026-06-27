@@ -71,6 +71,9 @@ donde `<proveedor>` es `google`, `github`, `microsoft`, `okta`, `keycloak` u
 | **Keycloak** | Client ID + secret + **Issuer URL** | Consola Keycloak → Clients |
 | **OIDC** (genérico) | Client ID + secret + **Issuer URL** | Cualquier IdP compatible con OpenID Connect |
 
+Para **Okta**, indica como Issuer la URL de tu organización —
+`https://<tu-org>.okta.com` (el servidor de autorización de organización).
+
 > **Dominios permitidos**: restringe el inicio de sesión a correos verificados
 > de ciertos dominios (p. ej. `acme.com`). Una identidad fuera de esos dominios
 > es rechazada — útil para evitar que una cuenta personal del mismo proveedor
@@ -89,10 +92,9 @@ Cada proveedor se configura y se activa de forma **independiente**. Desactivar
 un proveedor solo retira su botón de la página de inicio de sesión, sin
 eliminar su configuración.
 
-> ✅ **Disponibilidad**: Google, GitHub y Microsoft están validados en
-> producción. Okta, Keycloak y el OIDC genérico usan el mismo flujo OIDC
-> estándar y están disponibles — valídalos en tu entorno antes de un
-> despliegue amplio.
+> ✅ **Disponibilidad**: Google, GitHub, Microsoft y Okta están validados en
+> producción. Keycloak y el OIDC genérico usan el mismo flujo OIDC estándar y
+> están disponibles — valídalos en tu entorno antes de un despliegue amplio.
 
 ---
 

@@ -70,6 +70,9 @@ where `<provider>` is `google`, `github`, `microsoft`, `okta`, `keycloak` or
 | **Keycloak** | Client ID + secret + **Issuer URL** | Keycloak console → Clients |
 | **OIDC** (generic) | Client ID + secret + **Issuer URL** | Any OpenID Connect–compliant IdP |
 
+For **Okta**, set the Issuer to your org URL —
+`https://<your-org>.okta.com` (the org authorization server).
+
 > **Allowed domains**: restrict sign-in to verified emails from specific
 > domains (e.g. `acme.com`). An identity outside those domains is rejected —
 > useful to prevent a personal account on the same provider from getting in.
@@ -86,9 +89,9 @@ Each provider is configured and enabled **independently**. Disabling a provider
 simply removes its button from the sign-in page, without deleting its
 configuration.
 
-> ✅ **Availability**: Google, GitHub and Microsoft are validated in
-> production. Okta, Keycloak and generic OIDC use the same standard OIDC flow
-> and are available — validate them in your environment before a broad rollout.
+> ✅ **Availability**: Google, GitHub, Microsoft and Okta are validated in
+> production. Keycloak and generic OIDC use the same standard OIDC flow and are
+> available — validate them in your environment before a broad rollout.
 
 ---
 
