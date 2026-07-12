@@ -186,13 +186,17 @@ in the format expected by the provider (see the reference table): project →
 This is the **authorisation rule**: who (OIDC claims from the job) can deploy
 where (Physalis project + env).
 
-On the project page → **"Policies"** tab → **"+ New Policy"**.
+On the project page → **"Policies"** tab → **"+ Add"**.
+
+> The **repository** is **not** a Policy field: it is set once on the project's
+> **CI/CD connection** (Settings → CI/CD connection → **Repo** field). The Policy
+> therefore only defines the **3 dimensions** below — the repo is still verified
+> at runtime, from the connection.
 
 Fields (all required, **strict match, no wildcards**):
 
 | Field             | GitHub                | GitLab                  | Bitbucket               |
 |-------------------|-----------------------|-------------------------|-------------------------|
-| **Repo**          | `argo-web/physalis`   | `acme/web`              | `{11111111-…}`          |
 | **Workflow / CI env** | `deploy.yml`      | `production` (`environment: name:`) | `production` (`deployment:`) |
 | **Branch**        | `main`                | `main`                  | `main`                  |
 | **Environment**   | an existing env in the project | same           | same                    |

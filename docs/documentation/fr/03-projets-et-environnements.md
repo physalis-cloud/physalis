@@ -23,13 +23,11 @@ Dans Physalis, chaque application déployée est représentée par un
 > peuvent voir tous les projets mais pas en créer.
 
 1. Allez sur `/projects` (onglet **Projets** dans la nav).
-2. Bouton **« + Nouveau projet »** en haut à droite.
-3. Saisissez :
-   - **Nom** — libre, affiché dans le dashboard
-   - **Slug** — identifiant URL-safe (sera utilisé dans
-     `/projects/<slug>` et dans le bundle de déploiement)
-4. Validez. Vous êtes redirigé vers la page du projet, prêt à créer
-   votre premier environnement.
+2. Dans **« Créer un projet »**, saisissez le **nom** de votre projet, puis
+   cliquez sur **« Créer »**.
+3. Le projet apparaît dans un bloc **« sans groupe »** par défaut. Son **slug**
+   (identifiant URL-safe utilisé dans `/projects/<slug>` et le bundle de
+   déploiement) est **dérivé du nom**.
 
 > ⚠️ Le **slug est définitif** : il sert d'ancrage pour les Policies de
 > déploiement OIDC. Le changer plus tard cassera tous les workflows qui
@@ -37,9 +35,12 @@ Dans Physalis, chaque application déployée est représentée par un
 
 ## Créer un environnement
 
-Onglet **« Environnements »** du projet → bouton **« + Nouvel environnement »**.
+À la création d'un projet, **trois environnements sont créés par défaut** :
+`development`, `staging` et `production`. Vous les gérez depuis les **paramètres
+du projet** — onglet **« Environnements »** — et pouvez en **ajouter** d'autres
+avec le bouton **« + Nouvel environnement »**.
 
-Champs disponibles :
+Champs d'un environnement :
 
 | Champ            | Description                                                                 |
 |------------------|-----------------------------------------------------------------------------|

@@ -23,13 +23,11 @@ attached to an organisation. A project contains:
 > can see all projects but cannot create them.
 
 1. Go to `/projects` (**Projects** tab in the nav).
-2. Click **"+ New project"** in the top-right corner.
-3. Fill in:
-   - **Name** — free-form, displayed in the dashboard
-   - **Slug** — URL-safe identifier (used in
-     `/projects/<slug>` and in the deployment bundle)
-4. Submit. You are redirected to the project page, ready to create
-   your first environment.
+2. Under **"Create a project"**, enter your project **name**, then click
+   **"Create"**.
+3. The project appears in an **"ungrouped"** block by default. Its **slug**
+   (URL-safe identifier used in `/projects/<slug>` and the deployment bundle)
+   is **derived from the name**.
 
 > ⚠️ The **slug is permanent**: it serves as the anchor for OIDC
 > deployment Policies. Changing it later will break all workflows that
@@ -37,9 +35,12 @@ attached to an organisation. A project contains:
 
 ## Create an environment
 
-**"Environments"** tab of the project → **"+ New environment"** button.
+When a project is created, **three environments are created by default**:
+`development`, `staging` and `production`. You manage them from the **project
+settings** — **"Environments"** tab — and can **add** more with the
+**"+ New environment"** button.
 
-Available fields:
+Environment fields:
 
 | Field            | Description                                                                 |
 |------------------|-----------------------------------------------------------------------------|

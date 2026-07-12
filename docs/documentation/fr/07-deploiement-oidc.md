@@ -190,13 +190,17 @@ projet → **Paramètres** → **Connexion CI/CD** + champ **Repo**.
 C'est la **règle d'autorisation** : qui (claims OIDC du job) peut déployer
 où (projet + env Physalis).
 
-Sur la page du projet → onglet **« Policies »** → **« + Nouvelle Policy »**.
+Sur la page du projet → onglet **« Policies »** → **« + Ajouter »**.
+
+> Le **dépôt** n'est **pas** un champ de la Policy : il se renseigne une seule
+> fois sur la **connexion CI/CD** du projet (Paramètres → Connexion CI/CD →
+> champ **Repo**). La Policy ne définit donc que les **3 dimensions** ci-dessous
+> — le dépôt reste néanmoins vérifié à l'exécution, depuis la connexion.
 
 Champs (tous obligatoires, **match strict, aucune wildcard**) :
 
 | Champ             | GitHub                | GitLab                  | Bitbucket               |
 |-------------------|-----------------------|-------------------------|-------------------------|
-| **Repo**          | `argo-web/physalis`   | `acme/web`              | `{11111111-…}`          |
 | **Workflow / Env CI** | `deploy.yml`      | `production` (`environment: name:`) | `production` (`deployment:`) |
 | **Branche**       | `main`                | `main`                  | `main`                  |
 | **Environnement** | un env existant du projet | idem                | idem                    |

@@ -187,13 +187,17 @@ formato esperado por el proveedor (ver la tabla de referencia): proyecto →
 Esta es la **regla de autorización**: quién (claims OIDC del job) puede
 desplegar dónde (proyecto + entorno de Physalis).
 
-En la página del proyecto → pestaña **"Policies"** → **"+ New Policy"**.
+En la página del proyecto → pestaña **"Policies"** → **"+ Añadir"**.
+
+> El **repositorio** **no** es un campo de la Política: se indica una sola vez
+> en la **conexión CI/CD** del proyecto (Ajustes → Conexión CI/CD → campo
+> **Repo**). La Política solo define, por tanto, las **3 dimensiones** de abajo
+> — el repositorio sigue verificándose en ejecución, desde la conexión.
 
 Campos (todos obligatorios, **coincidencia estricta, sin comodines**):
 
 | Campo             | GitHub                | GitLab                  | Bitbucket               |
 |-------------------|-----------------------|-------------------------|-------------------------|
-| **Repo**          | `argo-web/physalis`   | `acme/web`              | `{11111111-…}`          |
 | **Workflow / Entorno CI** | `deploy.yml`  | `production` (`environment: name:`) | `production` (`deployment:`) |
 | **Branch**        | `main`                | `main`                  | `main`                  |
 | **Environment**   | un entorno existente del proyecto | igual       | igual                   |

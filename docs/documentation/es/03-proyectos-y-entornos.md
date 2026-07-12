@@ -23,13 +23,11 @@ vinculado a una organización. Un proyecto contiene:
 > puede ver todos los proyectos pero no puede crearlos.
 
 1. Ve a `/projects` (pestaña **Proyectos** en la navegación).
-2. Haz clic en **"+ Nuevo proyecto"** en la esquina superior derecha.
-3. Rellena:
-   - **Nombre** — libre, se muestra en el panel
-   - **Slug** — identificador válido en URL (usado en
-     `/projects/<slug>` y en el paquete de despliegue)
-4. Envía. Serás redirigido a la página del proyecto, listo para crear
-   tu primer entorno.
+2. En **"Crear un proyecto"**, introduce el **nombre** de tu proyecto y luego
+   haz clic en **"Crear"**.
+3. El proyecto aparece en un bloque **"sin grupo"** por defecto. Su **slug**
+   (identificador válido en URL, usado en `/projects/<slug>` y en el paquete de
+   despliegue) se **deriva del nombre**.
 
 > ⚠️ El **slug es permanente**: sirve como ancla para las
 > políticas de despliegue OIDC. Cambiarlo posteriormente romperá todos los flujos
@@ -37,9 +35,12 @@ vinculado a una organización. Un proyecto contiene:
 
 ## Crear un entorno
 
-Pestaña **"Entornos"** del proyecto → botón **"+ Nuevo entorno"**.
+Al crear un proyecto, se crean **tres entornos por defecto**: `development`,
+`staging` y `production`. Los gestionas desde los **ajustes del proyecto** —
+pestaña **"Entornos"** — y puedes **añadir** más con el botón
+**"+ Nuevo entorno"**.
 
-Campos disponibles:
+Campos de un entorno:
 
 | Campo              | Descripción                                                                 |
 |--------------------|-----------------------------------------------------------------------------|
