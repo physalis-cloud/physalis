@@ -1,0 +1,36 @@
+[
+  {
+    "order": 1,
+    "icon": "RiRocketLine",
+    "published": true,
+    "translations": {
+      "en": { "file": "01-first-github-deployment.md",    "slug": "first-github-deployment" },
+      "fr": { "file": "01-premier-deploiement-github.md", "slug": "premier-deploiement-github" },
+      "es": { "file": "01-primer-despliegue-github.md",   "slug": "primer-despliegue-github" }
+    }
+  },
+  {
+    "order": 2,
+    "icon": "RiTeamLine",
+    "published": false,
+    "translations": {
+      "fr": { "file": "02-inviter-equipe-sso.md",         "slug": "inviter-equipe-sso" }
+    }
+  },
+  {
+    "order": 3,
+    "icon": "RiShieldCheckLine",
+    "published": false,
+    "translations": {
+      "fr": { "file": "03-securiser-rotation-backups.md", "slug": "securiser-rotation-backups" }
+    }
+  },
+  {
+    "order": 4,
+    "icon": "RiMailSendLine",
+    "published": false,
+    "translations": {
+      "fr": { "file": "04-configurer-service-email.md",   "slug": "configurer-service-email" }
+    }
+  }
+]
