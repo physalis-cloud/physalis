@@ -4,9 +4,18 @@
     "icon": "RiRocketLine",
     "published": true,
     "translations": {
-      "en": { "file": "01-first-github-deployment.md",    "slug": "first-github-deployment" },
-      "fr": { "file": "01-premier-deploiement-github.md", "slug": "premier-deploiement-github" },
-      "es": { "file": "01-primer-despliegue-github.md",   "slug": "primer-despliegue-github" }
+      "en": {
+        "file": "01-first-github-deployment.md",
+        "slug": "first-github-deployment"
+      },
+      "fr": {
+        "file": "01-premier-deploiement-github.md",
+        "slug": "premier-deploiement-github"
+      },
+      "es": {
+        "file": "01-primer-despliegue-github.md",
+        "slug": "primer-despliegue-github"
+      }
     }
   },
   {
@@ -14,7 +23,18 @@
     "icon": "RiTeamLine",
     "published": false,
     "translations": {
-      "fr": { "file": "02-inviter-equipe-sso.md",         "slug": "inviter-equipe-sso" }
+      "fr": {
+        "file": "02-inviter-equipe-sso.md",
+        "slug": "inviter-equipe-sso"
+      },
+      "en": {
+        "file": "02-invite-team-sso.md",
+        "slug": "invite-team-sso"
+      },
+      "es": {
+        "file": "02-invitar-equipo-sso.md",
+        "slug": "invitar-equipo-sso"
+      }
     }
   },
   {
@@ -22,7 +42,18 @@
     "icon": "RiShieldCheckLine",
     "published": false,
     "translations": {
-      "fr": { "file": "03-securiser-rotation-backups.md", "slug": "securiser-rotation-backups" }
+      "fr": {
+        "file": "03-securiser-rotation-backups.md",
+        "slug": "securiser-rotation-backups"
+      },
+      "en": {
+        "file": "03-secure-org-rotation-backups.md",
+        "slug": "secure-org-rotation-backups"
+      },
+      "es": {
+        "file": "03-proteger-org-rotacion-backups.md",
+        "slug": "proteger-org-rotacion-backups"
+      }
     }
   },
   {
@@ -30,7 +61,18 @@
     "icon": "RiMailSendLine",
     "published": false,
     "translations": {
-      "fr": { "file": "04-configurer-service-email.md",   "slug": "configurer-service-email" }
+      "fr": {
+        "file": "04-configurer-service-email.md",
+        "slug": "configurer-service-email"
+      },
+      "en": {
+        "file": "04-configure-email-service.md",
+        "slug": "configure-email-service"
+      },
+      "es": {
+        "file": "04-configurar-servicio-email.md",
+        "slug": "configurar-servicio-email"
+      }
     }
   }
 ]
