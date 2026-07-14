@@ -40,7 +40,7 @@
   {
     "order": 3,
     "icon": "RiShieldCheckLine",
-    "published": false,
+    "published": true,
     "translations": {
       "fr": {
         "file": "03-securiser-rotation-backups.md",
