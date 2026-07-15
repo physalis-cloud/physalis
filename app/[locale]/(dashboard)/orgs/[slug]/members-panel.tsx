@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { OrgRole } from "@prisma/client";
 import RoleInfoDialog from "./role-info-dialog";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Member = {
   id: string;
@@ -56,8 +57,11 @@ export default function OrgMembersPanel({
   role: OrgRole;
 }) {
   const t = useTranslations("orgs.members");
+  const confirm = useConfirm();
   const canManage = ORG_ROLE_RANK[role] >= ORG_ROLE_RANK.ADMIN;
   const isOwner = role === "OWNER";
+  // Filtre d'affichage par rôle. Défaut = rôle de l'utilisateur connecté.
+  const [roleFilter, setRoleFilter] = useState<OrgRole | "ALL">(role);
 
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invitations, setInvitations] = useState<Invitation[] | null>(null);
@@ -157,7 +161,7 @@ export default function OrgMembersPanel({
   }
 
   async function remove(userId: string, email: string) {
-    if (!confirm(t("removeConfirm", { email }))) return;
+    if (!(await confirm({ message: t("removeConfirm", { email }), danger: true }))) return;
     const res = await fetch(`/api/orgs/${slug}/members/${userId}`, {
       method: "DELETE",
     });
@@ -201,8 +205,8 @@ export default function OrgMembersPanel({
     });
   }
 
-  function deleteInvitation(invitationId: string, email: string) {
-    if (!confirm(t("deleteConfirm", { email }))) return;
+  async function deleteInvitation(invitationId: string, email: string) {
+    if (!(await confirm({ message: t("deleteConfirm", { email }), danger: true }))) return;
     setError(null);
     startTransition(async () => {
       const res = await fetch(
@@ -219,6 +223,26 @@ export default function OrgMembersPanel({
       reload();
     });
   }
+
+  // Rôles présents parmi les membres → chips de filtre (pas de filtre vide).
+  const presentRoles = ROLES.filter((r) =>
+    (members ?? []).some((m) => m.role === r),
+  );
+  const visibleMembers =
+    members === null
+      ? null
+      : roleFilter === "ALL"
+        ? members
+        : members.filter((m) => m.role === roleFilter);
+
+  // Invitations en attente : on masque celles dont l'email est déjà membre
+  // (invitation re-créée pour quelqu'un ayant déjà accepté → doublon affiché).
+  const memberEmails = new Set(
+    (members ?? []).map((m) => m.user.email.toLowerCase()),
+  );
+  const visibleInvitations = (invitations ?? []).filter(
+    (inv) => !memberEmails.has(inv.email.toLowerCase()),
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -359,15 +383,61 @@ export default function OrgMembersPanel({
           </p>
         )}
 
+        {members && members.length > 0 && (
+          <div
+            className="flex"
+            style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}
+          >
+            <button
+              type="button"
+              onClick={() => setRoleFilter("ALL")}
+              className="role"
+              style={{
+                cursor: "pointer",
+                border: "none",
+                fontFamily: "inherit",
+                background: "var(--code-bg)",
+                color: "var(--muted)",
+                opacity: roleFilter === "ALL" ? 1 : 0.45,
+                boxShadow:
+                  roleFilter === "ALL" ? "0 0 0 2px var(--accent)" : "none",
+              }}
+            >
+              {t("filterAll")}
+            </button>
+            {presentRoles.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRoleFilter(r)}
+                className={`role role-${r.toLowerCase()}`}
+                style={{
+                  cursor: "pointer",
+                  border: "none",
+                  fontFamily: "inherit",
+                  opacity: roleFilter === r ? 1 : 0.45,
+                  boxShadow:
+                    roleFilter === r ? "0 0 0 2px var(--accent)" : "none",
+                }}
+              >
+                {roleLabel(r)}
+              </button>
+            ))}
+          </div>
+        )}
         {members === null ? (
           <p className="help">Chargement…</p>
         ) : members.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-title">{t("empty")}</div>
           </div>
+        ) : visibleMembers && visibleMembers.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">{t("filterEmpty")}</div>
+          </div>
         ) : (
           <div className="row-list">
-            {members.map((m) => (
+            {(visibleMembers ?? []).map((m) => (
               <div key={m.id} className="row">
                 <div className="row-icon">{initials(m.user.email)}</div>
                 <div className="row-info">
@@ -417,13 +487,13 @@ export default function OrgMembersPanel({
         )}
       </section>
 
-      {invitations !== null && invitations.length > 0 && (
+      {visibleInvitations.length > 0 && (
         <section className="section">
           <div className="section-header">
             <h2 className="section-title">{t("pendingTitle")}</h2>
           </div>
           <div className="row-list">
-            {invitations.map((inv) => {
+            {visibleInvitations.map((inv) => {
               const expired = new Date(inv.expiresAt).getTime() < Date.now();
               return (
                 <div key={inv.id} className="row">

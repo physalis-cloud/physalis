@@ -85,7 +85,7 @@ export default function ExtensionInstallPrompt() {
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: "var(--accent)",
+              color: "var(--accent-text)",
               background: "var(--accent-bg)",
               border: "1px solid var(--accent-soft)",
               borderRadius: 99,

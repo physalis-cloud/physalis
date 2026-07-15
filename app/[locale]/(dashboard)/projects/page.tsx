@@ -1,9 +1,13 @@
-import { Link } from "@/i18n/navigation";
+import { RiFolderOpenLine } from "@remixicon/react";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgSlug } from "@/lib/api";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
+import { isSyncProvider } from "@/lib/sync/types";
+import PageHero from "@/components/PageHero";
 import CreateProjectForm from "./create-project";
+import CreateGroupForm from "./create-group";
+import ProjectsBoard, { type ProjectVM } from "./projects-board";
 import { getTranslations } from "next-intl/server";
 
 export default async function ProjectsPage() {
@@ -16,7 +20,10 @@ export default async function ProjectsPage() {
     return (
       <div className="page">
         <div className="page-content">
-          <h1 className="page-title">{t("pageTitle")}</h1>
+          <PageHero
+            icon={<RiFolderOpenLine size={28} aria-hidden />}
+            title={t("pageTitle")}
+          />
           <div
             className="card"
             style={{
@@ -69,26 +76,44 @@ export default async function ProjectsPage() {
       id: true,
       name: true,
       slug: true,
+      groupId: true,
+      position: true,
       createdAt: true,
       environments: {
-        select: { _count: { select: { secrets: true } } },
+        select: {
+          _count: { select: { secrets: true } },
+          syncTargets: {
+            select: { ciConnection: { select: { provider: true } } },
+          },
+        },
       },
+      ciConnection: { select: { provider: true } },
+      emailConfig: { select: { verified: true } },
+      backupConfig: { select: { enabled: true } },
       _count: {
         select: {
           tokens: { where: { revokedAt: null } },
           environments: true,
           services: true,
           appAccounts: true,
+          apis: true,
         },
       },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ position: "asc" }, { createdAt: "desc" }],
   });
 
-  const org = await prisma.organization.findUnique({
-    where: { slug: orgSlug },
-    select: { name: true },
-  });
+  const [org, groups] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { slug: orgSlug },
+      select: { name: true },
+    }),
+    prisma.projectGroup.findMany({
+      where: { organization: { slug: orgSlug } },
+      select: { id: true, name: true, position: true },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
 
   // Dernier déploiement par projet.
   const projectIds = projects.map((p) => p.id);
@@ -121,111 +146,77 @@ export default async function ProjectsPage() {
     ]),
   );
 
+  // View-models passés au board client (drag-and-drop). Dates sérialisées ISO.
+  const projectVMs: ProjectVM[] = projects.map((p) => {
+    const lastDeploy = lastDeployByProject.get(p.id);
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      groupId: p.groupId,
+      position: p.position,
+      services: p._count.services,
+      accounts: p._count.appAccounts,
+      environments: p._count.environments,
+      secrets: p.environments.reduce((n, e) => n + e._count.secrets, 0),
+      status: {
+        ciProvider: p.ciConnection?.provider ?? null,
+        syncProviders: Array.from(
+          new Set(
+            p.environments
+              .flatMap((e) => e.syncTargets.map((s) => s.ciConnection.provider))
+              .filter(isSyncProvider),
+          ),
+        ),
+        emailConfigured: p.emailConfig != null,
+        emailVerified: p.emailConfig?.verified ?? false,
+        backupEnabled: p.backupConfig?.enabled ?? false,
+        apiCount: p._count.apis,
+      },
+      lastDeploy: lastDeploy
+        ? { at: lastDeploy.at.toISOString(), envName: lastDeploy.envName }
+        : null,
+    };
+  });
+
+  // Édition (création de groupe via DnD) réservée aux DEV+ / admins org.
+  const canEdit = isGlobalAdmin || isOrgAdmin || hasDevPrivileges(orgRole);
+
   return (
     <div className="page">
       <div className="page-content">
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">{t("pageTitle")}</h1>
-            <div className="page-subtitle">
+        <PageHero
+          icon={<RiFolderOpenLine size={28} aria-hidden />}
+          title={t("pageTitle")}
+          subtitle={
+            <>
               Organisation : <strong>{org?.name}</strong>
-            </div>
+            </>
+          }
+        />
+
+        <div className="create-row">
+          <div className="create-col-main">
+            <CreateProjectForm />
+          </div>
+          <div className="create-col-aside">
+            <CreateGroupForm groups={groups} canEdit={canEdit} />
           </div>
         </div>
 
-        <CreateProjectForm />
-
-        {projects.length === 0 ? (
+        {projects.length === 0 && groups.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-title">{t("empty")}</div>
             <div>{t("emptyHint")}</div>
           </div>
         ) : (
-          <div style={{
-            border: "1px solid var(--accent-soft)",
-            background: "var(--accent-bg)",
-            borderRadius: 12,
-            padding: 16,
-          }}>
-          <div className="projects-grid">
-            {projects.map((p) => {
-              const secrets = p.environments.reduce(
-                (n, e) => n + e._count.secrets,
-                0,
-              );
-              const lastDeploy = lastDeployByProject.get(p.id);
-              return (
-                <Link
-                  key={p.id}
-                  href={`/projects/${p.slug}`}
-                  className="card card-link project-card"
-                  style={{ position: "relative" }}
-                >
-                  {lastDeploy && (
-                    <span
-                      title={lastDeploy.at.toISOString()}
-                      style={{
-                        position: "absolute",
-                        top: 12,
-                        right: 12,
-                        fontSize: 11,
-                        fontWeight: 500,
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        background: "#fde9c8",
-                        color: "#8a4b00",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {lastDeploy.envName ? `${lastDeploy.envName} · ` : ""}
-                      {relativeTime(lastDeploy.at, t)}
-                    </span>
-                  )}
-                  <div className="project-name" style={{ paddingRight: lastDeploy ? 100 : 0 }}>
-                    {p.name}
-                  </div>
-                  <div className="project-slug">/{p.slug}</div>
-                  <div className="project-stats">
-                    <span>
-                      <span className="stat-icon">●</span>
-                      <strong>{p._count.services}</strong> {t("card.services")}
-                    </span>
-                    <span>
-                      <span className="stat-icon">●</span>
-                      <strong>{p._count.appAccounts}</strong> {t("card.accounts")}
-                    </span>
-                    <span>
-                      <span className="stat-icon">●</span>
-                      <strong>{p._count.environments}</strong> {t("card.env")}
-                    </span>
-                    <span>
-                      <span className="stat-icon">●</span>
-                      <strong>{secrets}</strong> {t("card.secrets")}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-          </div>
+          <ProjectsBoard
+            canEdit={canEdit}
+            groups={groups}
+            projects={projectVMs}
+          />
         )}
       </div>
     </div>
   );
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function relativeTime(date: Date, t: (key: string, values?: any) => string): string {
-  const diffMs = Date.now() - date.getTime();
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return t("relTime.justNow");
-  const min = Math.floor(sec / 60);
-  if (min < 60) return t("relTime.minutesAgo", { n: min });
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return t("relTime.hoursAgo", { n: hr });
-  const day = Math.floor(hr / 24);
-  if (day < 30) return t("relTime.daysAgo", { n: day });
-  const month = Math.floor(day / 30);
-  if (month < 12) return t("relTime.monthsAgo", { n: month });
-  return t("relTime.yearsAgo", { n: Math.floor(day / 365) });
 }

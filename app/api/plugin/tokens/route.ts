@@ -1,7 +1,7 @@
 // GET /api/plugin/tokens
 //
 // Liste les PluginTokens actifs du user connecte (session web NextAuth).
-// Utilise par la section "Sessions plugin" de /settings/parameters pour
+// Utilise par la section "Sessions plugin" de /account pour
 // permettre a l'utilisateur de revoquer ses sessions extension.
 //
 // Ne renvoie JAMAIS le tokenHash ni le brut — l'UI affiche uniquement

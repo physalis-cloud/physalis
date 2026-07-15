@@ -232,7 +232,7 @@ export default function SecretsImportDialog({
                 style={{
                   display: "inline-block",
                   cursor: "pointer",
-                  color: "var(--accent)",
+                  color: "var(--accent-text)",
                   textDecoration: "underline",
                 }}
               >
@@ -362,7 +362,7 @@ function PreviewSummary({ preview }: { preview: DryRunResponse }) {
           ✓ {t("newCount", { count: summary.toCreate })}
         </span>
         {summary.toUpdate > 0 && (
-          <span style={{ color: "var(--accent)" }}>
+          <span style={{ color: "var(--accent-text)" }}>
             ↻ {t("updateCount", { count: summary.toUpdate })}
           </span>
         )}
@@ -382,7 +382,7 @@ function PreviewSummary({ preview }: { preview: DryRunResponse }) {
       <KeyList
         label={t("keyListToUpdate")}
         keys={keys.toUpdate}
-        color="var(--accent)"
+        color="var(--accent-text)"
       />
       <KeyList label={t("keyListToSkip")} keys={keys.toSkip} />
       {keys.invalid.length > 0 && (
@@ -430,7 +430,7 @@ function ResultSummary({ result }: { result: ExecuteResponse }) {
           {t("resultCreated", { count: summary.created })}
         </span>
         {summary.updated > 0 && (
-          <span style={{ color: "var(--accent)" }}>
+          <span style={{ color: "var(--accent-text)" }}>
             {t("resultUpdated", { count: summary.updated })}
           </span>
         )}
@@ -451,7 +451,7 @@ function ResultSummary({ result }: { result: ExecuteResponse }) {
         )}
       </div>
       <KeyList label={t("keyListCreated")} keys={keys.created} />
-      <KeyList label={t("keyListUpdated")} keys={keys.updated} color="var(--accent)" />
+      <KeyList label={t("keyListUpdated")} keys={keys.updated} color="var(--accent-text)" />
       {keys.failed.length > 0 && (
         <div>
           <div className="help" style={{ fontWeight: 600, marginBottom: 4 }}>

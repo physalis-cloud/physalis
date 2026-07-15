@@ -1,5 +1,10 @@
 services:
   app:
+    # `build: .` → `docker compose up --build` construit l'image en local depuis
+    # le Dockerfile (install from source). Sans `--build`, l'image `image:` est
+    # utilisée (buildée localement si absente ; `docker compose pull` pour tirer
+    # la version publiée du registre en prod).
+    build: .
     image: ghcr.io/physalis-cloud/physalis:latest
     container_name: physalis
     restart: unless-stopped

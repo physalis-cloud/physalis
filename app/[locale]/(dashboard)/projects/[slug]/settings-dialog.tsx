@@ -4,6 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { defaultDeployPath } from "@/lib/validation";
+import { isSyncProvider } from "@/lib/sync/types";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type EnvSummary = {
   id: string;
@@ -27,6 +29,8 @@ export default function SettingsDialog({
   projectName,
   githubRepo,
   githubWorkflow,
+  ciConnectionId,
+  ciRepo,
   environments,
   onClose,
 }: {
@@ -35,6 +39,8 @@ export default function SettingsDialog({
   projectName: string;
   githubRepo: string | null;
   githubWorkflow: string | null;
+  ciConnectionId: string | null;
+  ciRepo: string | null;
   environments: EnvSummary[];
   onClose: () => void;
 }) {
@@ -79,10 +85,13 @@ export default function SettingsDialog({
 
         <div className="dialog-body">
           <ProjectNameSection slug={slug} initialName={projectName} />
-          <GithubSection
+          <CiSection
             slug={slug}
-            initialRepo={githubRepo}
-            initialWorkflow={githubWorkflow}
+            orgSlug={orgSlug}
+            initialConnectionId={ciConnectionId}
+            initialGithubRepo={githubRepo}
+            initialGithubWorkflow={githubWorkflow}
+            initialCiRepo={ciRepo}
           />
           <EnvironmentsSection
             slug={slug}
@@ -90,41 +99,226 @@ export default function SettingsDialog({
             servers={servers}
             serversError={serversError}
           />
+          <DeleteProjectSection slug={slug} projectName={projectName} onClose={onClose} />
         </div>
       </div>
     </div>
   );
 }
 
-function GithubSection({
+// Zone dangereuse en bas de la modale Paramètres : suppression définitive du
+// projet (cascade tenant + purge des résidus admin/externe côté API). Garde-fou
+// : il faut retaper le slug du projet pour activer le bouton.
+function DeleteProjectSection({
   slug,
-  initialRepo,
-  initialWorkflow,
+  projectName,
+  onClose,
 }: {
   slug: string;
-  initialRepo: string | null;
-  initialWorkflow: string | null;
+  projectName: string;
+  onClose: () => void;
+}) {
+  const t = useTranslations("projects.settings");
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section className="settings-section danger-zone">
+      <div className="settings-section-title danger-zone-title">
+        {t("dangerZoneTitle")}
+      </div>
+      <p className="danger-zone-text">{t("deleteHint")}</p>
+      <button
+        type="button"
+        className="btn btn-danger btn-sm"
+        onClick={() => setOpen(true)}
+      >
+        {t("deleteProjectBtn")}
+      </button>
+      {open && (
+        <DeleteProjectDialog
+          slug={slug}
+          projectName={projectName}
+          onCancel={() => setOpen(false)}
+          onDeleted={onClose}
+        />
+      )}
+    </section>
+  );
+}
+
+function DeleteProjectDialog({
+  slug,
+  projectName,
+  onCancel,
+  onDeleted,
+}: {
+  slug: string;
+  projectName: string;
+  onCancel: () => void;
+  /** Appelé après suppression réussie (ferme la modale Paramètres). */
+  onDeleted: () => void;
 }) {
   const t = useTranslations("projects.settings");
   const router = useRouter();
-  const [repo, setRepo] = useState(initialRepo ?? "");
-  const [workflow, setWorkflow] = useState(initialWorkflow ?? "");
+  const [confirmText, setConfirmText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const matches = confirmText.trim() === slug;
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!matches) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch(`/api/projects/${slug}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setError(data?.error ?? t("deleteError"));
+        return;
+      }
+      // Le projet n'existe plus → on sort vers la liste des projets.
+      onDeleted();
+      router.push("/projects");
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="dialog-overlay" onClick={onCancel}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()} role="alertdialog">
+        <div className="dialog-header">
+          <h2 className="dialog-title">{t("deleteDialogTitle")}</h2>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="dialog-close"
+            aria-label={t("deleteCancelBtn")}
+          >
+            ✕
+          </button>
+        </div>
+        <form onSubmit={submit}>
+          <div className="dialog-body">
+            <p style={{ margin: 0 }}>
+              {t("deleteWarning", { name: projectName })}
+            </p>
+            <div className="field">
+              <label htmlFor="delete-project-confirm">
+                {t("deleteConfirmLabel")} <code>{slug}</code>
+              </label>
+              <input
+                id="delete-project-confirm"
+                autoFocus
+                autoComplete="off"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder={slug}
+                className="input"
+              />
+            </div>
+            {error && <p className="error-text">{error}</p>}
+          </div>
+          <div className="dialog-footer">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="btn btn-ghost btn-sm"
+              disabled={pending}
+            >
+              {t("deleteCancelBtn")}
+            </button>
+            <button
+              type="submit"
+              disabled={!matches || pending}
+              className="btn btn-danger btn-sm"
+            >
+              {pending ? t("deletingBtn") : t("deleteSubmitBtn")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+type CiConnectionOption = {
+  id: string;
+  name: string;
+  provider: string;
+};
+
+function CiSection({
+  slug,
+  orgSlug,
+  initialConnectionId,
+  initialGithubRepo,
+  initialGithubWorkflow,
+  initialCiRepo,
+}: {
+  slug: string;
+  orgSlug: string;
+  initialConnectionId: string | null;
+  initialGithubRepo: string | null;
+  initialGithubWorkflow: string | null;
+  initialCiRepo: string | null;
+}) {
+  const t = useTranslations("projects.settings");
+  const router = useRouter();
+  const [connections, setConnections] = useState<CiConnectionOption[] | null>(
+    null,
+  );
+  const [connectionId, setConnectionId] = useState(initialConnectionId ?? "");
+  const [githubRepo, setGithubRepo] = useState(initialGithubRepo ?? "");
+  const [githubWorkflow, setGithubWorkflow] = useState(
+    initialGithubWorkflow ?? "",
+  );
+  const [ciRepo, setCiRepo] = useState(initialCiRepo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/orgs/${orgSlug}/ci-connections`);
+      if (cancelled || !res.ok) return;
+      const data = (await res.json()) as { connections: CiConnectionOption[] };
+      // Cette section configure le déploiement OIDC : on exclut les connexions de
+      // sync sortante (Vercel/Render), qui se relient dans le sous-onglet « Sync »
+      // de l'environnement, pas ici.
+      setConnections(data.connections.filter((c) => !isSyncProvider(c.provider)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug]);
+
+  const provider =
+    connections?.find((c) => c.id === connectionId)?.provider ?? "github";
+
   const dirty =
-    repo.trim() !== (initialRepo ?? "") ||
-    workflow.trim() !== (initialWorkflow ?? "");
+    connectionId !== (initialConnectionId ?? "") ||
+    githubRepo.trim() !== (initialGithubRepo ?? "") ||
+    githubWorkflow.trim() !== (initialGithubWorkflow ?? "") ||
+    ciRepo.trim() !== (initialCiRepo ?? "");
 
   function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const body: Record<string, string | null> = {};
-      const repoTrim = repo.trim();
-      const wfTrim = workflow.trim();
-      body.githubRepo = repoTrim === "" ? null : repoTrim;
-      body.githubWorkflow = wfTrim === "" ? null : wfTrim;
+      const body: Record<string, string | null> = {
+        ciConnectionId: connectionId === "" ? null : connectionId,
+      };
+      if (provider === "github") {
+        const r = githubRepo.trim();
+        const w = githubWorkflow.trim();
+        body.githubRepo = r === "" ? null : r;
+        body.githubWorkflow = w === "" ? null : w;
+      } else {
+        const r = ciRepo.trim();
+        body.ciRepo = r === "" ? null : r;
+      }
 
       const res = await fetch(`/api/projects/${slug}`, {
         method: "PATCH",
@@ -145,28 +339,74 @@ function GithubSection({
   return (
     <section>
       <h3 className="section-title" style={{ fontSize: 14, marginBottom: 8 }}>
-        {t("githubSection")}
+        {t("ciSection")}
       </h3>
       <form onSubmit={save} className="flex flex-col gap-2">
         <div className="field">
-          <label>{t("githubRepoLabel")}</label>
-          <input
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder={t("githubRepoPlaceholder")}
-            className="input input-mono"
-          />
+          <label>{t("ciConnectionLabel")}</label>
+          <select
+            value={connectionId}
+            onChange={(e) => setConnectionId(e.target.value)}
+            className="select"
+          >
+            <option value="">{t("ciConnectionNone")}</option>
+            {connections?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.provider})
+              </option>
+            ))}
+          </select>
+          {connections?.length === 0 && (
+            <p className="help">{t("ciNoConnections")}</p>
+          )}
         </div>
-        <div className="field">
-          <label>{t("githubWorkflowLabel")}</label>
-          <input
-            value={workflow}
-            onChange={(e) => setWorkflow(e.target.value)}
-            placeholder={t("githubWorkflowPlaceholder")}
-            className="input input-mono"
-          />
-        </div>
-        <p className="help">{t("githubNote")}</p>
+
+        {connectionId !== "" &&
+          (provider === "github" ? (
+            <>
+              <div className="field">
+                <label>{t("githubRepoLabel")}</label>
+                <input
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  placeholder={t("githubRepoPlaceholder")}
+                  className="input input-mono"
+                />
+              </div>
+              <div className="field">
+                <label>{t("githubWorkflowLabel")}</label>
+                <input
+                  value={githubWorkflow}
+                  onChange={(e) => setGithubWorkflow(e.target.value)}
+                  placeholder={t("githubWorkflowPlaceholder")}
+                  className="input input-mono"
+                />
+              </div>
+            </>
+          ) : provider === "gitlab" ? (
+            <div className="field">
+              <label>{t("gitlabRepoLabel")}</label>
+              <input
+                value={ciRepo}
+                onChange={(e) => setCiRepo(e.target.value)}
+                placeholder="group/projet"
+                className="input input-mono"
+              />
+            </div>
+          ) : (
+            <div className="field">
+              <label>{t("bitbucketRepoLabel")}</label>
+              <input
+                value={ciRepo}
+                onChange={(e) => setCiRepo(e.target.value)}
+                placeholder="{11111111-2222-3333-4444-555555555555}"
+                className="input input-mono"
+              />
+              <p className="help">{t("bitbucketRepoHelp")}</p>
+            </div>
+          ))}
+
+        <p className="help">{t("ciNote")}</p>
         {error && <p className="error-text">{error}</p>}
         <div>
           <button
@@ -190,6 +430,7 @@ function ProjectNameSection({
   initialName: string;
 }) {
   const t = useTranslations("projects.settings");
+  const confirm = useConfirm();
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [slugInput, setSlugInput] = useState(slug);
@@ -201,11 +442,11 @@ function ProjectNameSection({
   const nameChanged = trimmedName !== initialName && trimmedName.length > 0;
   const dirty = nameChanged || (slugChanged && trimmedSlug.length > 0);
 
-  function save(e: React.FormEvent<HTMLFormElement>) {
+  async function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     if (slugChanged) {
-      const ok = confirm(t("slugChangeConfirm", { old: slug, new: trimmedSlug }));
+      const ok = await confirm({ message: t("slugChangeConfirm", { old: slug, new: trimmedSlug }) });
       if (!ok) return;
     }
     startTransition(async () => {
@@ -493,6 +734,7 @@ function EnvRow({
   onChanged: () => void;
 }) {
   const t = useTranslations("projects.settings");
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(env.name);
   const [url, setUrl] = useState(env.url ?? "");
@@ -544,9 +786,9 @@ function EnvRow({
     });
   }
 
-  function remove() {
+  async function remove() {
     if (
-      !confirm(t("envDeleteConfirm", { name: env.name, count: env.secretCount }))
+      !(await confirm({ message: t("envDeleteConfirm", { name: env.name, count: env.secretCount }), danger: true }))
     )
       return;
     startTransition(async () => {

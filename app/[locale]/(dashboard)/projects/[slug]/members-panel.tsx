@@ -81,12 +81,8 @@ export default function MembersPanel({ slug }: { slug: string }) {
       <div className="section-header">
         <div>
           <h2 className="section-title">{t("title")}</h2>
-          <p className="help" style={{ marginTop: 4 }}>
-            {t("desc1")}
-          </p>
-          <p className="help" style={{ marginTop: 4 }}>
-            {t("desc2")}
-          </p>
+          <p className="panel-subtitle">{t("desc1")}</p>
+          <p className="panel-subtitle">{t("desc2")}</p>
         </div>
       </div>
 

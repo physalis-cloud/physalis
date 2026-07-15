@@ -57,6 +57,13 @@ const ADMIN_ONLY_MIGRATIONS = new Set([
   "20260509000000_lifecycle_emails",
   "20260509130000_token_kind_user_enum",
   "20260510000000_token_kind_org_enum",
+  "20260613120000_dedicated_instances",
+  "20260614120000_cicd_multiprovider_admin",
+  "20260614150000_account_pending_deletion",
+  "20260616120000_client_bonus_quotas",
+  "20260625120000_sso_config_admin",
+  "20260626120000_sso_v2_multi_provider",
+  "20260626160000_client_social_login_enabled",
 ]);
 
 const prisma = new PrismaClient();

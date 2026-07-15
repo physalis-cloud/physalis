@@ -18,6 +18,9 @@ export type AuditEntry = {
   secretKey?: string | null;
   metadata?: Prisma.InputJsonValue;
   req?: Request;
+  /** Mono-tenant : ignoré (toujours null/absent). Présent pour que le code
+   *  SaaS coulé verbatim, qui renseigne `tenantSlug`, compile sans overlay. */
+  tenantSlug?: string | null;
 };
 
 /**

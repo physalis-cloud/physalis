@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { RiShareForward2Line } from "@remixicon/react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import EmptyCard from "@/components/EmptyCard";
+import ShareCreateButton from "../share-create-button";
 
 type Status = "active" | "consumed" | "expired" | "revoked";
 
@@ -33,6 +36,7 @@ const STATUS_LABEL_KEY: Record<Status, string> = {
 
 export default function SharesList() {
   const t = useTranslations("shares");
+  const confirm = useConfirm();
   const [shares, setShares] = useState<ShareItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +56,7 @@ export default function SharesList() {
   }, [reload]);
 
   async function revoke(s: ShareItem) {
-    if (!confirm(t("revokeConfirm", { title: s.title ?? t("noTitle") }))) {
+    if (!(await confirm({ message: t("revokeConfirm", { title: s.title ?? t("noTitle") }), danger: true }))) {
       return;
     }
     const res = await fetch(`/api/me/shares/${s.id}`, { method: "DELETE" });
@@ -67,10 +71,12 @@ export default function SharesList() {
   if (shares === null) return <p className="help">{t("loading")}</p>;
   if (shares.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-title">{t("noShares")}</div>
-        <div>{t("noSharesHint")}</div>
-      </div>
+      <EmptyCard
+        icon={<RiShareForward2Line size={22} aria-hidden />}
+        title={t("noShares")}
+        hint={t("noSharesHint")}
+        action={<ShareCreateButton />}
+      />
     );
   }
 

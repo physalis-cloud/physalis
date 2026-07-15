@@ -76,6 +76,9 @@ export default function InfosPanel(props: Props) {
   const showQuickAdd =
     sub === "access" &&
     canEdit &&
+    // Quand NI service NI compte : c'est l'EmptyCard (après Environnements) qui
+    // porte les boutons d'ajout → on masque le quick-add du header.
+    !(servicesEmpty === true && accountsEmpty === true) &&
     ((servicesEmpty === true && !addingService) ||
       (accountsEmpty === true && !addingAccount));
 
@@ -127,7 +130,7 @@ export default function InfosPanel(props: Props) {
             {servicesEmpty === true && !addingService && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary"
                 onClick={() => setAddingService(true)}
               >
                 {tAccess("addService")}
@@ -136,7 +139,7 @@ export default function InfosPanel(props: Props) {
             {accountsEmpty === true && !addingAccount && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary"
                 onClick={() => setAddingAccount(true)}
               >
                 {tAccess("addAccount")}

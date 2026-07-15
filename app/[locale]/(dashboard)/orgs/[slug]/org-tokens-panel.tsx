@@ -13,6 +13,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { Link } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { RiKey2Line } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const SCOPE_LABELS: Record<string, { label: string; description: string }> = {
   PROJECTS_LIST: {
@@ -69,6 +71,7 @@ type DevConstraints = {
 
 export default function OrgTokensPanel({ slug }: { slug: string }) {
   const t = useTranslations("orgs.tokens");
+  const confirm = useConfirm();
   const [tokens, setTokens] = useState<OrgToken[] | null>(null);
   const [projects, setProjects] = useState<ProjectOption[] | null>(null);
   const [accessLevel, setAccessLevel] = useState<AccessLevel>("dev");
@@ -113,7 +116,7 @@ export default function OrgTokensPanel({ slug }: { slug: string }) {
   }, [reload, loadProjects]);
 
   async function regenerate(tok: OrgToken) {
-    if (!confirm(t("regenerateConfirm", { name: tok.name }))) {
+    if (!(await confirm({ message: t("regenerateConfirm", { name: tok.name }), danger: true }))) {
       return;
     }
     const res = await fetch(
@@ -132,7 +135,7 @@ export default function OrgTokensPanel({ slug }: { slug: string }) {
   }
 
   async function revoke(tok: OrgToken) {
-    if (!confirm(t("revokeConfirm", { name: tok.name }))) {
+    if (!(await confirm({ message: t("revokeConfirm", { name: tok.name }), danger: true }))) {
       return;
     }
     const res = await fetch(`/api/orgs/${slug}/org-tokens/${tok.id}`, {
@@ -175,7 +178,7 @@ export default function OrgTokensPanel({ slug }: { slug: string }) {
             </p>
           )}
         </div>
-        {!creating && !justCreated && (
+        {!creating && !justCreated && tokens && tokens.length > 0 && (
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -213,11 +216,23 @@ export default function OrgTokensPanel({ slug }: { slug: string }) {
 
       {tokens === null ? (
         <p className="help">{t("loading")}</p>
-      ) : tokens.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("empty")}</div>
-          <div>{t("emptyHint")}</div>
-        </div>
+      ) : tokens.length === 0 && !creating && !justCreated ? (
+        <EmptyCard
+          icon={<RiKey2Line size={22} aria-hidden />}
+          title={t("empty")}
+          hint={t("emptyHint")}
+          action={
+            !creating && !justCreated ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setCreating(true)}
+              >
+                {t("createBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {tokens.map((tok) => {
@@ -342,6 +357,7 @@ function CreateForm({
   onCreated: (token: string, name: string) => void;
 }) {
   const t = useTranslations("orgs.tokens");
+  const confirm = useConfirm();
   const isDev = accessLevel === "dev";
   // Pour DEV : pas d'option "Jamais", limite à devConstraints.maxExpiresInDays.
   const expiryOptions = isDev && devConstraints
@@ -375,9 +391,9 @@ function CreateForm({
     setSelectedProjects(next);
   }
 
-  function handleAllProjectsToggle(checked: boolean) {
+  async function handleAllProjectsToggle(checked: boolean) {
     if (checked) {
-      const ok = confirm(t("form.allProjectsConfirm"));
+      const ok = await confirm({ message: t("form.allProjectsConfirm") });
       if (!ok) return;
     }
     setAllProjects(checked);

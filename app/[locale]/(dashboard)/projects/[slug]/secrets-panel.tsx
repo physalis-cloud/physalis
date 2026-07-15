@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import type { ProjectRole } from "@prisma/client";
 import { RiDownload2Line, RiHistoryLine, RiKey2Line, RiUpload2Line } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
 import { useTranslations } from "next-intl";
 import {
   SECRET_CATEGORIES,
@@ -13,8 +14,10 @@ import {
 import SecretHistoryDialog from "@/components/SecretHistoryDialog";
 import TagsInput from "@/components/TagsInput";
 import SecretsImportDialog from "./secrets-import-dialog";
+import { useConfirm } from "@/components/ConfirmDialog";
+import ImmediateRotationSection from "@/components/ImmediateRotationSection";
 
-type RotationStrategy = "DATABASE" | "JWT_SECRET" | "REMINDER" | "API_KEY";
+type RotationStrategy = "DATABASE" | "JWT_SECRET" | "REMINDER" | "API_KEY" | "WEBHOOK";
 
 type SecretListItem = {
   key: string;
@@ -45,6 +48,7 @@ export default function SecretsPanel({
   orgSlug: string;
 }) {
   const t = useTranslations("projects.secrets");
+  const confirm = useConfirm();
   const [secrets, setSecrets] = useState<SecretListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -133,7 +137,7 @@ export default function SecretsPanel({
   }
 
   async function remove(key: string) {
-    if (!confirm(t("deleteConfirm", { key }))) return;
+    if (!(await confirm({ message: t("deleteConfirm", { key }), danger: true }))) return;
     const res = await fetch(
       `/api/projects/${slug}/${env}/secrets/${encodeURIComponent(key)}`,
       { method: "DELETE" },
@@ -241,11 +245,7 @@ export default function SecretsPanel({
               >
                 <RiHistoryLine size={12} aria-hidden /> {t("historyBtn")}
               </button>
-              {rotationFeatureEnabled && (
-                (s.category === "database" && s.key.toLowerCase().includes("password")) ||
-                s.category === "infra" ||
-                s.category === "services"
-              ) && (
+              {rotationFeatureEnabled && (s.rotationEnabled || isRotationCandidate(s.key)) && (
                 <button
                   type="button"
                   onClick={() => { setRotationKey(s.key); setRotationCategory(s.category ?? null); }}
@@ -318,7 +318,7 @@ export default function SecretsPanel({
             >
               <RiDownload2Line size={14} aria-hidden /> {t("exportBtn")}
             </a>
-            {canEdit && (
+            {canEdit && secrets && secrets.length > 0 && (
               <button
                 type="button"
                 onClick={() => setAdding(true)}
@@ -358,10 +358,22 @@ export default function SecretsPanel({
 
       {secrets === null ? (
         <p className="help">{t("empty")}</p>
-      ) : secrets.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("empty")}</div>
-        </div>
+      ) : secrets.length === 0 && !adding ? (
+        <EmptyCard
+          icon={<RiKey2Line size={22} aria-hidden />}
+          title={t("empty")}
+          action={
+            canEdit && !adding ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAdding(true)}
+              >
+                {t("addBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {grouped.map((group) => (
@@ -470,19 +482,26 @@ function SecretForm({
         };
       }
 
-      const res = await fetch(url, {
-        method,
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        setError(data?.error ?? t("updateError"));
-        return;
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          setError(data?.error ?? t("updateError"));
+          return;
+        }
+        onSaved();
+      } catch {
+        // Réseau coupé / connexion perdue : `fetch` throw (TypeError) au lieu
+        // de renvoyer !res.ok. Sans ce catch, l'échec était silencieux (aucun
+        // message). On affiche l'erreur pour que l'utilisateur puisse réessayer.
+        setError(t("updateError"));
       }
-      onSaved();
     });
   }
 
@@ -581,8 +600,12 @@ type RotationConfig = {
   dbName: string | null;
   dbType: string | null;
   dbUser: string | null;
+  rotationExecMode: string | null;
   apiKeyId: string | null;
   apiKey: { apiId: string } | null;
+  rotationWebhookUrl: string | null;
+  rotationHookLabel: string | null;
+  rotationHookToken: string | null;
 };
 
 type DetectedDb = {
@@ -603,10 +626,39 @@ const DB_TYPE_LABELS: Record<string, string> = {
 
 // Strategy labels are now built dynamically in the component using t()
 
-const STRATEGIES_BY_CATEGORY: Record<string, RotationStrategy[]> = {
-  database: ["DATABASE", "API_KEY", "REMINDER"],
-  infra: ["JWT_SECRET", "API_KEY", "REMINDER"],
-};
+// Les 4 stratégies sont TOUJOURS sélectionnables dans la modale (plus de
+// restriction dure par catégorie, qui créait des culs-de-sac). Le tri se fait
+// sur deux axes séparés :
+//  - isRotationCandidate(key) : faut-il proposer le bouton « Rotation » ? (tri
+//    positif par NOM, large — l'ambigu passe car la modale laisse choisir)
+//  - defaultRotationStrategy(...) : quelle stratégie pré-sélectionner (défaut
+//    SÛR : une stratégie destructive — JWT_SECRET, DATABASE — n'est jamais le
+//    défaut sur un nom incertain ; l'ambigu retombe sur REMINDER non destructif)
+const ALL_STRATEGIES: RotationStrategy[] = ["DATABASE", "JWT_SECRET", "API_KEY", "WEBHOOK", "REMINDER"];
+
+// Tri positif large : le nom dénote-t-il un credential rotable ?
+function isRotationCandidate(key: string): boolean {
+  const k = key.toLowerCase();
+  const tokens = ["password", "passwd", "pwd", "secret", "token", "apikey", "api_key", "credential", "auth", "jwt", "session", "private"];
+  if (tokens.some((tok) => k.includes(tok))) return true;
+  // « key » en mot délimité : API_KEY, ENCRYPTION_KEY, SECRET_KEY, KEY…
+  return /(?:^|[_-])keys?(?:$|[_-])/.test(k);
+}
+
+// Défaut SÛR : ambigu → REMINDER (non destructif). hasInternalApiKey = le secret
+// est lié à une clé de la gateway Physalis (signal exact, pas le nom).
+function defaultRotationStrategy(key: string, category: string | null, hasInternalApiKey: boolean): RotationStrategy {
+  if (hasInternalApiKey) return "API_KEY";
+  const k = key.toLowerCase();
+  if (/(password|passwd|pwd)/.test(k)) return "DATABASE";
+  // Random interne légitime à régénérer localement — HAUTE confiance uniquement
+  // (on exclut secret_key/app_secret : ambigus avec STRIPE_SECRET_KEY & co.).
+  const internalRandom = ["jwt", "signing", "session_secret", "nextauth_secret", "cron_secret", "encryption_key"];
+  if (internalRandom.some((tok) => k.includes(tok))) return "JWT_SECRET";
+  if (category === "database") return "DATABASE";
+  if (category === "infra") return "JWT_SECRET";
+  return "REMINDER";
+}
 
 function SecretRotationDialog({
   slug,
@@ -623,15 +675,16 @@ function SecretRotationDialog({
   onClose: () => void;
 }) {
   const t = useTranslations("projects.secrets.rotation");
-  const availableStrategies: RotationStrategy[] =
-    STRATEGIES_BY_CATEGORY[category ?? ""] ?? (["DATABASE", "JWT_SECRET", "API_KEY", "REMINDER"] as RotationStrategy[]);
-  const defaultStrategy: RotationStrategy =
-    category === "infra" ? "JWT_SECRET" : "DATABASE";
+  const confirm = useConfirm();
+  // Pré-sélection à l'ouverture (avant fetch) : nom + catégorie, sans le signal
+  // ApiKey interne (inconnu tant que la config n'est pas chargée).
+  const defaultStrategy = defaultRotationStrategy(secretKey, category, false);
   const STRATEGY_LABELS: Record<RotationStrategy, string> = {
     DATABASE: t("strategyDatabase"),
     JWT_SECRET: t("strategyJwtSecret"),
     REMINDER: t("strategyReminder"),
     API_KEY: t("strategyApiKey"),
+    WEBHOOK: t("strategyWebhook"),
   };
 
   const [config, setConfig] = useState<RotationConfig | null>(null);
@@ -643,9 +696,14 @@ function SecretRotationDialog({
   const [dbName, setDbName] = useState<string>("");
   const [dbType, setDbType] = useState<string>("POSTGRESQL");
   const [dbUser, setDbUser] = useState<string>("");
+  // AGENT = DB Docker-interne (sidecar self-rotation) ; DIRECT = DB managée joignable.
+  const [execMode, setExecMode] = useState<string>("AGENT");
   const [detected, setDetected] = useState<DetectedDb[]>([]);
   const [detecting, setDetecting] = useState(false);
   const [needsFullDeploy, setNeedsFullDeploy] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [hookLabel, setHookLabel] = useState<string>("");
+  const [hookToken, setHookToken] = useState<string>("");
   const [apiKeyId, setApiKeyId] = useState<string>("");
   const [apis, setApis] = useState<{ id: string; name: string }[]>([]);
   const [selectedApiId, setSelectedApiId] = useState<string>("");
@@ -661,16 +719,20 @@ function SecretRotationDialog({
         const r = data.rotation;
         setConfig(r);
         setEnabled(r.rotationEnabled);
-        setStrategy(r.rotationStrategy ?? "REMINDER");
+        setStrategy(r.rotationStrategy ?? defaultRotationStrategy(secretKey, category, !!r.apiKey || !!r.apiKeyId));
         setIntervalDays(r.rotationIntervalDays ? String(r.rotationIntervalDays) : "30");
         setDbHost(r.dbHost ?? "");
         setDbPort(r.dbPort ? String(r.dbPort) : "");
         setDbName(r.dbName ?? "");
         setDbType(r.dbType ?? "POSTGRESQL");
         setDbUser(r.dbUser ?? "");
+        setExecMode(r.rotationExecMode ?? "AGENT");
         setApiKeyId(r.apiKeyId ?? "");
         setSelectedApiId(r.apiKey?.apiId ?? "");
         setNeedsFullDeploy(r.rotationNeedsFullDeploy ?? false);
+        setWebhookUrl(r.rotationWebhookUrl ?? "");
+        setHookLabel(r.rotationHookLabel ?? "");
+        setHookToken(r.rotationHookToken ?? "");
       })
       .catch(() => setError(t("loading")));
 
@@ -679,7 +741,7 @@ function SecretRotationDialog({
       .then((r) => r.ok ? r.json() as Promise<{ apis: { id: string; name: string }[] }> : Promise.resolve({ apis: [] }))
       .then((data) => setApis(data.apis ?? []))
       .catch(() => null);
-  }, [slug, env, secretKey]);
+  }, [slug, env, secretKey, category]);
 
   useEffect(() => {
     if (!selectedApiId) { setApiKeys([]); return; }
@@ -720,6 +782,20 @@ function SecretRotationDialog({
   function save(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    // Validation client : ne pas enregistrer une config qui n'échouerait
+    // qu'au cron (DATABASE sans connexion, API_KEY sans clé sélectionnée).
+    if (enabled && strategy === "DATABASE" && (!dbHost.trim() || !dbName.trim() || !dbUser.trim())) {
+      setError(t("validationDbFields"));
+      return;
+    }
+    if (enabled && strategy === "API_KEY" && !apiKeyId) {
+      setError(t("validationApiKey"));
+      return;
+    }
+    if (enabled && strategy === "WEBHOOK" && !webhookUrl.trim()) {
+      setError(t("validationWebhookUrl"));
+      return;
+    }
     startTransition(async () => {
       const body: Record<string, unknown> = {
         rotationEnabled: enabled,
@@ -732,14 +808,40 @@ function SecretRotationDialog({
         body.dbName = dbName || null;
         body.dbType = dbType || null;
         body.dbUser = dbUser || null;
+        body.rotationExecMode = execMode;
       }
       if (enabled && strategy === "API_KEY") {
         body.apiKeyId = apiKeyId || null;
+      }
+      if (enabled && strategy === "WEBHOOK") {
+        body.rotationWebhookUrl = webhookUrl.trim() || null;
+        body.rotationHookLabel = hookLabel.trim() || null;
+        body.rotationHookToken = hookToken.trim() || null;
+        body.rotationExecMode = execMode;
       }
       body.rotationNeedsFullDeploy = needsFullDeploy;
       const res = await fetch(
         `/api/projects/${slug}/${env}/secrets/${encodeURIComponent(secretKey)}/rotation`,
         { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+      );
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(data?.error ?? t("saveError"));
+        return;
+      }
+      onClose();
+    });
+  }
+
+  // Rotation immédiate pour une stratégie AUTO = forcer la rotation maintenant
+  // (rend le secret dû / déclenche hors fenêtre). Confirmation bloquante.
+  async function forceNow() {
+    setError(null);
+    if (!(await confirm({ message: t("forceConfirm") }))) return;
+    startTransition(async () => {
+      const res = await fetch(
+        `/api/projects/${slug}/${env}/secrets/${encodeURIComponent(secretKey)}/rotation/force`,
+        { method: "POST" },
       );
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -797,7 +899,7 @@ function SecretRotationDialog({
                   <div className="field">
                     <label>{t("strategyLabel")}</label>
                     <select value={strategy} onChange={(e) => setStrategy(e.target.value as RotationStrategy)} className="select" disabled={pending}>
-                      {availableStrategies.map((s) => (
+                      {ALL_STRATEGIES.map((s) => (
                         <option key={s} value={s}>{STRATEGY_LABELS[s]}</option>
                       ))}
                     </select>
@@ -859,6 +961,17 @@ function SecretRotationDialog({
                         </div>
                       </div>
 
+                      <div className="form-row">
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>{t("execModeLabel")}</label>
+                          <select value={execMode} onChange={(e) => setExecMode(e.target.value)} className="select" disabled={pending}>
+                            <option value="AGENT">{t("execModeAgent")}</option>
+                            <option value="DIRECT">{t("execModeDirect")}</option>
+                          </select>
+                          <p className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("execModeNote")}</p>
+                        </div>
+                      </div>
+
                     </>
                   )}
 
@@ -866,6 +979,39 @@ function SecretRotationDialog({
                     <p className="help" style={{ fontSize: 12 }}>
                       {t("jwtHint")}
                     </p>
+                  )}
+
+                  {strategy === "REMINDER" && (
+                    <p className="help" style={{ fontSize: 12 }}>
+                      {t("reminderHint")}
+                    </p>
+                  )}
+
+                  {strategy === "WEBHOOK" && (
+                    <>
+                      <p className="help" style={{ fontSize: 12 }}>{t("webhookHint")}</p>
+                      <div className="field">
+                        <label>{t("webhookUrlLabel")} *</label>
+                        <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="http://app:3000/internal/rotate" className="input input-mono" disabled={pending} autoComplete="off" name="rotation-hook-url" />
+                      </div>
+                      <div className="field">
+                        <label>{t("hookLabelLabel")}</label>
+                        <input value={hookLabel} onChange={(e) => setHookLabel(e.target.value)} placeholder={t("hookLabelPlaceholder")} className="input" disabled={pending} />
+                      </div>
+                      <div className="field">
+                        <label>{t("hookTokenLabel")}</label>
+                        <input value={hookToken} onChange={(e) => setHookToken(e.target.value)} type="password" autoComplete="new-password" name="rotation-hook-token" placeholder={t("hookTokenPlaceholder")} className="input input-mono" disabled={pending} />
+                        <p className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("hookTokenNote")}</p>
+                      </div>
+                      <div className="field">
+                        <label>{t("execModeLabel")}</label>
+                        <select value={execMode} onChange={(e) => setExecMode(e.target.value)} className="select" disabled={pending}>
+                          <option value="AGENT">{t("hookExecAgent")}</option>
+                          <option value="DIRECT">{t("hookExecDirect")}</option>
+                        </select>
+                        <p className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("hookExecNote")}</p>
+                      </div>
+                    </>
                   )}
 
                   {strategy !== "REMINDER" && (
@@ -939,6 +1085,26 @@ function SecretRotationDialog({
                     </>
                   )}
                 </>
+              )}
+
+              {/* Rotation immédiate — basée sur la config SAUVEGARDÉE (config),
+                  pas le formulaire en cours. REMINDER → section assistée ;
+                  stratégie auto activée → bouton Forcer. */}
+              {config?.rotationStrategy === "REMINDER" && (
+                <ImmediateRotationSection
+                  endpoint={`/api/projects/${slug}/${env}/secrets/${encodeURIComponent(secretKey)}/rotation/mark-rotated`}
+                  payloadKey="newValue"
+                  onDone={onClose}
+                />
+              )}
+              {config?.rotationEnabled && config.rotationStrategy && config.rotationStrategy !== "REMINDER" && (
+                <div className="field" style={{ borderTop: "1px solid var(--border, rgba(0,0,0,0.1))", paddingTop: 12, marginTop: 4 }}>
+                  <label>{t("forceHeading")}</label>
+                  <p className="help" style={{ fontSize: 11, marginTop: 0, marginBottom: 6 }}>{t("forceHint")}</p>
+                  <button type="button" onClick={forceNow} disabled={pending} className="btn btn-secondary btn-sm">
+                    {t("forceBtn")}
+                  </button>
+                </div>
               )}
 
               {error && <p className="error-text">{error}</p>}

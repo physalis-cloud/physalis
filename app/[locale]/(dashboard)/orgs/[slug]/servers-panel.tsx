@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { OrgRole } from "@prisma/client";
 import { RiServerLine } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type ServerListItem = {
   id: string;
@@ -31,6 +33,7 @@ export default function ServersPanel({
   role: OrgRole;
 }) {
   const t = useTranslations("orgs.servers");
+  const confirm = useConfirm();
   const [servers, setServers] = useState<ServerListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -63,7 +66,7 @@ export default function ServersPanel({
   }, [reload]);
 
   async function remove(server: ServerListItem) {
-    if (!confirm(t("deleteConfirm", { name: server.name }))) return;
+    if (!(await confirm({ message: t("deleteConfirm", { name: server.name }), danger: true }))) return;
     const res = await fetch(`/api/orgs/${slug}/servers/${server.id}`, {
       method: "DELETE",
     });
@@ -89,7 +92,7 @@ export default function ServersPanel({
             {t("panelDesc")}
           </p>
         </div>
-        {!adding && canManage && (
+        {!adding && canManage && servers && servers.length > 0 && (
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -117,10 +120,22 @@ export default function ServersPanel({
 
       {servers === null ? (
         <p className="help">{t("loading")}</p>
-      ) : servers.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("emptyTitle")}</div>
-        </div>
+      ) : servers.length === 0 && !adding ? (
+        <EmptyCard
+          icon={<RiServerLine size={22} aria-hidden />}
+          title={t("emptyTitle")}
+          action={
+            canManage ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAdding(true)}
+              >
+                {t("createBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {servers.map((s) =>

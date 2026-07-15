@@ -103,6 +103,17 @@ export async function listDocPages(locale = "en"): Promise<DocPage[]> {
   return pages;
 }
 
+// Retire le 1er titre H1 en tête de corps s'il duplique le `title` du
+// frontmatter (déjà affiché dans l'en-tête via la pastille section). On ne
+// retire QUE s'il correspond exactement → aucun vrai titre de contenu supprimé.
+function stripLeadingH1(body: string, title: string): string {
+  const m = body.match(/^\s*#\s+(.+?)\s*(?:\r?\n|$)/);
+  if (m && m[1].trim() === title.trim()) {
+    return body.slice(m[0].length);
+  }
+  return body;
+}
+
 export async function getDocPage(
   slug: string,
   locale = "en",
@@ -120,7 +131,10 @@ export async function getDocPage(
   if (!file) return null;
   const raw = await readFile(path.join(dir, file), "utf8");
   const { meta, body } = parseFrontmatter(raw);
-  const html = await marked.parse(body, { gfm: true, breaks: false });
+  const html = await marked.parse(stripLeadingH1(body, meta.title), {
+    gfm: true,
+    breaks: false,
+  });
   const page: DocPageWithContent = { ...meta, slug, html };
   pageCache.set(cacheKey, page);
   return page;
@@ -130,4 +144,26 @@ export async function getDocPage(
 export async function listDocSlugs(): Promise<string[]> {
   const pages = await listDocPages("en");
   return pages.map((p) => p.slug);
+}
+
+/**
+ * Slug équivalent dans `toLocale` d'un slug de `fromLocale`, via le préfixe
+ * numérique du fichier (`01-premiers-pas` ↔ `01-getting-started`). Retourne
+ * `null` si la page n'existe pas dans la langue cible (→ repli sur la liste).
+ */
+export async function resolveDocSlug(
+  slug: string,
+  fromLocale: string,
+  toLocale: string,
+): Promise<string | null> {
+  const from = await resolveLocale(fromLocale);
+  const to = await resolveLocale(toLocale);
+  if (from === to) return slug;
+  const fromFiles = await readdir(path.join(DOCS_ROOT, from));
+  const fromFile = fromFiles.find((f) => f.endsWith(".md") && fileBaseToSlug(f) === slug);
+  const prefix = fromFile?.match(SLUG_PREFIX_RE)?.[0];
+  if (!prefix) return null;
+  const toFiles = await readdir(path.join(DOCS_ROOT, to));
+  const toFile = toFiles.find((f) => f.endsWith(".md") && f.startsWith(prefix));
+  return toFile ? fileBaseToSlug(toFile) : null;
 }

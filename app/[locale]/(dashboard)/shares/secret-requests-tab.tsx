@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { RiMailLine } from "@remixicon/react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import EmptyCard from "@/components/EmptyCard";
 import SecretRequestRevealDialog from "./secret-request-reveal-dialog";
+import SecretRequestCreateButton from "./secret-request-create-button";
 
 type Status =
   | "pending"
@@ -77,6 +81,7 @@ export default function SecretRequestsTab({
   refreshKey?: number;
 }) {
   const t = useTranslations("shares");
+  const confirm = useConfirm();
   const [requests, setRequests] = useState<SecretRequest[] | null>(null);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [orgFilter, setOrgFilter] = useState<string>("");
@@ -107,18 +112,24 @@ export default function SecretRequestsTab({
   }, [reload, refreshKey]);
 
   async function copyLink(id: string) {
-    alert(t("requestLinkOnce"));
     void id;
+    await confirm({ message: t("requestLinkOnce"), confirmLabel: "OK" });
   }
 
   async function revoke(id: string, label: string) {
-    if (!confirm(t("requestRevoke", { label }))) return;
+    if (!(await confirm({ message: t("requestRevoke", { label }), danger: true }))) return;
     const res = await fetch(`/api/secret-requests/${id}`, { method: "DELETE" });
     if (res.ok) reload();
     else setError(t("requestRevokeError"));
   }
 
   const reveal = revealId ? requests?.find((r) => r.id === revealId) : null;
+
+  // Selects de filtre affichés seulement s'il y a des demandes — ou si un
+  // filtre est actif (sinon on piégerait l'user sur un résultat filtré vide).
+  const hasFilters = Boolean(orgFilter || statusFilter);
+  const showFilters =
+    requests !== null && (requests.length > 0 || hasFilters);
 
   return (
     <div className="flex flex-col gap-4">
@@ -139,53 +150,55 @@ export default function SecretRequestsTab({
         />
       )}
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <select
-          value={orgFilter}
-          onChange={(e) => setOrgFilter(e.target.value)}
-          className="select"
-          style={{ maxWidth: 200 }}
+      {showFilters && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
         >
-          <option value="">{t("requestAllOrgs")}</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.slug}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="select"
-          style={{ maxWidth: 200 }}
-        >
-          <option value="">{t("requestAllStatuses")}</option>
-          <option value="pending">{t("requestStatus.pending")}</option>
-          <option value="received">{t("requestStatus.received")}</option>
-          <option value="imported">{t("requestStatus.imported")}</option>
-          <option value="revoked">{t("requestStatus.revoked")}</option>
-          <option value="expired">{t("requestStatus.expired")}</option>
-        </select>
-      </div>
+          <select
+            value={orgFilter}
+            onChange={(e) => setOrgFilter(e.target.value)}
+            className="select"
+            style={{ maxWidth: 200 }}
+          >
+            <option value="">{t("requestAllOrgs")}</option>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.slug}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="select"
+            style={{ maxWidth: 200 }}
+          >
+            <option value="">{t("requestAllStatuses")}</option>
+            <option value="pending">{t("requestStatus.pending")}</option>
+            <option value="received">{t("requestStatus.received")}</option>
+            <option value="imported">{t("requestStatus.imported")}</option>
+            <option value="revoked">{t("requestStatus.revoked")}</option>
+            <option value="expired">{t("requestStatus.expired")}</option>
+          </select>
+        </div>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 
       {requests === null ? (
         <p className="help">{t("loading")}</p>
       ) : requests.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("externalEmpty")}</div>
-          <p className="help" style={{ marginTop: 6 }}>
-            {t("externalEmptyHint")}
-          </p>
-        </div>
+        <EmptyCard
+          icon={<RiMailLine size={22} aria-hidden />}
+          title={t("externalEmpty")}
+          hint={t("externalEmptyHint")}
+          action={<SecretRequestCreateButton onCreated={reload} />}
+        />
       ) : (
         <div className="row-list">
           {requests.map((r) => (

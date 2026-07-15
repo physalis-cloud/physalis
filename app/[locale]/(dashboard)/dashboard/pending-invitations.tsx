@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { RiMailLine } from "@remixicon/react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type PendingInvitation = {
   id: string;
@@ -24,6 +25,7 @@ type PendingInvitation = {
 
 export default function PendingInvitations() {
   const t = useTranslations("dashboard.invitations");
+  const confirm = useConfirm();
   const router = useRouter();
   const [invitations, setInvitations] = useState<PendingInvitation[] | null>(
     null,
@@ -66,8 +68,13 @@ export default function PendingInvitations() {
     });
   }
 
-  function decline(inv: PendingInvitation) {
-    if (!confirm(t("declineConfirm", { orgName: inv.organization.name })))
+  async function decline(inv: PendingInvitation) {
+    if (
+      !(await confirm({
+        message: t("declineConfirm", { orgName: inv.organization.name }),
+        danger: true,
+      }))
+    )
       return;
     startTransition(async () => {
       const res = await fetch(`/api/me/invitations/${inv.id}`, {

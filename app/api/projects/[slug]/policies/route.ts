@@ -108,10 +108,13 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  // Conflit (repo, workflow, branch, projectId, environmentId).
+  // Conflit (provider, repo, workflow, branch, projectId, environmentId).
+  // Overlay self-host : github-only (repo = Project.githubRepo) → provider figé
+  // à "github" (défaut du modèle Policy après l'ajout multiprovider).
   const conflict = await prisma.policy.findUnique({
     where: {
-      repo_workflow_branch_projectId_environmentId: {
+      provider_repo_workflow_branch_projectId_environmentId: {
+        provider: "github",
         repo,
         workflow,
         branch,

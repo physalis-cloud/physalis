@@ -151,7 +151,10 @@ export async function POST(req: Request) {
         } satisfies AuthFailure;
       }
 
-      const passwordOk = await bcrypt.compare(password, user.password);
+      // password nullable (user invité/SSO sans mot de passe Physalis) → refus.
+      const passwordOk = user.password
+        ? await bcrypt.compare(password, user.password)
+        : false;
       if (!passwordOk) {
         return {
           reason: "invalid_password",

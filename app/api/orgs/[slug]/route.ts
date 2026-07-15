@@ -62,6 +62,20 @@ export async function DELETE(req: Request, { params }: Params) {
   const access = await requireOrgMember(slug, "OWNER");
   if ("error" in access) return access.error;
 
+  // L'org principale (compte général) ne peut pas être supprimée seule : elle
+  // est l'ancre du tenant. Sa suppression passe par la fermeture du compte
+  // (cf. POST /api/account/delete) qui déprovisionne tout le schéma.
+  const org = await prisma.organization.findUnique({
+    where: { id: access.organization.id },
+    select: { isPrimary: true },
+  });
+  if (org?.isPrimary) {
+    return NextResponse.json(
+      { error: "PRIMARY_ORG_UNDELETABLE" },
+      { status: 409 },
+    );
+  }
+
   await prisma.organization.delete({ where: { id: access.organization.id } });
 
   logAction({

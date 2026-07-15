@@ -4,6 +4,7 @@ import { encrypt } from "@/lib/crypto";
 import { readJson, requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
+import { resolveAccountLink, accountLinkView } from "@/lib/account-link";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -12,11 +13,26 @@ export async function GET(_req: Request, { params }: Params) {
   const access = await requireProjectMember(slug);
   if ("error" in access) return access.error;
 
-  const accounts = await prisma.appAccount.findMany({
+  const rows = await prisma.appAccount.findMany({
     where: { projectId: access.project.id },
-    select: { id: true, name: true, tags: true, updatedAt: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      tags: true,
+      updatedAt: true,
+      createdAt: true,
+      environmentId: true,
+      serviceId: true,
+      environment: { select: { name: true, url: true } },
+      service: { select: { name: true, url: true } },
+    },
     orderBy: { name: "asc" },
   });
+
+  const accounts = rows.map(({ environment, service, ...a }) => ({
+    ...a,
+    ...accountLinkView({ environment, service }),
+  }));
 
   return NextResponse.json({ accounts });
 }
@@ -27,7 +43,7 @@ export async function POST(req: Request, { params }: Params) {
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as
-    | { name?: string; user?: string; password?: string; tags?: string[] }
+    | { name?: string; user?: string; password?: string; tags?: string[]; environmentId?: string | null; serviceId?: string | null }
     | null;
   const name = String(body?.name ?? "").trim();
   if (!name) {
@@ -39,6 +55,8 @@ export async function POST(req: Request, { params }: Params) {
   if (tags === null) {
     return NextResponse.json({ error: TAG_VALIDATION_ERROR }, { status: 400 });
   }
+  const link = await resolveAccountLink(access.project.id, body ?? {});
+  if ("error" in link) return NextResponse.json({ error: link.error }, { status: 400 });
 
   const payload = encrypt(JSON.stringify({ user, password }));
 
@@ -50,6 +68,8 @@ export async function POST(req: Request, { params }: Params) {
       tag: payload.tag,
       tags,
       projectId: access.project.id,
+      environmentId: link.environmentId,
+      serviceId: link.serviceId,
     },
     select: { id: true, name: true, tags: true, createdAt: true, updatedAt: true },
   });

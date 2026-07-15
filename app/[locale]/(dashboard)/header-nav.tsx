@@ -14,9 +14,14 @@ import {
   type RemixiconComponentType,
 } from "@remixicon/react";
 
-type NavItem = { href: string; label: string; Icon?: RemixiconComponentType };
+type NavItem = {
+  href: string;
+  label: string;
+  shortLabel?: string;
+  Icon?: RemixiconComponentType;
+};
 
-export default function HeaderNav() {
+export default function HeaderNav({ currentSlug }: { currentSlug: string | null }) {
   const t = useTranslations("dashboard.nav");
   const pathname = usePathname() ?? "";
   const [open, setOpen] = useState(false);
@@ -46,12 +51,16 @@ export default function HeaderNav() {
     };
   }, [open]);
 
+  // « Paramètres » mène à la page de l'organisation courante (réglages org).
+  // Fallback /dashboard si aucune org courante (cas limite : user sans org).
+  const settingsHref = currentSlug ? `/orgs/${currentSlug}` : "/dashboard";
+
   const items: NavItem[] = [
     { href: "/projects", label: t("projects"), Icon: RiFolderOpenLine },
-    { href: "/vault", label: t("vault"), Icon: RiSafe2Line },
+    { href: "/vault", label: t("vault"), shortLabel: t("vaultShort"), Icon: RiSafe2Line },
     { href: "/shares", label: t("shares"), Icon: RiShareForward2Line },
     { href: "/docs", label: t("docs"), Icon: RiBookOpenLine },
-    { href: "/settings/parameters", label: t("parameters"), Icon: RiSettings3Line },
+    { href: settingsHref, label: t("parameters"), Icon: RiSettings3Line },
   ];
 
   function isActive(href: string): boolean {
@@ -59,7 +68,7 @@ export default function HeaderNav() {
     if (href === "/vault") return pathname === "/vault";
     if (href === "/shares") return pathname === "/shares";
     if (href === "/docs") return pathname.startsWith("/docs");
-    if (href === "/settings/parameters") return pathname.startsWith("/settings");
+    if (href === settingsHref) return pathname.startsWith("/orgs");
     return pathname === href;
   }
 
@@ -80,14 +89,21 @@ export default function HeaderNav() {
         className={`app-nav${open ? " is-open" : ""}`}
         aria-label={t("ariaLabel")}
       >
-        {items.map(({ href, label, Icon }) => (
+        {items.map(({ href, label, shortLabel, Icon }) => (
           <Link
             key={href}
             href={href}
             className={isActive(href) ? "active" : ""}
           >
             {Icon && <Icon size={15} aria-hidden />}
-            {label}
+            {shortLabel ? (
+              <>
+                <span className="nav-label-full">{label}</span>
+                <span className="nav-label-short">{shortLabel}</span>
+              </>
+            ) : (
+              label
+            )}
           </Link>
         ))}
       </nav>

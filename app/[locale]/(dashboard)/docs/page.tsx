@@ -1,6 +1,6 @@
 import { Link } from "@/i18n/navigation";
 import { getTranslations } from "next-intl/server";
-import { RiArrowRightLine, RiBookOpenLine } from "@remixicon/react";
+import { RiArrowRightLine, RiBookOpenLine, RiGraduationCapLine } from "@remixicon/react";
 import { listDocPages } from "@/lib/docs";
 import { DocIcon } from "@/lib/docs-icons";
 
@@ -9,6 +9,7 @@ type Props = { params: Promise<{ locale: string }> };
 export default async function DocsIndexPage({ params }: Props) {
   const { locale } = await params;
   const t = await getTranslations("docs");
+  const tt = await getTranslations("tutos");
   const pages = await listDocPages(locale);
 
   return (
@@ -22,6 +23,19 @@ export default async function DocsIndexPage({ params }: Props) {
           <p className="docs-hero-subtitle">{t("subtitle")}</p>
         </div>
       </div>
+
+      <Link href="/tutos" className="tuto-banner">
+        <div className="tuto-banner-icon">
+          <RiGraduationCapLine size={30} aria-hidden />
+        </div>
+        <div className="tuto-banner-body">
+          <div className="tuto-banner-title">{tt("bannerTitle")}</div>
+          <p className="tuto-banner-text">{tt("bannerText")}</p>
+        </div>
+        <span className="tuto-banner-cta">
+          {tt("bannerCta")} <RiArrowRightLine size={16} aria-hidden />
+        </span>
+      </Link>
 
       <div className="docs-grid">
         {pages.map((p, idx) => (

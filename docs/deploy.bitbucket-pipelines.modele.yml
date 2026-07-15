@@ -15,11 +15,13 @@
 #          https://api.bitbucket.org/2.0/workspaces/<ws>/pipelines-config/identity/oidc
 #        - (optionnel) creds registry
 #   2. Projet relié à cette connexion + repo = repositoryUuid Bitbucket
-#        (Repository settings → l'UUID entre accolades, ex. {11111111-...})
+#        (Repository settings → General → Repository details → Advanced →
+#         l'UUID AVEC accolades, ex. {93a800af-...})
 #   3. Server (org) avec la clé SSH de la VPS + environnement lié + deployPath
 #   4. Policy : (provider bitbucket, repositoryUuid, deployment env, branche)
-#        → (project, environment Physalis). Le champ « environment CI » de la
-#        policy DOIT matcher le `deployment:` déclaré ci-dessous.
+#        → (project, environment Physalis). ATTENTION : le claim
+#        `deploymentEnvironment` peut être VIDE même avec `deployment:` ci-dessous
+#        → dans ce cas mettre « environment CI » VIDE dans la Policy (= tous).
 #   5. Physalis accessible en HTTPS depuis Bitbucket Pipelines
 #
 # Note : Bitbucket ne permet pas (à ce jour) de configurer l'audience du token

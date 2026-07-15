@@ -8,10 +8,12 @@ export default async function DocsLayout({ children, params }: Props) {
   const { locale } = await params;
   const pages = await listDocPages(locale);
   return (
-    <div className="page">
-      <div className="page-content docs-shell">
-        <DocsSidebar pages={pages} />
-        <div className="docs-main">{children}</div>
+    <div className="side-shell">
+      <DocsSidebar pages={pages} />
+      <div className="side-content">
+        <div className="page">
+          <div className="page-content">{children}</div>
+        </div>
       </div>
     </div>
   );

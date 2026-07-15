@@ -8,6 +8,7 @@ import { isValidCategory } from "@/lib/categories";
 import { logAction } from "@/lib/audit";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
 import { createSecretVersion } from "@/lib/versioning";
+import { triggerSync } from "@/lib/sync/dispatch";
 
 type Params = { params: Promise<{ slug: string; env: string; key: string }> };
 
@@ -242,6 +243,12 @@ export async function PATCH(req: Request, { params }: Params) {
     req,
   });
 
+  // Sync sortante (fire-and-forget) — valeur, clé ou tags peuvent avoir changé.
+  void triggerSync(access.tenantSlug, access.environment.id, "secret_update", {
+    userId: access.user.id,
+    email: access.user.email,
+  });
+
   return NextResponse.json({ secret: updated });
 }
 
@@ -278,6 +285,13 @@ export async function DELETE(req: Request, { params }: Params) {
       targetId: existing.id,
       secretKey: existing.key,
       req,
+    });
+
+    // Sync sortante (fire-and-forget) — la cible retirera la var distante
+    // absente de l'état désiré (réconciliation côté connecteur).
+    void triggerSync(access.tenantSlug, access.environment.id, "secret_delete", {
+      userId: access.user.id,
+      email: access.user.email,
     });
 
     return NextResponse.json({ ok: true });

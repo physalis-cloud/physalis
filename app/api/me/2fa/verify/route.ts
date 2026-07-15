@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, basePrisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { readJson, requireUser } from "@/lib/api";
 import {
@@ -19,7 +19,9 @@ import { logAction } from "@/lib/audit";
 export async function POST(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
+  // SUPERADMIN platform-level → public.User (cf. setup/route.ts).
+  const db = tenantSlug ? prisma : basePrisma;
 
   const body = (await readJson(req)) as { code?: string } | null;
   const code = body?.code?.trim();
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Code requis" }, { status: 400 });
   }
 
-  const dbUser = await prisma.user.findUnique({
+  const dbUser = await db.user.findUnique({
     where: { id: user.id },
     select: {
       twoFactorEnabled: true,
@@ -72,7 +74,7 @@ export async function POST(req: Request) {
   const plainBackupCodes = generateBackupCodes();
   const hashes = await hashBackupCodes(plainBackupCodes);
 
-  await prisma.user.update({
+  await db.user.update({
     where: { id: user.id },
     data: {
       twoFactorEnabled: true,

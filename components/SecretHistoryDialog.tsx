@@ -16,6 +16,7 @@ import {
   RiEyeOffLine,
   RiHistoryLine,
 } from "@remixicon/react";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Version = {
   version: number;
@@ -47,6 +48,8 @@ export default function SecretHistoryDialog({
   const [revealError, setRevealError] = useState<Record<number, string>>({});
   const [revealing, setRevealing] = useState<number | null>(null);
   const [restoring, setRestoring] = useState<number | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => {
     let cancelled = false;
@@ -139,10 +142,11 @@ export default function SecretHistoryDialog({
   }
 
   async function restore(version: number) {
-    const confirmed = window.confirm(
-      `Restaurer la version ${version} ?\n\nLa valeur actuelle sera conservée dans l'historique.`,
-    );
+    const confirmed = await confirm({
+      message: `Restaurer la version ${version} ?\n\nLa valeur actuelle sera conservée dans l'historique.`,
+    });
     if (!confirmed) return;
+    setRestoreError(null);
     setRestoring(version);
     try {
       const res = await fetch(
@@ -153,13 +157,13 @@ export default function SecretHistoryDialog({
         const data = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        alert(`Restauration échouée : ${data.error ?? `HTTP ${res.status}`}`);
+        setRestoreError(`Restauration échouée : ${data.error ?? `HTTP ${res.status}`}`);
         return;
       }
       onRestored();
       onClose();
     } catch (err) {
-      alert(
+      setRestoreError(
         `Restauration échouée : ${
           err instanceof Error ? err.message : "Erreur réseau"
         }`,
@@ -244,6 +248,21 @@ export default function SecretHistoryDialog({
             }}
           >
             {listError}
+          </div>
+        )}
+
+        {restoreError && (
+          <div
+            role="alert"
+            style={{
+              padding: 12,
+              borderRadius: 8,
+              background: "#fee2e2",
+              color: "#7f1d1d",
+              fontSize: 13,
+            }}
+          >
+            {restoreError}
           </div>
         )}
 

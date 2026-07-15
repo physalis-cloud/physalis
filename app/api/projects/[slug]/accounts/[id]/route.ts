@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { readJson, requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
+import { resolveAccountLink, accountLinkView } from "@/lib/account-link";
 
 type Params = { params: Promise<{ slug: string; id: string }> };
 
@@ -31,6 +32,10 @@ export async function GET(req: Request, { params }: Params) {
 
   const account = await prisma.appAccount.findFirst({
     where: { id, projectId: access.project.id },
+    include: {
+      environment: { select: { name: true, url: true } },
+      service: { select: { name: true, url: true } },
+    },
   });
   if (!account) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -55,6 +60,9 @@ export async function GET(req: Request, { params }: Params) {
       name: account.name,
       user: creds.user,
       password: creds.password,
+      environmentId: account.environmentId,
+      serviceId: account.serviceId,
+      ...accountLinkView(account),
     },
   });
 }
@@ -72,7 +80,7 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const body = (await readJson(req)) as
-    | { name?: string; user?: string; password?: string; tags?: string[] }
+    | { name?: string; user?: string; password?: string; tags?: string[]; environmentId?: string | null; serviceId?: string | null }
     | null;
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
@@ -84,8 +92,18 @@ export async function PATCH(req: Request, { params }: Params) {
     iv?: string;
     tag?: string;
     tags?: string[];
+    environmentId?: string | null;
+    serviceId?: string | null;
   } = {};
   const changed: string[] = [];
+
+  if ("environmentId" in body || "serviceId" in body) {
+    const link = await resolveAccountLink(access.project.id, body);
+    if ("error" in link) return NextResponse.json({ error: link.error }, { status: 400 });
+    data.environmentId = link.environmentId;
+    data.serviceId = link.serviceId;
+    changed.push("link");
+  }
 
   if (typeof body.name === "string") {
     const newName = body.name.trim();

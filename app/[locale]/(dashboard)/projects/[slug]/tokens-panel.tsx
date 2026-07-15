@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { ProjectRole } from "@prisma/client";
 import { RiShieldKeyholeLine } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type TokenItem = {
   id: string;
@@ -30,6 +32,7 @@ export default function TokensPanel({
   role: ProjectRole;
 }) {
   const t = useTranslations("projects.tokens");
+  const confirm = useConfirm();
   const [tokens, setTokens] = useState<TokenItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -85,7 +88,7 @@ export default function TokensPanel({
   }
 
   async function revoke(id: string) {
-    if (!confirm(t("revokeConfirm"))) return;
+    if (!(await confirm({ message: t("revokeConfirm"), danger: true }))) return;
     const res = await fetch(`/api/tokens/${id}`, { method: "DELETE" });
     if (!res.ok) {
       setError(t("revokeError"));
@@ -110,7 +113,7 @@ export default function TokensPanel({
         <h2 className="section-title">
           {t("title", { env })}
         </h2>
-        {canEdit && !creating && !issuedToken && (
+        {canEdit && !creating && !issuedToken && tokens && tokens.length > 0 && (
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -216,12 +219,22 @@ export default function TokensPanel({
 
       {tokens === null ? (
         <p className="help">Chargement…</p>
-      ) : tokens.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">
-            {t("empty")}
-          </div>
-        </div>
+      ) : tokens.length === 0 && !creating && !issuedToken ? (
+        <EmptyCard
+          icon={<RiShieldKeyholeLine size={22} aria-hidden />}
+          title={t("empty")}
+          action={
+            canEdit && !creating && !issuedToken ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setCreating(true)}
+              >
+                {t("createBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {tokens.map((tok) => (

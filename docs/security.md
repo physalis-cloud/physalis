@@ -41,7 +41,7 @@
 | Module Email Pink-Floyd | ✅ | Config par projet, clé API chiffrée AES-256-GCM, gating allowlist fail-closed, RBAC, historique scopé par compte ; revu 2026-05-30 (§3.15) |
 | npm audit / CVE CI (SCA) | ✅ | Job `npm-audit` (`--omit=dev --audit-level=high`) dans `security.yml`, bloque sur high/critical. Cf. §3.14.2 |
 | Session fixation (password change / 2FA) | ⚠️ | Non vérifié — les JWT NextAuth existants sont-ils invalidés ? |
-| ENCRYPTION_KEY re-keying | ⚠️ | Aucune procédure documentée si la clé maître est compromise |
+| ENCRYPTION_KEY re-keying | ✅ | Script `scripts/rekey-encryption.mjs` (dual-key, idempotent, dry-run) + procédure ops. Cf. §3.14.4 |
 
 ---
 
@@ -148,7 +148,7 @@ NextAuth génère et valide automatiquement un token CSRF à chaque login via `/
 | `plugin-vault-write` | 30 / min | user |
 | `gateway-verify` | 1 000 / min | IP |
 
-Endpoints cron (`/api/cron/*`) : gardés par `CRON_SECRET` (timingSafeEqual), pas de rate-limit IP (accès opérateur uniquement).
+Endpoints cron (`/api/cron/*`) : gardés par `CRON_SECRET_ADMIN` (tier admin, header `Authorization: Bearer`, `timingSafeEqual` via `requireCronAuth` — `lib/cron-auth.ts`), pas de rate-limit IP (accès opérateur uniquement). Le tier bas-privilège `CRON_SECRET_REPORT` ne garde que `POST /api/admin/infra/backup`.
 
 **Limite in-memory** : les buckets sont module-level — ils se réinitialisent à chaque redéploiement. Un attaquant peut temporiser une attaque autour d'un deploy. Phase 2 : migration vers Redis pour persistance inter-instance. Cf. [todo_v2.md](todo_v2.md).
 
@@ -200,7 +200,7 @@ Phase 12 livrée (2026-05-13). Stratégies :
 | `API_KEY` | Révocation ancienne clé + génération nouvelle, redeploy GitHub Actions |
 | `WEBHOOK` | Dispatch vers URL webhook externe |
 
-Auth cron : `POST /api/cron/rotation` gardé par `X-Cron-Secret` (timingSafeEqual). Callback N8n : HMAC-SHA256 avec `ROTATION_HMAC_KEY`, fenêtre ±1h, token à usage unique (stocké `rotationToken` sur Secret, effacé après validation).
+Auth cron : `POST /api/cron/rotation` gardé par `CRON_SECRET_ADMIN` (tier admin, `Authorization: Bearer`, `timingSafeEqual` via `requireCronAuth`). Callback N8n : HMAC-SHA256 avec `ROTATION_HMAC_KEY`, fenêtre ±1h, token à usage unique (stocké `rotationToken` sur Secret, effacé après validation).
 
 **Robustesse V2 en backlog** : retries N8n, pattern write-ahead. Cf. [todo_v2.md](todo_v2.md).
 
@@ -225,8 +225,8 @@ Secret TOTP chiffré AES-256-GCM. 8 backup codes 64 bits bcrypt one-shot. Single
 
 Endpoint consommé par N8n pour lire/écrire la valeur d'un secret DB avant/après rotation.
 
-- **Auth** : `X-Rotation-Admin-Key = CRON_SECRET` — comparaison `timingSafeEqual` via helper `checkAdminKey()` (fix 2026-05-15). Le try/catch absorbe le throw de `timingSafeEqual` si les buffers ont des longueurs différentes (clé vide fournie).
-- **Pas de rate-limit IP** — accès opérateur uniquement (N8n interne). `CRON_SECRET` doit être ≥ 32 bytes hex aléatoires.
+- **Auth** : `Authorization: Bearer <CRON_SECRET_ADMIN>` (tier admin) — comparaison `timingSafeEqual` via le helper partagé `requireCronAuth(req, "admin")` (`lib/cron-auth.ts`, Phase 1 cron-secret-hardening). Header standardisé pour tous les endpoints opérateur.
+- **Pas de rate-limit IP** — accès opérateur uniquement (N8n interne). `CRON_SECRET_ADMIN` doit être ≥ 32 bytes hex aléatoires.
 - **Réponses d'erreur génériques** (fix 2026-05-15) : les blocs catch (Prisma et déchiffrement) retournent `{ error: "Internal server error" }` sans `err.message`. L'erreur brute reste dans `console.error` (opérateur uniquement).
 - **ROTATION_HMAC_KEY** : clé critique — si elle fuite, un attaquant peut forger des callbacks N8n et écrire n'importe quelle valeur dans un secret DB via `PATCH`. À traiter avec la même rigueur que `ENCRYPTION_KEY`. Voir §3.14.
 
@@ -264,7 +264,7 @@ Pull-based, GPG RSA 4096, escrow externe, vérification d'intégrité à chaque 
 `ROTATION_HMAC_KEY` est utilisée pour signer les callbacks N8n vers `POST /api/cron/rotation` (HMAC-SHA256, fenêtre ±1h, token à usage unique). Si cette clé fuite :
 
 1. Un attaquant peut forger un callback N8n valide pour n'importe quel secret.
-2. `PATCH /api/rotation/admin/secret-value` (protégé par `CRON_SECRET` / `timingSafeEqual`) peut être appelé directement si `CRON_SECRET` est aussi compromis.
+2. `PATCH /api/rotation/admin/secret-value` (protégé par `CRON_SECRET_ADMIN` / `timingSafeEqual`) peut être appelé directement si `CRON_SECRET_ADMIN` est aussi compromis.
 3. Résultat : écriture arbitraire de valeur chiffrée dans un `Secret` tenant.
 
 **Traitement requis** : `ROTATION_HMAC_KEY` doit être traitée avec la même rigueur que `ENCRYPTION_KEY` — jamais en repo, uniquement dans les secrets opérateur (`.env` VPS / GitHub Secrets). Renouvellement manuel en cas de suspicion de compromission (réécrire la valeur dans l'env + redéployer).
@@ -293,17 +293,29 @@ NextAuth v5 émet des JWT sessionToken avec expiration. Après un changement de 
 
 **Action recommandée** : vérifier [lib/auth.ts](../lib/auth.ts) et les routes `/api/auth/reset-password`, `/api/user/2fa/disable`. Si pas d'invalidation, documenter la fenêtre de risque et envisager une table `SessionRevocation` ou un champ `sessionVersion` sur `User`.
 
-#### 3.14.4 ENCRYPTION_KEY re-keying (⚠️ aucune procédure)
+#### 3.14.4 ENCRYPTION_KEY re-keying (✅ — script + procédure livrés 2026-06-24)
 
-Aucune procédure documentée pour faire tourner la clé maître `ENCRYPTION_KEY` si elle est compromise. Tous les secrets (`Secret`, `OrgSecret`, `VaultEntry`, `ApiKey`, etc.) sont chiffrés avec cette clé.
+Procédure de rotation de la clé maître `ENCRYPTION_KEY` (rotation planifiée **ou** récupération après compromission). Tous les secrets serveur (`Secret`/`SecretVersion`, `OrgSecret`/`OrgSecretVersion`, `Service` (2 triplets), `AppAccount`, `Server`, `VaultEntry`/`TeamVaultEntry` (2 triplets), `User.twoFactor*`, `Api.jwtSecret*`, `CiConnectionSecret`, `ProjectEmailConfig`, `ProjectBackupConfig.agentToken*`) sont chiffrés AES-256-GCM avec cette clé unique, **sans versioning dans le payload** → faire tourner la clé EXIGE un re-keying (déchiffrer sous l'ancienne, re-chiffrer sous la nouvelle).
 
-**Procédure manuelle V1** (si compromission suspectée) :
-1. Générer `NEW_ENCRYPTION_KEY` (32 bytes hex).
-2. Pour chaque enregistrement chiffré : `decrypt(old_key)` → `encrypt(new_key)` → écriture.
-3. Permuter les clés dans l'env + redéployer.
-4. Révoquer `OLD_ENCRYPTION_KEY`.
+**Mécanisme dual-key** ([lib/crypto.ts](../../lib/crypto.ts)) : si `ENCRYPTION_KEY_OLD` est définie, `decrypt()` y retombe quand la clé courante échoue. Pendant la migration, les lignes encore sous l'ancienne clé ET les nouvelles restent lisibles → **zéro downtime**. Absente, le comportement est strictement inchangé.
 
-Aucun script de re-keying n'existe aujourd'hui. Acceptable V1 (opération rare), mais à scripter avant d'atteindre un volume > 10 k secrets. Cf. [todo_v2.md](todo_v2.md).
+**Script** : [scripts/rekey-encryption.mjs](../../scripts/rekey-encryption.mjs). Idempotent/reprenable (saute ce qui est déjà sous la nouvelle clé), transaction par lot, **dry-run par défaut**, robuste au drift de schéma (table/colonne absente sautée), parcourt tous les schémas `client_*` (+`public` via `--include-public`).
+
+> **Exclus du re-keying** (zero-knowledge — le serveur ne peut pas déchiffrer) : `OneTimeShare` (chiffré navigateur) et `SecretRequest` (hybride ECDH/ML-KEM, déchiffré par le destinataire). Invariant : un champ re-keyable côté serveur possède une colonne `tag` GCM.
+
+**Procédure ops** (à lancer **en conteneur** — `node` direct, l'image runtime n'a ni npm ni npx) :
+1. **Backup DB** (le script réécrit des données ; il ne touche PAS au schéma).
+2. Générer la nouvelle clé : `openssl rand -hex 32` → `K2`.
+3. Déployer avec `ENCRYPTION_KEY=K2` **et** `ENCRYPTION_KEY_OLD=K1` (ancienne). L'app reste pleinement fonctionnelle (fallback dual-key).
+4. **Dry-run** (lecture seule, compte les lignes à migrer) :
+   `docker compose exec app node scripts/rekey-encryption.mjs --include-public`
+5. **Appliquer** : ajouter `--apply` (confirmation interactive, ou `--yes` en non-interactif).
+6. **Vérifier** : relancer le dry-run → doit afficher `0 à migrer | … déjà K2 | 0 erreurs`.
+7. **Retirer `ENCRYPTION_KEY_OLD`** du déploiement et redéployer (une fois le « 0 à migrer » confirmé). `K1` est alors révoquée.
+
+> ⚠️ Ne PAS retirer `ENCRYPTION_KEY_OLD` avant que le dry-run ne confirme `0 à migrer` : toute ligne restée sous K1 deviendrait illisible. Une ligne illisible sous K1 ET K2 est loguée et laissée **intacte** (jamais d'écrasement aveugle).
+
+Garde-fous tests : [tests/lib/rekey-script-interop.test.ts](../../tests/lib/rekey-script-interop.test.ts) (interop crypto script↔lib) + [tests/lib/rekey-registry.test.ts](../../tests/lib/rekey-registry.test.ts) (le registre couvre exactement les triplets GCM des schémas → détecte tout nouveau champ chiffré oublié). Cf. [todo_v2.md](todo_v2.md). Migration future de ce socle vers OpenBao Transit : gated par la HA OpenBao ([ha-openbao.md](steps-docs/todo/ha-openbao.md)).
 
 #### 3.14.5 Middleware locale routing — cross-domain caveat (⚠️ mitigation applicative)
 
@@ -366,7 +378,7 @@ Avant chaque livraison touchant à l'auth, au chiffrement, ou aux routes API :
 
 1. Vérifier qu'aucune valeur de secret ne transite par les logs (`grep "console" lib/ app/api/`).
 2. Confirmer que les nouvelles routes appellent `requireUser` / `requireOrgMember` / `requireProjectMember` avec le bon rôle — ou `validateIntegrationToken` pour les endpoints intégration.
-3. Vérifier que les nouveaux endpoints cron ont bien `timingSafeEqual(Buffer.from(process.env.CRON_SECRET), Buffer.from(provided))`.
+3. Vérifier que les nouveaux endpoints opérateur appellent bien le helper partagé `requireCronAuth(req, tier)` (`lib/cron-auth.ts`) avec le bon tier (`"report"` pour le bas-privilège, `"admin"` sinon) — jamais de vérif inline copiée-collée.
 4. Lancer `npm test && npm run test:integ` (docker compose up -d au préalable). Tout vert avant merge.
 5. Lancer `npm audit --audit-level=high` — zéro high/critical avant merge. (En attendant l'intégration CI, cf. §3.14.2.)
 6. Tests manuels critiques :

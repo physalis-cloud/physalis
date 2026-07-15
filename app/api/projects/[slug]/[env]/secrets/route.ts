@@ -12,6 +12,7 @@ import { isValidCategory } from "@/lib/categories";
 import { logAction } from "@/lib/audit";
 import { createSecretVersion } from "@/lib/versioning";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
+import { triggerSync } from "@/lib/sync/dispatch";
 
 type Params = { params: Promise<{ slug: string; env: string }> };
 
@@ -135,6 +136,14 @@ export async function POST(req: Request, { params }: Params) {
     metadata: { category: secret.category },
     req,
   });
+
+  // Sync sortante (fire-and-forget) — pousse l'env vers ses cibles (Vercel…).
+  void triggerSync(
+    access.tenantSlug,
+    access.environment.id,
+    existing ? "secret_update" : "secret_create",
+    { userId: access.user.id, email: access.user.email },
+  );
 
   return NextResponse.json(
     {

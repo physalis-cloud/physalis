@@ -20,10 +20,15 @@ export async function requestPasswordReset(
     windowMs: 60 * 60_000,
   });
   if (limited) {
-    return { ok: false, error: "Trop de tentatives, réessayez dans une heure." };
+    return {
+      ok: false,
+      error: "Trop de tentatives, réessayez dans une heure.",
+    };
   }
 
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const email = String(formData.get("email") ?? "")
+    .trim()
+    .toLowerCase();
   if (!isValidEmail(email)) {
     return { ok: false, error: "Email invalide." };
   }
@@ -41,7 +46,13 @@ export async function requestPasswordReset(
         email: user.email,
       });
 
-      const baseUrl = (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
+      // PHYSALIS_URL prioritaire (cf. lib/app-url) ; fallback NEXTAUTH_URL pour
+      // rétro-compat. Chaîne inline car l'overlay self-host est un build séparé.
+      const baseUrl = (
+        process.env.PHYSALIS_URL ??
+        process.env.NEXTAUTH_URL ??
+        "http://localhost:3000"
+      ).replace(/\/$/, "");
       const resetUrl = `${baseUrl}/reset-password/${token}`;
 
       await sendPasswordResetEmail({

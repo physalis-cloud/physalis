@@ -18,16 +18,16 @@ export default function DocsSidebarNav({ pages }: { pages: DocPage[] }) {
     : null;
 
   return (
-    <nav className="docs-nav" aria-label={t("title")}>
+    <>
       <Link
         href="/docs"
-        className={`docs-nav-item${isHome ? " active" : ""}`}
+        className={`side-nav-item${isHome ? " active" : ""}`}
         aria-current={isHome ? "page" : undefined}
       >
-        <span className="docs-nav-icon">
+        <span className="side-nav-icon">
           <RiBookOpenLine size={16} aria-hidden />
         </span>
-        <span className="docs-nav-label">{t("title")}</span>
+        <span className="side-nav-label">{t("title")}</span>
       </Link>
       {pages.map((p) => {
         const active = activeSlug === p.slug;
@@ -35,16 +35,16 @@ export default function DocsSidebarNav({ pages }: { pages: DocPage[] }) {
           <Link
             key={p.slug}
             href={`/docs/${p.slug}`}
-            className={`docs-nav-item${active ? " active" : ""}`}
+            className={`side-nav-item${active ? " active" : ""}`}
             aria-current={active ? "page" : undefined}
           >
-            <span className="docs-nav-icon">
+            <span className="side-nav-icon">
               <DocIcon name={p.icon} size={16} />
             </span>
-            <span className="docs-nav-label">{p.title}</span>
+            <span className="side-nav-label">{p.title}</span>
           </Link>
         );
       })}
-    </nav>
+    </>
   );
 }

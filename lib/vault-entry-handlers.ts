@@ -17,6 +17,11 @@ import {
   type EntryPatchBody,
 } from "@/lib/vault-entries";
 import { hasVaultRole, type CollectionAccess } from "@/lib/vault-access";
+import {
+  computeReminderNextAt,
+  pushRotationHistory,
+  type RotationHistoryEntry,
+} from "@/lib/rotation-reminder";
 
 // Rangs locaux pour le calcul du role effectif sur une collection cible
 // (move entre collections). Doit rester en sync avec lib/vault-access.ts.
@@ -490,4 +495,161 @@ export async function deleteEntry(
   });
 
   return NextResponse.json({ ok: true });
+}
+
+// ─── Rotation REMINDER (Phase B) ─────────────────────────────────────────
+// Coffres équipe/org : rappel d'âge + rotation assistée sur le mot de passe
+// (encryptedPassword). Pas de versioning → historique capé à 3 (rotationHistory).
+// Stratégie implicite REMINDER : Physalis n'applique rien à la source.
+
+export async function getEntryRotation(access: CollectionAccess, entryId: string) {
+  if (!hasVaultRole(access.role, "VIEWER")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const entry = await prisma.teamVaultEntry.findFirst({
+    where: { id: entryId, collectionId: access.collection.id },
+    select: {
+      rotationEnabled: true,
+      rotationIntervalDays: true,
+      rotationLastAt: true,
+      rotationNextAt: true,
+      rotationLastStatus: true,
+      rotationHistory: true,
+    },
+  });
+  if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const history = Array.isArray(entry.rotationHistory) ? entry.rotationHistory : [];
+  return NextResponse.json({
+    rotation: {
+      rotationEnabled: entry.rotationEnabled,
+      rotationIntervalDays: entry.rotationIntervalDays,
+      rotationLastAt: entry.rotationLastAt,
+      rotationNextAt: entry.rotationNextAt,
+      rotationLastStatus: entry.rotationLastStatus,
+      historyCount: history.length,
+    },
+  });
+}
+
+export async function patchEntryRotation(
+  access: CollectionAccess,
+  entryId: string,
+  req: Request,
+) {
+  if (!hasVaultRole(access.role, "EDITOR")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const entry = await prisma.teamVaultEntry.findFirst({
+    where: { id: entryId, collectionId: access.collection.id },
+    select: { id: true, name: true, rotationLastAt: true },
+  });
+  if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const body = (await readJson(req)) as
+    | { rotationEnabled?: boolean; rotationIntervalDays?: number | null }
+    | null;
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  }
+  const enabled = Boolean(body.rotationEnabled);
+  const intervalDays =
+    enabled && body.rotationIntervalDays ? Number(body.rotationIntervalDays) : null;
+  if (enabled && (!intervalDays || intervalDays < 1 || intervalDays > 3650)) {
+    return NextResponse.json({ error: "Intervalle invalide (1–3650 jours)." }, { status: 400 });
+  }
+  const base = entry.rotationLastAt ?? new Date();
+  const nextAt = enabled ? computeReminderNextAt(intervalDays, base) : null;
+
+  await prisma.teamVaultEntry.update({
+    where: { id: entry.id },
+    data: { rotationEnabled: enabled, rotationIntervalDays: intervalDays, rotationNextAt: nextAt },
+    select: { id: true },
+  });
+
+  logAction({
+    action: "VAULT_ENTRY_UPDATE",
+    actor: { kind: "user", userId: access.user.id, email: access.user.email },
+    organizationId: access.organizationId,
+    projectId: access.projectId,
+    targetType: "TeamVaultEntry",
+    targetId: entry.id,
+    metadata: { source: inferSource(access), changedFields: ["rotationConfig"], rotationEnabled: enabled },
+    req,
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+// POST assisté : newPassword → remplace encryptedPassword + snapshot l'ancien dans
+// rotationHistory (cap 3) + bump. Sans newPassword = marquer roté (bump seul).
+export async function rotateEntry(
+  access: CollectionAccess,
+  entryId: string,
+  req: Request,
+) {
+  if (!hasVaultRole(access.role, "EDITOR")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const entry = await prisma.teamVaultEntry.findFirst({
+    where: { id: entryId, collectionId: access.collection.id },
+    select: {
+      id: true,
+      name: true,
+      encryptedPassword: true,
+      passwordIv: true,
+      passwordTag: true,
+      rotationIntervalDays: true,
+      rotationHistory: true,
+    },
+  });
+  if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const body = (await readJson(req).catch(() => null)) as { newPassword?: string } | null;
+  const newPassword =
+    body && typeof body.newPassword === "string" && body.newPassword !== ""
+      ? body.newPassword
+      : null;
+
+  const now = new Date();
+  const nextAt = computeReminderNextAt(entry.rotationIntervalDays, now);
+
+  const data: {
+    rotationLastAt: Date;
+    rotationNextAt: Date | null;
+    rotationLastStatus: null;
+    encryptedPassword?: string;
+    passwordIv?: string;
+    passwordTag?: string;
+    rotationHistory?: RotationHistoryEntry[];
+  } = { rotationLastAt: now, rotationNextAt: nextAt, rotationLastStatus: null };
+
+  if (newPassword) {
+    const payload = encrypt(newPassword);
+    if (entry.encryptedPassword && entry.passwordIv && entry.passwordTag) {
+      data.rotationHistory = pushRotationHistory(entry.rotationHistory, {
+        encryptedValue: entry.encryptedPassword,
+        iv: entry.passwordIv,
+        tag: entry.passwordTag,
+        rotatedAt: now.toISOString(),
+      });
+    }
+    data.encryptedPassword = payload.encryptedValue;
+    data.passwordIv = payload.iv;
+    data.passwordTag = payload.tag;
+  }
+
+  await prisma.teamVaultEntry.update({ where: { id: entry.id }, data, select: { id: true } });
+
+  logAction({
+    action: "VAULT_ENTRY_UPDATE",
+    actor: { kind: "user", userId: access.user.id, email: access.user.email },
+    organizationId: access.organizationId,
+    projectId: access.projectId,
+    targetType: "TeamVaultEntry",
+    targetId: entry.id,
+    metadata: { source: inferSource(access), changedFields: ["rotation"], valueUpdated: Boolean(newPassword) },
+    req,
+  });
+
+  return NextResponse.json({ ok: true, valueUpdated: Boolean(newPassword) });
 }

@@ -12,6 +12,8 @@ import { RiAccountCircleLine } from "@remixicon/react";
 import OrgSwitcher from "./org-switcher";
 import HeaderNav from "./header-nav";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
+import OfflineBanner from "@/components/OfflineBanner";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 
 // Self-host : single-tenant. Pas de bandeau billing/quota Stripe (réservé
 // au SaaS). Le layout original est dans le repo SaaS.
@@ -43,7 +45,9 @@ export default async function DashboardLayout({
   const currentSlug = await getCurrentOrgSlug(userId);
 
   return (
+    <ConfirmProvider>
     <div className="min-h-screen flex flex-col bg-bg">
+      <OfflineBanner />
       <header className="app-header">
         <div className="flex items-center gap-6">
           <Link href={`/${locale}/dashboard`} className="brand">
@@ -64,7 +68,7 @@ export default async function DashboardLayout({
             }))}
             currentSlug={currentSlug}
           />
-          <HeaderNav />
+          <HeaderNav currentSlug={currentSlug} />
         </div>
         <div className="flex items-center gap-3">
           {isSuperadmin(session.user.role) && (
@@ -96,5 +100,6 @@ export default async function DashboardLayout({
       </header>
       <main className="flex-1">{children}</main>
     </div>
+    </ConfirmProvider>
   );
 }

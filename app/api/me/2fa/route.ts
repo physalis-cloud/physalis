@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, basePrisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { readJson, requireUser } from "@/lib/api";
 import { findBackupCodeIndex, verifyTotp } from "@/lib/totp";
@@ -11,9 +11,11 @@ import { logAction } from "@/lib/audit";
 export async function GET() {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
+  // SUPERADMIN platform-level → public.User (cf. setup/route.ts).
+  const db = tenantSlug ? prisma : basePrisma;
 
-  const dbUser = await prisma.user.findUnique({
+  const dbUser = await db.user.findUnique({
     where: { id: user.id },
     select: { twoFactorEnabled: true, backupCodes: true },
   });
@@ -30,7 +32,9 @@ export async function GET() {
 export async function DELETE(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
+  // SUPERADMIN platform-level → public.User (cf. setup/route.ts).
+  const db = tenantSlug ? prisma : basePrisma;
 
   const body = (await readJson(req)) as { code?: string } | null;
   const code = body?.code?.trim();
@@ -38,7 +42,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Code requis" }, { status: 400 });
   }
 
-  const dbUser = await prisma.user.findUnique({
+  const dbUser = await db.user.findUnique({
     where: { id: user.id },
     select: {
       twoFactorEnabled: true,
@@ -90,7 +94,7 @@ export async function DELETE(req: Request) {
   // volée plus ancienne sans déconnecter l'utilisateur qui fait l'action.
   // loginAt null (token legacy) → fallback now() ; ce token-là n'est de toute
   // façon pas soumis au check (loginAt null) et expirera sous 8h.
-  await prisma.user.update({
+  await db.user.update({
     where: { id: user.id },
     data: {
       twoFactorEnabled: false,

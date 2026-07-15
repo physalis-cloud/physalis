@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireEnvironment } from "@/lib/api";
 import { logAction } from "@/lib/audit";
+import { triggerSync } from "@/lib/sync/dispatch";
 import { createSecretVersion } from "@/lib/versioning";
 
 type Params = {
@@ -101,6 +102,12 @@ export async function POST(req: Request, { params }: Params) {
       toVersion: targetVersion,
     },
     req,
+  });
+
+  // Sync sortante (fire-and-forget) — la valeur du secret a changé.
+  void triggerSync(access.tenantSlug, access.environment.id, "secret_rollback", {
+    userId: access.user.id,
+    email: access.user.email,
   });
 
   return NextResponse.json({ secret: result.updated });

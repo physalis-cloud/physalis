@@ -141,7 +141,10 @@ describe("verifyGithubOidcToken", () => {
     });
     const r = await verifyGithubOidcToken(token);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("wrong_issuer");
+    // Depuis le refactor multi-provider, un issuer https inconnu (non
+    // github.com / gitlab.com / bitbucket) est traité comme un issuer dynamique
+    // non allowlisté → `untrusted_issuer` (toujours rejeté, plus précis).
+    if (!r.ok) expect(r.reason).toBe("untrusted_issuer");
   });
 
   it("rejette une mauvaise audience", async () => {

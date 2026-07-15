@@ -58,6 +58,8 @@ export default function ProjectView({
   orgSlug,
   githubRepo,
   githubWorkflow,
+  ciConnectionId,
+  ciRepo,
   environments,
   role,
   orgRole,
@@ -67,6 +69,8 @@ export default function ProjectView({
   orgSlug: string;
   githubRepo: string | null;
   githubWorkflow: string | null;
+  ciConnectionId: string | null;
+  ciRepo: string | null;
   environments: EnvSummary[];
   role: ProjectRole;
   /** OrgRole transversal — OrgDEV peut gérer les policies au même titre
@@ -170,11 +174,17 @@ export default function ProjectView({
 
       {/* Content */}
       {tab.kind === "access" ? (
-        <InfosPanel slug={slug} role={role} environments={sortedEnvs} />
+        <InfosPanel
+          slug={slug}
+          role={role}
+          environments={sortedEnvs}
+          rotationFeatureEnabled={false}
+        />
       ) : tab.kind === "vault" ? (
         <TeamVaultPanel
           scope={{ kind: "project", projectSlug: slug }}
           canCreate={canRedeploy}
+          rotationFeatureEnabled={false}
         />
       ) : tab.kind === "policies" ? (
         <PoliciesPanel
@@ -253,6 +263,8 @@ export default function ProjectView({
           projectName={projectName}
           githubRepo={githubRepo}
           githubWorkflow={githubWorkflow}
+          ciConnectionId={ciConnectionId}
+          ciRepo={ciRepo}
           environments={sortedEnvs}
           onClose={() => setSettingsOpen(false)}
         />

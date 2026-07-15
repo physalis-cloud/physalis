@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { usePathname } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import DocsSidebarNav from "./docs-sidebar-nav";
@@ -11,12 +12,10 @@ export default function DocsSidebar({ pages }: { pages: DocPage[] }) {
   // Hide sidebar on docs index (usePathname from next-intl is locale-stripped)
   if (/^\/docs\/?$/.test(pathname)) return null;
   return (
-    <aside className="docs-sidebar">
-      <div className="docs-sidebar-eyebrow">{t("title")}</div>
-      <div className="docs-sidebar-count">
-        {pages.length} {t("section").toLowerCase()}s
-      </div>
-      <DocsSidebarNav pages={pages} />
+    <aside className="side-nav-col" style={{ "--rail-top": "124px" } as CSSProperties}>
+      <nav className="side-nav" aria-label={t("title")}>
+        <DocsSidebarNav pages={pages} />
+      </nav>
     </aside>
   );
 }

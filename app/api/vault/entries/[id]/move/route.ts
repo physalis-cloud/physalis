@@ -49,7 +49,7 @@ function maxVaultRole(
 }
 
 type MoveBody = {
-  target?: "team_org" | "team_project";
+  target?: "team_org" | "team_project" | "project_account";
   orgSlug?: string;
   projectSlug?: string;
   collectionSlug?: string;
@@ -193,9 +193,13 @@ export async function POST(req: Request, { params }: Params) {
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
-  if (body.target !== "team_org" && body.target !== "team_project") {
+  if (
+    body.target !== "team_org" &&
+    body.target !== "team_project" &&
+    body.target !== "project_account"
+  ) {
     return NextResponse.json(
-      { error: "target must be 'team_org' or 'team_project'" },
+      { error: "target must be 'team_org', 'team_project' or 'project_account'" },
       { status: 400 },
     );
   }
@@ -206,6 +210,81 @@ export async function POST(req: Request, { params }: Params) {
   });
   if (!source) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Cible « compte de projet » (AppAccount) — déplacement INTER-MODÈLES :
+  // l'entrée de login perso devient un Compte du projet. Mapping :
+  // name→name, username→user, password→password. L'URL et le 2FA (TOTP) ne
+  // sont PAS portés par AppAccount → perdus (l'UI prévient avant le move).
+  if (body.target === "project_account") {
+    if (!body.projectSlug) {
+      return NextResponse.json({ error: "projectSlug requis" }, { status: 400 });
+    }
+    const project = await prisma.project.findUnique({
+      where: { slug: body.projectSlug },
+      select: {
+        id: true,
+        organizationId: true,
+        members: { where: { userId: user.id }, select: { role: true } },
+        organization: { select: { members: { where: { userId: user.id }, select: { role: true } } } },
+      },
+    });
+    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // Rôle effectif aligné sur requireProjectCollectionAccess (cf. team_project).
+    const projectRole = project.members[0]?.role;
+    const orgRole = project.organization.members[0]?.role;
+    let role: VaultRole | null = null;
+    if (isPlatformAdmin(user.role) || orgRole === "OWNER" || orgRole === "ADMIN") {
+      role = "OWNER";
+    } else if (projectRole) {
+      role = PROJECT_TO_VAULT[projectRole];
+    } else if (hasDevPrivileges(orgRole)) {
+      role = "EDITOR";
+    }
+    if (!role || !hasVaultRole(role, "EDITOR")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Mot de passe en clair pour le blob {user, password} de l'AppAccount.
+    let plaintextPwd = "";
+    if (source.encryptedPassword && source.passwordIv && source.passwordTag) {
+      plaintextPwd = decrypt({
+        encryptedValue: source.encryptedPassword,
+        iv: source.passwordIv,
+        tag: source.passwordTag,
+      });
+    }
+    const payload = encrypt(JSON.stringify({ user: source.username ?? "", password: plaintextPwd }));
+
+    const created = await prisma.$transaction(async (tx) => {
+      const acc = await tx.appAccount.create({
+        data: {
+          projectId: project.id,
+          name: source.name,
+          encryptedData: payload.encryptedValue,
+          iv: payload.iv,
+          tag: payload.tag,
+          tags: source.tags,
+        },
+        select: { id: true },
+      });
+      await tx.vaultEntry.delete({ where: { id: source.id } });
+      return acc;
+    });
+
+    logAction({
+      action: "ACCOUNT_CREATE",
+      actor: { kind: "user", userId: user.id, email: user.email },
+      organizationId: project.organizationId,
+      projectId: project.id,
+      targetType: "AppAccount",
+      targetId: created.id,
+      metadata: { from: "personal", fromEntryId: source.id, name: source.name },
+      req,
+    });
+
+    return NextResponse.json({ id: created.id, target: "project_account" });
   }
 
   // Resolution de la cible.

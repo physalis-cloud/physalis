@@ -39,7 +39,7 @@ export default function SecretRequestCreateButton({
         type="button"
         onClick={openDialog}
         disabled={loading}
-        className="btn btn-primary btn-sm"
+        className="btn btn-primary"
       >
         {loading ? t("loading") : t("allowExternalBtn")}
       </button>

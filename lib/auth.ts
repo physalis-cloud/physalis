@@ -66,6 +66,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return rejectWithConstantTime(password);
         }
 
+        // password nullable : un user invité/SSO peut n'avoir aucun mot de
+        // passe Physalis → Credentials refuse (temps constant, pas d'oracle).
+        if (!user.password) return rejectWithConstantTime(password);
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) {
           logAction({

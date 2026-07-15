@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition, type ReactNode, type CSSProperties } from "react";
 import { useTranslations } from "next-intl";
 import {
   RiFolderOpenLine,
@@ -13,6 +13,7 @@ import {
 import { generatePassword } from "@/lib/generate-password";
 import { estimateStrength, strengthMeta } from "@/lib/password-strength";
 import { computeDuplicates, extractDomain } from "@/lib/vault-duplicates";
+import { useConfirm } from "@/components/ConfirmDialog";
 import ExtensionBanner from "./extension-banner";
 import RenameCollectionDialog from "../rename-collection-dialog";
 
@@ -134,8 +135,9 @@ function relativeTime(iso: string, t: VaultT): string {
   return t("relTime.yearsAgo", { n: year });
 }
 
-export default function VaultPanel() {
+export default function VaultPanel({ children }: { children?: ReactNode }) {
   const t = useTranslations("vault");
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<VaultEntryListItem[] | null>(null);
   const [collections, setCollections] = useState<VaultCollection[]>([]);
   const [allTagsList, setAllTagsList] = useState<string[]>([]);
@@ -156,6 +158,16 @@ export default function VaultPanel() {
   const [moving, setMoving] = useState<VaultEntryListItem | null>(null);
   const [creatingCollection, setCreatingCollection] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [exportPending, setExportPending] = useState(false);
+
+  // Export du coffre personnel (JSON déchiffré) — réutilise l'endpoint RGPD
+  // existant. Le serveur pose Content-Disposition: attachment → download natif.
+  function downloadExport() {
+    setExportPending(true);
+    window.location.href = "/api/me/export?scope=personal";
+    // Latence pour laisser le navigateur démarrer le download avant reset.
+    setTimeout(() => setExportPending(false), 800);
+  }
   const [sort, setSort] = useState<
     "name" | "recent" | "favorite_first" | "strength"
   >("name");
@@ -272,9 +284,13 @@ export default function VaultPanel() {
 
   async function removeCollection(c: VaultCollection) {
     if (
-      !confirm(
-        t("deleteCollection.confirm", { name: c.name, count: c.entryCount }),
-      )
+      !(await confirm({
+        message: t("deleteCollection.confirm", {
+          name: c.name,
+          count: c.entryCount,
+        }),
+        danger: true,
+      }))
     ) {
       return;
     }
@@ -351,7 +367,8 @@ export default function VaultPanel() {
   }
 
   async function remove(entry: VaultEntryListItem) {
-    if (!confirm(t("deleteConfirm", { name: entry.name }))) return;
+    if (!(await confirm({ message: t("deleteConfirm", { name: entry.name }), danger: true })))
+      return;
     const res = await fetch(`/api/vault/entries/${entry.id}`, {
       method: "DELETE",
     });
@@ -369,9 +386,10 @@ export default function VaultPanel() {
   }
 
   return (
-    <div className="vault-shell">
-      {/* Sidebar — collections perso */}
-      <aside className="vault-shell-aside flex flex-col gap-1">
+    <div className="side-shell">
+      {/* Menu — collections perso, à gauche du contenu (hors du bloc) */}
+      <aside className="side-nav-col" style={{ "--rail-top": "138px" } as CSSProperties}>
+        <div className="side-nav">
         <SidebarItem
           active={filter === "all"}
           onClick={() => setFilter("all")}
@@ -387,10 +405,7 @@ export default function VaultPanel() {
           count={favoritesCount}
         />
 
-        <div
-          className="cat-header"
-          style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}
-        >
+        <div className="side-nav-section">
           <span>{t("collectionsTitle")}</span>
           <button
             type="button"
@@ -463,10 +478,15 @@ export default function VaultPanel() {
             warning
           />
         )}
+        </div>
       </aside>
 
-      {/* Main — entries de la collection sélectionnée */}
-      <div className="flex flex-col gap-4">
+      {/* Contenu — titre + entries, dans le bloc centré */}
+      <div className="side-content">
+        <div className="page">
+          <div className="page-content">
+            {children}
+            <div className="flex flex-col gap-4">
         <ExtensionBanner totalCount={totalCount} />
         {/* Toolbar */}
         <div className="form-row" style={{ alignItems: "center" }}>
@@ -531,6 +551,15 @@ export default function VaultPanel() {
             title={t("importBtn")}
           >
             {t("importBtn")}
+          </button>
+          <button
+            type="button"
+            onClick={downloadExport}
+            disabled={exportPending}
+            className="btn btn-ghost"
+            title={t("exportBtn")}
+          >
+            {t("exportBtn")}
           </button>
           <button
             type="button"
@@ -970,6 +999,9 @@ export default function VaultPanel() {
             ))}
           </div>
         )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -998,47 +1030,18 @@ function SidebarItem({
   onRename?: () => void;
   onDelete?: () => void;
 }) {
-  const color = warning ? "#f97316" : muted ? "var(--text-muted)" : "inherit";
   const showActions = Boolean(onRename || onDelete);
+  const cls = ["side-nav-item"];
+  if (active) cls.push("active");
+  if (warning) cls.push("is-warning");
+  else if (muted) cls.push("is-muted");
+  if (showActions) cls.push("vault-sidebar-item");
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        borderRadius: 6,
-        background: active ? "var(--surface-hover, rgba(255,255,255,0.04))" : "transparent",
-      }}
-      className={showActions ? "vault-sidebar-item" : ""}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 10px",
-          background: "transparent",
-          border: "none",
-          color,
-          textAlign: "left",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: active ? 600 : 400,
-          fontFamily: "inherit",
-        }}
-      >
-        {icon}
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {label}
-        </span>
-        <span
-          className="text-muted"
-          style={{ fontSize: 11, fontVariantNumeric: "tabular-nums" }}
-        >
-          {count}
-        </span>
+    <div className={cls.join(" ")}>
+      <button type="button" onClick={onClick} className="side-nav-hit">
+        <span className="side-nav-icon">{icon}</span>
+        <span className="side-nav-label">{label}</span>
+        <span className="side-nav-count">{count}</span>
       </button>
       {onRename && (
         <button
@@ -1047,14 +1050,6 @@ function SidebarItem({
           title="Renommer la collection"
           aria-label={`Renommer ${label}`}
           className="vault-sidebar-action"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: "0 6px",
-            fontSize: 12,
-            color: "var(--muted)",
-          }}
         >
           ✏️
         </button>
@@ -1066,14 +1061,6 @@ function SidebarItem({
           title="Supprimer la collection"
           aria-label={`Supprimer ${label}`}
           className="vault-sidebar-action"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: "0 8px",
-            fontSize: 14,
-            color: "var(--muted)",
-          }}
         >
           ✕
         </button>
@@ -1546,13 +1533,15 @@ function EntryDialog({
                   >
                     <RiShuffleLine size={12} aria-hidden /> {t("generator.refreshBtn")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {showPassword ? t("hideBtn") : t("revealBtn")}
-                  </button>
+                  {(pwdLoaded || password !== "") && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="btn btn-ghost btn-xs"
+                    >
+                      {showPassword ? t("hideBtn") : t("revealBtn")}
+                    </button>
+                  )}
                 </div>
               </div>
               <input
@@ -1592,13 +1581,15 @@ function EntryDialog({
                       {t("form.loadCurrentBtn")}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setShowTotpSecret((v) => !v)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {showTotpSecret ? t("hideBtn") : t("revealBtn")}
-                  </button>
+                  {(totpLoaded || totpSecret !== "") && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTotpSecret((v) => !v)}
+                      className="btn btn-ghost btn-xs"
+                    >
+                      {showTotpSecret ? t("hideBtn") : t("revealBtn")}
+                    </button>
+                  )}
                 </div>
               </div>
               <input
@@ -1747,7 +1738,7 @@ function MoveDialog({
   const t = useTranslations("vault");
   const [destinations, setDestinations] = useState<Destinations | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [scope, setScope] = useState<"team_org" | "team_project">("team_org");
+  const [scope, setScope] = useState<"team_org" | "team_project" | "project_account">("team_org");
   const [parentSlug, setParentSlug] = useState<string>("");
   const [collectionSlug, setCollectionSlug] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -1776,9 +1767,11 @@ function MoveDialog({
   const parentOptions = scope === "team_org" ? orgs : projects;
   const selectedParent = parentOptions.find((p) => p.slug === parentSlug);
   const collections = selectedParent?.collections ?? [];
+  // Cible « compte de projet » (AppAccount) : pas de collection ; url + 2FA perdus.
+  const isAccountTarget = scope === "project_account";
 
   // Reset cascade quand l'utilisateur change de scope.
-  function changeScope(next: "team_org" | "team_project") {
+  function changeScope(next: "team_org" | "team_project" | "project_account") {
     setScope(next);
     setParentSlug("");
     setCollectionSlug("");
@@ -1793,18 +1786,23 @@ function MoveDialog({
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!parentSlug || !collectionSlug) {
+    if (!parentSlug || (!isAccountTarget && !collectionSlug)) {
       setError(t("move.noDestError"));
       return;
     }
     setError(null);
     startTransition(async () => {
-      const body: Record<string, string> = {
-        target: scope,
-        collectionSlug,
-      };
-      if (scope === "team_org") body.orgSlug = parentSlug;
-      else body.projectSlug = parentSlug;
+      const body: Record<string, string> = { target: scope };
+      if (scope === "team_org") {
+        body.orgSlug = parentSlug;
+        body.collectionSlug = collectionSlug;
+      } else if (scope === "team_project") {
+        body.projectSlug = parentSlug;
+        body.collectionSlug = collectionSlug;
+      } else {
+        // project_account : pas de collection
+        body.projectSlug = parentSlug;
+      }
 
       const res = await fetch(`/api/vault/entries/${entry.id}/move`, {
         method: "POST",
@@ -1818,10 +1816,10 @@ function MoveDialog({
         setError(data?.error ?? t("deleteError"));
         return;
       }
-      const label = `${selectedParent?.name ?? parentSlug} / ${
-        collections.find((c) => c.slug === collectionSlug)?.name ??
-        collectionSlug
-      }`;
+      const parentName = selectedParent?.name ?? parentSlug;
+      const label = isAccountTarget
+        ? `${parentName} / ${t("move.scopeAccount")}`
+        : `${parentName} / ${collections.find((c) => c.slug === collectionSlug)?.name ?? collectionSlug}`;
       onMoved(label);
     });
   }
@@ -1897,6 +1895,24 @@ function MoveDialog({
                     />
                     {t("move.scopeProject")}
                   </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="scope"
+                      value="project_account"
+                      checked={scope === "project_account"}
+                      onChange={() => changeScope("project_account")}
+                    />
+                    {t("move.scopeAccount")}
+                  </label>
                 </div>
               </div>
 
@@ -1913,7 +1929,7 @@ function MoveDialog({
                   {parentOptions.map((p) => (
                     <option key={p.slug} value={p.slug}>
                       {p.name}
-                      {p.collections.length === 0 ? t("move.noCollectionSuffix") : ""}
+                      {!isAccountTarget && p.collections.length === 0 ? t("move.noCollectionSuffix") : ""}
                     </option>
                   ))}
                 </select>
@@ -1926,28 +1942,43 @@ function MoveDialog({
                 )}
               </div>
 
-              <div className="field">
-                <label>{t("move.collectionLabel")}</label>
-                <select
-                  value={collectionSlug}
-                  onChange={(e) => setCollectionSlug(e.target.value)}
-                  className="select"
-                  required
-                  disabled={!parentSlug || collections.length === 0}
+              {isAccountTarget ? (
+                <div
+                  style={{
+                    background: "rgba(234,179,8,0.08)",
+                    border: "1px solid rgba(234,179,8,0.3)",
+                    borderRadius: 6,
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                  }}
                 >
-                  <option value="">{t("move.selectPlaceholder")}</option>
-                  {collections.map((c) => (
-                    <option key={c.slug} value={c.slug}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                {parentSlug && collections.length === 0 && (
-                  <div className="help" style={{ marginTop: 6 }}>
-                    {t("move.noEditorCollections")}
-                  </div>
-                )}
-              </div>
+                  {t("move.accountWarning")}
+                </div>
+              ) : (
+                <div className="field">
+                  <label>{t("move.collectionLabel")}</label>
+                  <select
+                    value={collectionSlug}
+                    onChange={(e) => setCollectionSlug(e.target.value)}
+                    className="select"
+                    required
+                    disabled={!parentSlug || collections.length === 0}
+                  >
+                    <option value="">{t("move.selectPlaceholder")}</option>
+                    {collections.map((c) => (
+                      <option key={c.slug} value={c.slug}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  {parentSlug && collections.length === 0 && (
+                    <div className="help" style={{ marginTop: 6 }}>
+                      {t("move.noEditorCollections")}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {error && <p className="error-text">{error}</p>}
             </div>
@@ -1961,7 +1992,7 @@ function MoveDialog({
               </button>
               <button
                 type="submit"
-                disabled={pending || !parentSlug || !collectionSlug}
+                disabled={pending || !parentSlug || (!isAccountTarget && !collectionSlug)}
                 className="btn btn-primary btn-sm"
               >
                 {pending ? t("move.movingBtn") : t("move.moveBtn")}

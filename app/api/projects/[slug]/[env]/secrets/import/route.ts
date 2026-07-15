@@ -35,6 +35,7 @@ import { logAction } from "@/lib/audit";
 import { createSecretVersion } from "@/lib/versioning";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
 import { parseEnv } from "@/lib/env-parser";
+import { triggerSync } from "@/lib/sync/dispatch";
 
 type Params = { params: Promise<{ slug: string; env: string }> };
 
@@ -240,6 +241,14 @@ export async function POST(req: Request, { params }: Params) {
     },
     req,
   });
+
+  // Sync sortante (fire-and-forget) — uniquement si l'import a modifié l'env.
+  if (created > 0 || updated > 0) {
+    void triggerSync(access.tenantSlug, access.environment.id, "secret_import", {
+      userId: access.user.id,
+      email: access.user.email,
+    });
+  }
 
   return NextResponse.json({
     dryRun: false,

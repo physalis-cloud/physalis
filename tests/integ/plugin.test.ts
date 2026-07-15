@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generate as totpGenerate } from "otplib";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import {
   Session,
@@ -19,8 +19,16 @@ import {
   BASE_URL,
   postJson,
   deleteReq,
+  TENANT_SCHEMA,
+  TENANT_SLUG,
 } from "./helpers/api";
 import { execSql } from "./helpers/db";
+
+// Les INSERT/SELECT/UPDATE directs ciblent le schema du tenant de test
+// (client_test), pas `public` : l'app est multi-tenant et `loginAs` se
+// connecte au tenant `test`. Sans qualification, le user seede dans public
+// est invisible au login → 401.
+const T = `"${TENANT_SCHEMA}".`;
 
 const SUFFIX = `${Date.now()}`;
 const PLUGIN_USER_EMAIL = `plugin-${SUFFIX}@test.local`;
@@ -49,15 +57,15 @@ async function provisionUserWith2FA(): Promise<void> {
   const passwordHash = await bcrypt.hash(PLUGIN_USER_PASSWORD, 12);
 
   await execSql(
-    `INSERT INTO "User" (id, email, password, role, "createdAt")
+    `INSERT INTO ${T}"User" (id, email, password, role, "createdAt")
      VALUES ('${userIdLocal}', '${PLUGIN_USER_EMAIL}', '${passwordHash}', 'MEMBER', NOW())`,
   );
   await execSql(
-    `INSERT INTO "Organization" (id, name, slug, "createdAt")
+    `INSERT INTO ${T}"Organization" (id, name, slug, "createdAt")
      VALUES ('${orgIdLocal}', 'plugin org', 'plugin-${SUFFIX}', NOW())`,
   );
   await execSql(
-    `INSERT INTO "OrgMember" (id, "userId", "organizationId", role, "createdAt")
+    `INSERT INTO ${T}"OrgMember" (id, "userId", "organizationId", role, "createdAt")
      VALUES ('${memIdLocal}', '${userIdLocal}', '${orgIdLocal}', 'OWNER', NOW())`,
   );
   userId = userIdLocal;
@@ -84,12 +92,12 @@ async function provisionUserWith2FA(): Promise<void> {
   // Cree un projet + service avec URL stripe.com pour les tests de match.
   const projIdLocal = "ck" + randomBytes(11).toString("hex");
   await execSql(
-    `INSERT INTO "Project" (id, name, slug, "organizationId", "createdAt")
+    `INSERT INTO ${T}"Project" (id, name, slug, "organizationId", "createdAt")
      VALUES ('${projIdLocal}', 'plugin-proj', 'plugin-proj-${SUFFIX}', '${orgIdLocal}', NOW())`,
   );
   const pmId = "ck" + randomBytes(11).toString("hex");
   await execSql(
-    `INSERT INTO "ProjectMember" (id, "userId", "projectId", role)
+    `INSERT INTO ${T}"ProjectMember" (id, "userId", "projectId", role)
      VALUES ('${pmId}', '${userIdLocal}', '${projIdLocal}', 'OWNER')`,
   );
   projectId = projIdLocal;
@@ -101,41 +109,53 @@ async function pluginFetch(
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (!init?.skipOrigin) headers.set("origin", TEST_ORIGIN);
+  // IP simulee unique par appel : isole le bucket rate-limit de /api/plugin/auth
+  // (5/15min/IP). Sans ca, les multiples (re)auth de la suite partagent l'IP du
+  // host docker et se font 429, ce qui casse aussi les beforeAll qui re-authent.
+  if (!headers.has("x-forwarded-for")) {
+    headers.set(
+      "x-forwarded-for",
+      `198.51.100.${Math.floor(Math.random() * 254) + 1}`,
+    );
+  }
   return fetch(`${BASE_URL}${path}`, {
     ...init,
     headers,
   });
 }
 
-let pluginOriginConfigured = false;
+// Probe l'origine en top-level await : doit etre resolu AVANT la collection
+// des tests, car `it.runIf(pluginOriginConfigured)` lit la valeur au moment
+// ou le test est defini (collection), pas a l'execution. Un beforeAll
+// s'executerait trop tard → toute la suite se skipperait a tort.
+const pluginOriginConfigured = await (async () => {
+  try {
+    const probe = await pluginFetch("/api/plugin/auth", { method: "OPTIONS" });
+    return probe.headers.get("access-control-allow-origin") === TEST_ORIGIN;
+  } catch {
+    return false;
+  }
+})();
+
+if (!pluginOriginConfigured) {
+  console.warn(
+    `[plugin.test] PLUGIN_ALLOWED_ORIGIN ne contient pas ${TEST_ORIGIN} ` +
+      `cote app — tests skippe. Ajouter dans .env de la stack puis relancer.`,
+  );
+}
 
 beforeAll(async () => {
-  // Probe : envoyer un OPTIONS preflight, si on recoit Access-Control-Allow-Origin
-  // c'est que PLUGIN_ALLOWED_ORIGIN inclut TEST_ORIGIN cote app.
-  const probe = await pluginFetch("/api/plugin/auth", {
-    method: "OPTIONS",
-  });
-  pluginOriginConfigured =
-    probe.headers.get("access-control-allow-origin") === TEST_ORIGIN;
-
-  if (!pluginOriginConfigured) {
-    console.warn(
-      `[plugin.test] PLUGIN_ALLOWED_ORIGIN ne contient pas ${TEST_ORIGIN} ` +
-        `cote app — tests skippe. Ajouter dans .env de la stack puis relancer.`,
-    );
-    return;
-  }
-
+  if (!pluginOriginConfigured) return;
   await provisionUserWith2FA();
 });
 
 afterAll(async () => {
   if (userId) {
     await execSql(
-      `DELETE FROM "User" WHERE id = '${userId}'`,
+      `DELETE FROM ${T}"User" WHERE id = '${userId}'`,
     ).catch(() => {});
     await execSql(
-      `DELETE FROM "Organization" WHERE id = '${orgId}'`,
+      `DELETE FROM ${T}"Organization" WHERE id = '${orgId}'`,
     ).catch(() => {});
   }
 });
@@ -164,6 +184,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
         skipOrigin: true,
       });
@@ -187,6 +208,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
       });
       expect(res.status).toBe(403);
@@ -215,6 +237,7 @@ describe("/api/plugin/auth", () => {
           email: `nope-${SUFFIX}@test.local`,
           password: "anything",
           totp: "123456",
+          tenantSlug: TENANT_SLUG,
         }),
       });
       expect(res.status).toBe(401);
@@ -231,6 +254,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: "wrong-password",
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
       });
       expect(res.status).toBe(401);
@@ -247,6 +271,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: "000000",
+          tenantSlug: TENANT_SLUG,
         }),
       });
       expect(res.status).toBe(401);
@@ -263,6 +288,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
       });
       expect(res.status).toBe(200);
@@ -285,6 +311,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
           ttl: 7200, // 2h, pas dans la liste autorisée
         }),
       });
@@ -303,6 +330,7 @@ describe("/api/plugin/auth", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
           ttl: 3600,
         }),
       });
@@ -327,6 +355,7 @@ describe("/api/plugin/match", () => {
         email: PLUGIN_USER_EMAIL,
         password: PLUGIN_USER_PASSWORD,
         totp: await totpGenerate({ secret: totpSecret }),
+        tenantSlug: TENANT_SLUG,
       }),
     });
     if (!res.ok) throw new Error(`auth setup: ${res.status}`);
@@ -387,7 +416,12 @@ describe("/api/plugin/match", () => {
   // On cree des entrees vault au runtime via les routes API du user
   // de test (personal + project — l'org demande des privileges OrgADMIN
   // que ce user n'a pas, donc on couvre ce cas via un autre integ test).
-  const vaultDomain = `vault-${SUFFIX}.test.local`;
+  // SUFFIX dans le label enregistrable (et non en sous-domaine) pour que le
+  // matching par eTLD+1 isole vraiment ce domaine des autres : vault-X.com et
+  // other-X.com ont des domaines enregistrables distincts, alors que
+  // vault-X.test.local / other-X.test.local s'effondrent tous deux sur
+  // test.local (cf. lib/domain-match.ts).
+  const vaultDomain = `vault-${SUFFIX}.com`;
   let personalEntryId = "";
   let projectCollectionSlug = "";
 
@@ -445,6 +479,7 @@ describe("/api/plugin/match", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
       });
       // Si rate-limit (5/15min), on skip ce test plutot que de fail.
@@ -503,6 +538,42 @@ describe("/api/plugin/match", () => {
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
           totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
+        }),
+      });
+      if (authRes.status === 429) return;
+      const { sessionToken } = (await authRes.json()) as {
+        sessionToken: string;
+      };
+
+      // Domaine enregistrable distinct (other-X.com != vault-X.com).
+      const res = await pluginFetch(
+        `/api/plugin/match?domain=other-${SUFFIX}.com`,
+        {
+          headers: { authorization: `Bearer ${sessionToken}` },
+        },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { vault: unknown[] };
+      expect(body.vault).toEqual([]);
+    },
+  );
+
+  // ── Test B : matching par domaine enregistrable (eTLD+1) ─────────────
+  // Les entrees sont stockees sous `${vaultDomain}` mais doivent remonter
+  // quand la page est un SOUS-DOMAINE (ex. DatoCMS : entree datocms.com,
+  // login sur oauth.datocms.com).
+  it.runIf(pluginOriginConfigured)(
+    "match par sous-domaine : oauth.<domaine> remonte les entrees de <domaine>",
+    async () => {
+      const authRes = await pluginFetch("/api/plugin/auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: PLUGIN_USER_EMAIL,
+          password: PLUGIN_USER_PASSWORD,
+          totp: await totpGenerate({ secret: totpSecret }),
+          tenantSlug: TENANT_SLUG,
         }),
       });
       if (authRes.status === 429) return;
@@ -511,14 +582,28 @@ describe("/api/plugin/match", () => {
       };
 
       const res = await pluginFetch(
-        `/api/plugin/match?domain=other-${SUFFIX}.test.local`,
+        `/api/plugin/match?domain=oauth.${vaultDomain}`,
         {
           headers: { authorization: `Bearer ${sessionToken}` },
         },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { vault: unknown[] };
-      expect(body.vault).toEqual([]);
+      const body = (await res.json()) as {
+        vault: Array<{ target: string; username: string }>;
+      };
+      // Memes entrees que le match exact : perso + projet.
+      expect(body.vault.length).toBeGreaterThanOrEqual(2);
+      expect(
+        body.vault.some(
+          (v) => v.target === "personal" && v.username === "perso@test.local",
+        ),
+      ).toBe(true);
+      expect(
+        body.vault.some(
+          (v) =>
+            v.target === "team_project" && v.username === "projet@test.local",
+        ),
+      ).toBe(true);
     },
   );
 
@@ -545,10 +630,13 @@ describe("/api/plugin/match", () => {
   it.runIf(pluginOriginConfigured)(
     "Bearer revoque → 401 (revoke via DB direct)",
     async () => {
-      // Revoke directement le token dans la base.
+      // Revoke directement le token dans la base. Le hash est calcule en Node
+      // (SHA-256 hex, cf. lib/plugin-token.ts) plutot qu'en SQL : pgcrypto
+      // (digest()) n'est pas installe sur cette base.
+      const tokenHash = createHash("sha256").update(pluginToken).digest("hex");
       await execSql(
-        `UPDATE "PluginToken" SET "revokedAt" = NOW() WHERE "tokenHash" = encode(digest('${pluginToken}', 'sha256'), 'hex')`,
-      ).catch(() => {});
+        `UPDATE ${T}"PluginToken" SET "revokedAt" = NOW() WHERE "tokenHash" = '${tokenHash}'`,
+      );
       const res = await pluginFetch("/api/plugin/match?domain=stripe.com", {
         headers: { authorization: `Bearer ${pluginToken}` },
       });
@@ -635,6 +723,7 @@ describe("/api/plugin/vault — auto-save credentials", () => {
         email: PLUGIN_USER_EMAIL,
         password: PLUGIN_USER_PASSWORD,
         totp: await totpGenerate({ secret: totpSecret }),
+        tenantSlug: TENANT_SLUG,
       }),
     });
     if (auth.status === 429) return; // rate-limit, skip ce bloc
@@ -735,14 +824,16 @@ describe("/api/plugin/vault — auto-save credentials", () => {
 
       // Verifie que le password est bien chiffre en base (pas en clair).
       const rows = await execSql(
-        `SELECT "encryptedPassword", "passwordIv", "passwordTag" FROM "VaultEntry" WHERE id = '${body.id}'`,
+        `SELECT "encryptedPassword", "passwordIv", "passwordTag" FROM ${T}"VaultEntry" WHERE id = '${body.id}'`,
       );
-      expect(rows).toMatch(/encryptedPassword/);
+      // psql -At (tuples-only) renvoie les valeurs, pas les noms de colonnes :
+      // on verifie la forme chiffree (3 segments base64 separes par |).
+      expect(rows).toMatch(/^[^|]+\|[^|]+\|[^|]+$/);
       expect(rows).not.toContain("auto-secret-1234");
 
       // Audit log avec origin et domain.
       const audit = await execSql(
-        `SELECT metadata::text FROM "AccessLog" WHERE action = 'VAULT_ENTRY_CREATE' AND "targetId" = '${body.id}' ORDER BY "createdAt" DESC LIMIT 1`,
+        `SELECT metadata::text FROM ${T}"AccessLog" WHERE action = 'VAULT_ENTRY_CREATE' AND "targetId" = '${body.id}' ORDER BY "createdAt" DESC LIMIT 1`,
       );
       expect(audit).toContain("plugin_autosave");
       expect(audit).toContain("autosave.test.local");
@@ -804,11 +895,11 @@ describe("/api/plugin/vault — auto-save credentials", () => {
       const otherUserId = "ck" + randomBytes(11).toString("hex");
       const otherEntryId = "ck" + randomBytes(11).toString("hex");
       await execSql(
-        `INSERT INTO "User" (id, email, password, role, "createdAt")
+        `INSERT INTO ${T}"User" (id, email, password, role, "createdAt")
          VALUES ('${otherUserId}', 'other-${SUFFIX}@test.local', 'x', 'MEMBER', NOW())`,
       );
       await execSql(
-        `INSERT INTO "VaultEntry" (id, "userId", name, "createdAt", "updatedAt")
+        `INSERT INTO ${T}"VaultEntry" (id, "userId", name, "createdAt", "updatedAt")
          VALUES ('${otherEntryId}', '${otherUserId}', 'other entry', NOW(), NOW())`,
       );
 
@@ -829,7 +920,7 @@ describe("/api/plugin/vault — auto-save credentials", () => {
       expect(res.status).toBe(404);
 
       await execSql(
-        `DELETE FROM "User" WHERE id = '${otherUserId}'`,
+        `DELETE FROM ${T}"User" WHERE id = '${otherUserId}'`,
       ).catch(() => {});
     },
   );
@@ -859,7 +950,7 @@ describe("/api/plugin/vault — auto-save credentials", () => {
       const body = (await res.json()) as { id: string };
 
       const audit = await execSql(
-        `SELECT metadata::text FROM "AccessLog" WHERE action = 'VAULT_ENTRY_CREATE' AND "targetId" = '${body.id}' ORDER BY "createdAt" DESC LIMIT 1`,
+        `SELECT metadata::text FROM ${T}"AccessLog" WHERE action = 'VAULT_ENTRY_CREATE' AND "targetId" = '${body.id}' ORDER BY "createdAt" DESC LIMIT 1`,
       );
       expect(audit).toContain("plugin_autosave");
       expect(audit).toContain('"source": "project"');

@@ -5,9 +5,13 @@ import { useTranslations } from "next-intl";
 import {
   RiDownload2Line,
   RiFolderOpenLine,
+  RiKey2Line,
   RiShuffleLine,
 } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
 import { generatePassword } from "@/lib/generate-password";
+import { useConfirm } from "@/components/ConfirmDialog";
+import ImmediateRotationSection from "@/components/ImmediateRotationSection";
 import TeamVaultImportDialog from "./team-vault-import-dialog";
 import RenameCollectionDialog from "./rename-collection-dialog";
 
@@ -65,11 +69,14 @@ function initials(name: string): string {
 export default function TeamVaultPanel({
   scope,
   canCreate,
+  rotationFeatureEnabled,
 }: {
   scope: TeamVaultScope;
   canCreate: boolean;
+  rotationFeatureEnabled: boolean;
 }) {
   const t = useTranslations("vault.teamVault");
+  const confirm = useConfirm();
   const [collections, setCollections] = useState<Collection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
@@ -109,7 +116,7 @@ export default function TeamVaultPanel({
   }
 
   async function removeCollection(c: Collection) {
-    if (!confirm(t("deleteConfirm", { name: c.name })))
+    if (!(await confirm({ message: t("deleteConfirm", { name: c.name }), danger: true })))
       return;
     const res = await fetch(`${basePath(scope)}/${c.slug}`, {
       method: "DELETE",
@@ -125,16 +132,19 @@ export default function TeamVaultPanel({
   return (
     <div className="flex flex-col gap-4">
       <div className="section-header">
-        <p className="help" style={{ marginRight: 12 }}>
-          {scope.kind === "org"
-            ? t("scopeOrg")
-            : t("scopeProject")}
-        </p>
-        {canCreate && (
+        <div>
+          <h2 className="section-title">
+            {scope.kind === "org" ? t("titleOrg") : t("titleProject")}
+          </h2>
+          <p className="panel-subtitle">
+            {scope.kind === "org" ? t("scopeOrg") : t("scopeProject")}
+          </p>
+        </div>
+        {canCreate && collections && collections.length > 0 && (
           <button
             type="button"
             onClick={() => setCreating(true)}
-            className="btn btn-primary btn-sm"
+            className="btn btn-primary"
           >
             {t("newCollectionBtn")}
           </button>
@@ -154,15 +164,23 @@ export default function TeamVaultPanel({
 
       {collections === null ? (
         <p className="help">{t("loading")}</p>
-      ) : collections.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("noCollections")}</div>
-          <div>
-            {canCreate
-              ? t("noCollectionsCreate")
-              : t("noCollectionsAccess")}
-          </div>
-        </div>
+      ) : collections.length === 0 && !creating ? (
+        <EmptyCard
+          icon={<RiFolderOpenLine size={22} aria-hidden />}
+          title={t("noCollections")}
+          hint={canCreate ? undefined : t("noCollectionsAccess")}
+          action={
+            canCreate && !creating ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setCreating(true)}
+              >
+                {t("newCollectionBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {collections.map((c) => (
@@ -221,6 +239,7 @@ export default function TeamVaultPanel({
                   allCollections={collections ?? []}
                   onDeleted={() => removeCollection(c)}
                   onChanged={reload}
+                  rotationFeatureEnabled={rotationFeatureEnabled}
                 />
               )}
             </div>
@@ -265,14 +284,14 @@ function CreateCollectionForm({
       <button
         type="submit"
         disabled={pending || !name.trim()}
-        className="btn btn-primary btn-sm"
+        className="btn btn-primary btn-primary-form"
       >
         {pending ? "..." : t("newCollectionBtn")}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="btn btn-ghost btn-sm"
+        className="btn btn-ghost btn-primary-form"
       >
         {t("cancelBtn")}
       </button>
@@ -286,6 +305,7 @@ function CollectionDetail({
   allCollections,
   onDeleted,
   onChanged,
+  rotationFeatureEnabled,
 }: {
   scope: TeamVaultScope;
   collection: Collection;
@@ -294,9 +314,11 @@ function CollectionDetail({
   allCollections: Collection[];
   onDeleted: () => void;
   onChanged: () => void;
+  rotationFeatureEnabled: boolean;
 }) {
   const t = useTranslations("vault.teamVault");
   const tv = useTranslations("vault");
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [showMembers, setShowMembers] = useState(false);
@@ -304,6 +326,7 @@ function CollectionDetail({
   const [importing, setImporting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
+  const [rotationConfigTarget, setRotationConfigTarget] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canEdit = ROLE_RANK[collection.role] >= ROLE_RANK.EDITOR;
@@ -361,7 +384,7 @@ function CollectionDetail({
   }
 
   async function remove(e: Entry) {
-    if (!confirm(t("deleteConfirm", { name: e.name }))) return;
+    if (!(await confirm({ message: t("deleteConfirm", { name: e.name }), danger: true }))) return;
     const res = await fetch(`${entryBase}/${e.id}`, { method: "DELETE" });
     if (!res.ok) return setError(t("deleteError"));
     setRevealed((r) => {
@@ -387,7 +410,7 @@ function CollectionDetail({
     >
       <div className="section-header">
         <div className="flex items-center gap-2">
-          {canEdit && (
+          {canEdit && entries && entries.length > 0 && (
             <button
               type="button"
               onClick={() => setAdding(true)}
@@ -505,12 +528,33 @@ function CollectionDetail({
         />
       )}
 
+      {rotationConfigTarget && (
+        <EntryRotationDialog
+          endpoint={`${entryBase}/${rotationConfigTarget.id}/rotation`}
+          name={rotationConfigTarget.name}
+          onClose={() => setRotationConfigTarget(null)}
+          onRotated={reload}
+        />
+      )}
+
       {entries === null ? (
         <p className="help">{t("loading")}</p>
-      ) : entries.length === 0 ? (
-        <p className="help" style={{ fontStyle: "italic" }}>
-          {tv("form.emptyCategoryHint")}
-        </p>
+      ) : entries.length === 0 && !adding ? (
+        <EmptyCard
+          icon={<RiKey2Line size={22} aria-hidden />}
+          title={tv("form.emptyCategoryHint")}
+          action={
+            canEdit && !adding ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAdding(true)}
+              >
+                {t("addEntryBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {entries.map((e) => (
@@ -598,6 +642,15 @@ function CollectionDetail({
                     >
                       {tv("editBtn")}
                     </button>
+                    {rotationFeatureEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setRotationConfigTarget({ id: e.id, name: e.name })}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {t("rotationBtn")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => remove(e)}
@@ -624,6 +677,7 @@ function MembersSection({
   collectionSlug: string;
 }) {
   const t = useTranslations("vault.teamVault");
+  const confirm = useConfirm();
   const [members, setMembers] = useState<Member[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -670,7 +724,7 @@ function MembersSection({
   }
 
   async function remove(m: Member) {
-    if (!confirm(`Retirer ${m.email} de cette collection ?`)) return;
+    if (!(await confirm({ message: `Retirer ${m.email} de cette collection ?`, danger: true }))) return;
     const res = await fetch(`${base}/${m.userId}`, { method: "DELETE" });
     if (!res.ok) return setError(t("deleteError"));
     reload();
@@ -980,13 +1034,15 @@ function EntryDialog({
                   >
                     <RiShuffleLine size={12} aria-hidden /> {t("generator.refreshBtn")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {showPassword ? t("hideBtn") : t("revealBtn")}
-                  </button>
+                  {(pwdLoaded || password !== "") && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="btn btn-ghost btn-xs"
+                    >
+                      {showPassword ? t("hideBtn") : t("revealBtn")}
+                    </button>
+                  )}
                 </div>
               </div>
               <input
@@ -1022,13 +1078,15 @@ function EntryDialog({
                       {t("form.loadCurrentBtn")}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setShowTotpSecret((v) => !v)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {showTotpSecret ? t("hideBtn") : t("revealBtn")}
-                  </button>
+                  {(totpLoaded || totpSecret !== "") && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTotpSecret((v) => !v)}
+                      className="btn btn-ghost btn-xs"
+                    >
+                      {showTotpSecret ? t("hideBtn") : t("revealBtn")}
+                    </button>
+                  )}
                 </div>
               </div>
               <input
@@ -1141,6 +1199,99 @@ function EntryDialog({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Modale rotation d'une entrée de coffre : config du rappel (activer + intervalle)
+// + section « Rotation immédiate » (assistée) dans la même modale.
+function EntryRotationDialog({
+  endpoint,
+  name,
+  onClose,
+  onRotated,
+}: {
+  endpoint: string;
+  name: string;
+  onClose: () => void;
+  onRotated?: () => void;
+}) {
+  const t = useTranslations("vault.teamVault");
+  const [loaded, setLoaded] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [intervalDays, setIntervalDays] = useState("30");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    fetch(endpoint)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d: { rotation: { rotationEnabled: boolean; rotationIntervalDays: number | null } }) => {
+        setEnabled(d.rotation.rotationEnabled);
+        if (d.rotation.rotationIntervalDays) setIntervalDays(String(d.rotation.rotationIntervalDays));
+      })
+      .catch(() => null)
+      .finally(() => setLoaded(true));
+  }, [endpoint]);
+
+  function save(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          rotationEnabled: enabled,
+          rotationIntervalDays: enabled && intervalDays ? Number(intervalDays) : null,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(data?.error ?? t("rotationSaveError"));
+        return;
+      }
+      onClose();
+    });
+  }
+
+  return (
+    <div className="dialog-overlay" onClick={onClose}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="dialog-header">
+          <h2 className="dialog-title">{t("rotationTitle", { name })}</h2>
+          <button type="button" onClick={onClose} className="dialog-close" aria-label={t("rotationCancelBtn")}>✕</button>
+        </div>
+        <div className="dialog-body">
+          {!loaded ? (
+            <p className="help">{t("rotationLoading")}</p>
+          ) : (
+            <form onSubmit={save} className="flex flex-col gap-4">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={pending} />
+                <span>{t("rotationEnable")}</span>
+              </label>
+              {enabled && (
+                <div className="field">
+                  <label>{t("rotationInterval")}</label>
+                  <input type="number" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} min={1} max={3650} className="input" style={{ maxWidth: 120 }} disabled={pending} />
+                </div>
+              )}
+              <p className="help" style={{ fontSize: 12 }}>{t("rotationHelp")}</p>
+              {error && <p className="error-text">{error}</p>}
+              <ImmediateRotationSection endpoint={endpoint} payloadKey="newPassword" onDone={onRotated} />
+              <div className="flex items-center gap-2">
+                <button type="submit" disabled={pending} className="btn btn-primary btn-sm">
+                  {pending ? t("rotationSavingBtn") : t("rotationSaveBtn")}
+                </button>
+                <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" disabled={pending}>
+                  {t("rotationCancelBtn")}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

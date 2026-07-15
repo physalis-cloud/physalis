@@ -85,12 +85,14 @@ Un VPS secondaire reçoit chaque nuit une copie chiffrée de la base de données
 
 ```bash
 cp .env.example .env
-# Renseigner ENCRYPTION_KEY, AUTH_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+# Renseigner les valeurs vides : ENCRYPTION_KEY, AUTH_SECRET, NEXTAUTH_SECRET,
+#   DB_PASSWORD, ADMIN_PASSWORD (ADMIN_EMAIL a un défaut).
+#   ENCRYPTION_KEY = openssl rand -hex 32 ; les secrets = openssl rand -base64 32.
 docker compose up -d --build
 ```
 
-→ http://localhost:3001 (3000 réservé sur certains hôtes ; ajustable dans
-[docker-compose.yml](docker-compose.yml)).
+→ http://localhost:3001 (port par défaut ; 3000 souvent déjà pris — ajustable
+via `PORT` dans `.env`, en alignant `NEXTAUTH_URL` sur le même port).
 
 Le premier démarrage applique les migrations Prisma et crée l'admin défini par
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` ([scripts/bootstrap-admin.mjs](scripts/bootstrap-admin.mjs)).

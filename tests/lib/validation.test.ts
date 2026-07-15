@@ -13,6 +13,11 @@ import {
   isValidWorkflowFile,
   isValidGitBranch,
   defaultDeployPath,
+  isValidGitlabProjectPath,
+  isValidBitbucketRepoUuid,
+  isValidCiEnvironmentName,
+  isValidGitlabIssuer,
+  isValidBitbucketIssuer,
 } from "@/lib/validation";
 
 describe("lib/api — fonctions pures", () => {
@@ -276,6 +281,81 @@ describe("lib/api — fonctions pures", () => {
       expect(isValidGitBranch("/main")).toBe(false);
       expect(isValidGitBranch("ma in")).toBe(false);
       expect(isValidGitBranch("")).toBe(false);
+    });
+  });
+
+  describe("isValidGitlabProjectPath", () => {
+    it("accepte group/project et sous-groupes", () => {
+      expect(isValidGitlabProjectPath("acme/web")).toBe(true);
+      expect(isValidGitlabProjectPath("acme/team/web")).toBe(true);
+      expect(isValidGitlabProjectPath("a-b_c.d/proj.ect")).toBe(true);
+    });
+    it("refuse un segment unique, vide, ou les bordures invalides", () => {
+      expect(isValidGitlabProjectPath("web")).toBe(false);
+      expect(isValidGitlabProjectPath("acme/")).toBe(false);
+      expect(isValidGitlabProjectPath("/web")).toBe(false);
+      expect(isValidGitlabProjectPath("acme//web")).toBe(false);
+      expect(isValidGitlabProjectPath("")).toBe(false);
+      expect(isValidGitlabProjectPath("acme/we b")).toBe(false);
+    });
+  });
+
+  describe("isValidBitbucketRepoUuid", () => {
+    it("accepte un UUID avec ou sans accolades", () => {
+      expect(
+        isValidBitbucketRepoUuid("{11111111-2222-3333-4444-555555555555}"),
+      ).toBe(true);
+      expect(
+        isValidBitbucketRepoUuid("11111111-2222-3333-4444-555555555555"),
+      ).toBe(true);
+    });
+    it("refuse les non-UUID", () => {
+      expect(isValidBitbucketRepoUuid("acme/web")).toBe(false);
+      expect(isValidBitbucketRepoUuid("{not-a-uuid}")).toBe(false);
+      expect(isValidBitbucketRepoUuid("")).toBe(false);
+    });
+  });
+
+  describe("isValidCiEnvironmentName", () => {
+    it("accepte vide (wildcard) et des noms usuels", () => {
+      expect(isValidCiEnvironmentName("")).toBe(true);
+      expect(isValidCiEnvironmentName("production")).toBe(true);
+      expect(isValidCiEnvironmentName("review/feature-1")).toBe(true);
+    });
+    it("refuse les caractères de contrôle / trop long", () => {
+      expect(isValidCiEnvironmentName(" leadingspace")).toBe(false);
+      expect(isValidCiEnvironmentName("a".repeat(101))).toBe(false);
+    });
+  });
+
+  describe("isValidGitlabIssuer", () => {
+    it("accepte vide (gitlab.com) et une URL https d'instance", () => {
+      expect(isValidGitlabIssuer("")).toBe(true);
+      expect(isValidGitlabIssuer("https://gitlab.acme.io")).toBe(true);
+      expect(isValidGitlabIssuer("https://gitlab.acme.io:8443")).toBe(true);
+    });
+    it("refuse http et le non-URL", () => {
+      expect(isValidGitlabIssuer("http://gitlab.acme.io")).toBe(false);
+      expect(isValidGitlabIssuer("gitlab.acme.io")).toBe(false);
+    });
+  });
+
+  describe("isValidBitbucketIssuer", () => {
+    it("accepte l'URL OIDC du workspace", () => {
+      expect(
+        isValidBitbucketIssuer(
+          "https://api.bitbucket.org/2.0/workspaces/acme/pipelines-config/identity/oidc",
+        ),
+      ).toBe(true);
+    });
+    it("refuse une URL qui ne suit pas le pattern", () => {
+      expect(isValidBitbucketIssuer("")).toBe(false);
+      expect(isValidBitbucketIssuer("https://gitlab.acme.io")).toBe(false);
+      expect(
+        isValidBitbucketIssuer(
+          "https://api.bitbucket.org/2.0/workspaces/acme/pipelines-config/identity/oidc/extra",
+        ),
+      ).toBe(false);
     });
   });
 });

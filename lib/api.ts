@@ -31,7 +31,7 @@ const PROJECT_ROLE_RANK: Record<ProjectRole, number> = {
 export const CURRENT_ORG_COOKIE = "sv-current-org";
 
 export async function requireUser(): Promise<
-  { user: AuthedUser } | { error: NextResponse }
+  { user: AuthedUser; tenantSlug: string | null } | { error: NextResponse }
 > {
   const session = await auth();
   if (!session?.user?.id) {
@@ -64,6 +64,9 @@ export async function requireUser(): Promise<
       role: session.user.role,
       loginAt,
     },
+    // Mono-tenant : pas de tenant. Champ porté à null pour que le code
+    // SaaS coulé verbatim (qui lit `.tenantSlug`) compile sans overlay.
+    tenantSlug: null as string | null,
   };
 }
 
@@ -128,7 +131,7 @@ export async function requireOrgMember(
     };
   }
 
-  return { user, organization, role: effectiveRole };
+  return { user, organization, role: effectiveRole, tenantSlug: null as string | null };
 }
 
 /**
@@ -196,7 +199,7 @@ export async function requireProjectMember(
     };
   }
 
-  return { user, project, role: effectiveRole, orgRole };
+  return { user, project, role: effectiveRole, orgRole, tenantSlug: null as string | null };
 }
 
 export async function requireEnvironment(

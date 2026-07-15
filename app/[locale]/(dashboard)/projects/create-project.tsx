@@ -37,7 +37,7 @@ export default function CreateProjectForm() {
       <div className="create-card-title">{t("createForm.title")}</div>
       <div className="form-row">
         <div className="field">
-          <label>{t("createForm.nameLabel")}</label>
+          <label style={{ marginLeft: 4 }}>{t("createForm.nameLabel")}</label>
           <input
             required
             value={name}
@@ -49,14 +49,11 @@ export default function CreateProjectForm() {
         <button
           type="submit"
           disabled={pending || name.trim().length === 0}
-          className="btn btn-primary"
+          className="btn btn-primary btn-primary-form"
         >
           {pending ? t("createForm.creatingBtn") : t("createForm.submitBtn")}
         </button>
       </div>
-      <p className="help" style={{ marginTop: 10 }}>
-        {t("createForm.hint")}
-      </p>
       {error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}
     </form>
   );

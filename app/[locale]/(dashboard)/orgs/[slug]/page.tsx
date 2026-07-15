@@ -24,6 +24,7 @@ export default async function OrgPage({
       id: true,
       name: true,
       slug: true,
+      isPrimary: true,
       rotationFeatureEnabled: true,
       members: { where: { userId: session.user.id }, select: { role: true } },
       _count: { select: { projects: true, members: true } },
@@ -71,6 +72,12 @@ export default async function OrgPage({
           slug={org.slug}
           orgName={org.name}
           role={role}
+          isPrimary={org.isPrimary}
+          // Rotation = feature exclue du build self-host (org-rotation-panel +
+          // rotation-cron denylistés) → toujours désactivée, quel que soit le
+          // flag en base.
+          rotationFeatureEnabled={false}
+          rotationPaidPlan={false}
         />
       </div>
     </div>

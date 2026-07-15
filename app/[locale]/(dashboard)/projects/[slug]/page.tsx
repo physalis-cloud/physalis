@@ -26,6 +26,8 @@ export default async function ProjectPage({
       slug: true,
       githubRepo: true,
       githubWorkflow: true,
+      ciConnectionId: true,
+      ciRepo: true,
       organizationId: true,
       members: { where: { userId: session.user.id } },
       organization: {
@@ -116,6 +118,8 @@ export default async function ProjectPage({
           orgSlug={orgSlug}
           githubRepo={project.githubRepo}
           githubWorkflow={project.githubWorkflow}
+          ciConnectionId={project.ciConnectionId}
+          ciRepo={project.ciRepo}
           environments={project.environments.map((e) => ({
             id: e.id,
             name: e.name,

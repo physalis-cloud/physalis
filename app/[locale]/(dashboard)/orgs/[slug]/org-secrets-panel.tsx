@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { OrgRole } from "@prisma/client";
 import { RiHistoryLine, RiKey2Line } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
 import SecretHistoryDialog from "@/components/SecretHistoryDialog";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type SecretListItem = {
   key: string;
@@ -38,13 +40,6 @@ const ORG_ROLE_RANK: Record<OrgRole, number> = {
   OWNER: 5,
 };
 
-const RESERVED_KEYS = new Set([
-  "GITHUB_DISPATCH_TOKEN",
-  "REGISTRY_PAT",
-  "REGISTRY_USER",
-  "REGISTRY_URL",
-]);
-
 export default function OrgSecretsPanel({
   slug,
   role,
@@ -53,6 +48,7 @@ export default function OrgSecretsPanel({
   role: OrgRole;
 }) {
   const t = useTranslations("orgs.secrets");
+  const confirm = useConfirm();
   const [secrets, setSecrets] = useState<SecretListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -108,7 +104,7 @@ export default function OrgSecretsPanel({
   }
 
   async function remove(key: string) {
-    if (!confirm(t("deleteConfirm", { key }))) return;
+    if (!(await confirm({ message: t("deleteConfirm", { key }), danger: true }))) return;
     const res = await fetch(
       `/api/orgs/${slug}/secrets/${encodeURIComponent(key)}`,
       { method: "DELETE" },
@@ -141,13 +137,8 @@ export default function OrgSecretsPanel({
           <p className="help" style={{ marginTop: 4 }}>
             {t("desc")}
           </p>
-          <ul className="help" style={{ marginTop: 4, paddingLeft: 18 }}>
-            <li>{t("reserved1")}</li>
-            <li>{t("reserved2")}</li>
-            <li>{t("reserved3")}</li>
-          </ul>
         </div>
-        {!adding && canManage && (
+        {!adding && canManage && secrets && secrets.length > 0 && (
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -175,10 +166,22 @@ export default function OrgSecretsPanel({
 
       {secrets === null ? (
         <p className="help">{t("loading")}</p>
-      ) : secrets.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("empty")}</div>
-        </div>
+      ) : secrets.length === 0 && !adding ? (
+        <EmptyCard
+          icon={<RiKey2Line size={22} aria-hidden />}
+          title={t("empty")}
+          action={
+            canManage && !adding ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAdding(true)}
+              >
+                {t("addBtn")}
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {secrets.map((s) =>
@@ -205,11 +208,6 @@ export default function OrgSecretsPanel({
                 <div className="row-info">
                   <div className="row-name code-mono flex items-center gap-2">
                     {s.key}
-                    {RESERVED_KEYS.has(s.key) && (
-                      <span className="chip chip-active">
-                        {t("reservedBadge")}
-                      </span>
-                    )}
                   </div>
                   <div
                     className="row-meta"
@@ -336,7 +334,7 @@ function SecretForm({
             readOnly={isEdit}
             value={key}
             onChange={(e) => setKey(e.target.value.toUpperCase())}
-            placeholder="GITHUB_DISPATCH_TOKEN"
+            placeholder="STRIPE_API_KEY"
             className="input input-mono"
           />
         </div>

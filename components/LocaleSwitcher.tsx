@@ -15,10 +15,29 @@ export default function LocaleSwitcher() {
   const pathname = usePathname();
   const router = useRouter();
 
-  function switchTo(next: string) {
+  async function switchTo(next: string) {
     if (next === locale) return;
     // Persist locale preference in cookie so detectLocale() picks it up.
     document.cookie = `NEXT_LOCALE=${next};path=/;max-age=31536000;SameSite=Lax`;
+
+    // Pages docs/tutos : le slug est localisé (`premiers-pas` ↔ `getting-started`)
+    // → le remapper vers son équivalent dans la langue cible, sinon 404. `null`
+    // (page absente dans la langue cible) → repli sur la liste.
+    const m = pathname.match(/^\/[^/]+\/(docs|tutos)\/([^/]+)\/?$/);
+    if (m) {
+      const [, type, slug] = m;
+      try {
+        const res = await fetch(
+          `/api/i18n/resolve-slug?type=${type}&slug=${encodeURIComponent(slug)}&from=${locale}&to=${next}`,
+        );
+        const data = (await res.json()) as { slug: string | null };
+        router.push(data.slug ? `/${next}/${type}/${data.slug}` : `/${next}/${type}`);
+      } catch {
+        router.push(`/${next}/${type}`);
+      }
+      return;
+    }
+
     const withoutLocale = pathname.replace(/^\/[^/]+/, "");
     router.push(`/${next}${withoutLocale}`);
   }
@@ -29,7 +48,7 @@ export default function LocaleSwitcher() {
         <button
           key={l}
           type="button"
-          onClick={() => switchTo(l)}
+          onClick={() => void switchTo(l)}
           disabled={l === locale}
           style={{
             padding: "2px 6px",

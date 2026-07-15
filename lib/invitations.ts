@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { physalisBaseUrl } from "./app-url";
 
 export const INVITATION_TTL_MS = 48 * 60 * 60_000; // 48h
 
@@ -14,7 +15,8 @@ export function hashInvitationToken(token: string): string {
  * Builds the acceptance URL for an invitation. If a request is provided,
  * the origin is derived from it (so links match whichever host the inviter
  * connected from — useful in dev where the IP changes, and behind reverse
- * proxies where NEXTAUTH_URL may be wrong). Falls back to NEXTAUTH_URL.
+ * proxies where the configured URL may be wrong). Falls back to PHYSALIS_URL
+ * (cf. lib/app-url, chaîne PHYSALIS_URL → NEXTAUTH_URL → AUTH_URL).
  */
 export function buildAcceptUrl(token: string, req?: Request): string {
   if (req) {
@@ -26,7 +28,5 @@ export function buildAcceptUrl(token: string, req?: Request): string {
       return `${proto}://${host}/invite/${token}`;
     }
   }
-  const base =
-    process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/invite/${token}`;
+  return `${physalisBaseUrl()}/invite/${token}`;
 }

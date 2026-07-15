@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, basePrisma } from "@/lib/prisma";
 import { encrypt } from "@/lib/crypto";
 import { requireUser } from "@/lib/api";
 import {
@@ -22,9 +22,13 @@ import {
 export async function POST() {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
+  // SUPERADMIN platform-level (tenantSlug=null) vit dans public.User → le
+  // client `prisma` scopé tenant throw (pas de contexte). On bascule sur
+  // basePrisma (schéma public) pour qu'il puisse gérer sa 2FA comme un tenant.
+  const db = tenantSlug ? prisma : basePrisma;
 
-  const dbUser = await prisma.user.findUnique({
+  const dbUser = await db.user.findUnique({
     where: { id: user.id },
     select: { id: true, email: true, twoFactorEnabled: true },
   });
@@ -43,7 +47,7 @@ export async function POST() {
   const qrDataUrl = await generateQrDataUrl(otpauthUrl);
 
   const enc = encrypt(secret);
-  await prisma.user.update({
+  await db.user.update({
     where: { id: user.id },
     data: {
       twoFactorSecret: enc.encryptedValue,

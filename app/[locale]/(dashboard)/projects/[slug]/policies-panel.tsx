@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { ProjectRole } from "@prisma/client";
-import { RiSettings3Line } from "@remixicon/react";
+import { RiSettings3Line, RiShieldCheckLine } from "@remixicon/react";
+import EmptyCard from "@/components/EmptyCard";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type PolicyListItem = {
   id: string;
+  provider: string;
   repo: string;
   workflow: string;
   branch: string;
@@ -15,7 +18,19 @@ type PolicyListItem = {
   createdAt: string;
 };
 
+type ProjectCiContext = {
+  provider: string;
+  repo: string;
+  connectionConfigured: boolean;
+};
+
 type EnvSummary = { id: string; name: string };
+
+const PROVIDER_LABEL: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  bitbucket: "Bitbucket",
+};
 
 const ROLE_RANK: Record<ProjectRole, number> = {
   VIEWER: 1,
@@ -39,7 +54,9 @@ export default function PoliciesPanel({
   defaultGithubRepo: string | null;
 }) {
   const t = useTranslations("projects.policies");
+  const confirm = useConfirm();
   const [policies, setPolicies] = useState<PolicyListItem[] | null>(null);
+  const [projectCtx, setProjectCtx] = useState<ProjectCiContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -54,9 +71,19 @@ export default function PoliciesPanel({
       setError("Erreur de chargement.");
       return;
     }
-    const data = (await res.json()) as { policies: PolicyListItem[] };
+    const data = (await res.json()) as {
+      policies: PolicyListItem[];
+      project: ProjectCiContext;
+    };
     setPolicies(data.policies);
+    setProjectCtx(data.project);
   }, [slug]);
+
+  // Pour créer une policy il faut une connexion CI reliée ET un repo configuré.
+  const repoConfigured = projectCtx?.repo || defaultGithubRepo || "";
+  const provider = projectCtx?.provider ?? "github";
+  const canAddPolicy =
+    Boolean(repoConfigured) && (projectCtx?.connectionConfigured ?? false);
 
   useEffect(() => {
     setPolicies(null);
@@ -66,9 +93,10 @@ export default function PoliciesPanel({
 
   async function remove(p: PolicyListItem) {
     if (
-      !confirm(
-        t("deleteConfirm", { repo: p.repo, workflow: p.workflow, branch: p.branch, environment: p.environment }),
-      )
+      !(await confirm({
+        message: t("deleteConfirm", { repo: p.repo, workflow: p.workflow, branch: p.branch, environment: p.environment }),
+        danger: true,
+      }))
     )
       return;
     const res = await fetch(`/api/projects/${slug}/policies/${p.id}`, {
@@ -86,12 +114,11 @@ export default function PoliciesPanel({
       <div className="section-header">
         <div>
           <h2 className="section-title">{t("title")}</h2>
-          <p className="help" style={{ marginTop: 4 }}>
-            {t("desc")}
-          </p>
+          <p className="panel-subtitle">{t("desc")}</p>
+          <p className="panel-subtitle">{t("desc2")}</p>
         </div>
-        {effectiveCanManage && !adding && (
-          defaultGithubRepo ? (
+        {effectiveCanManage && !adding && policies && policies.length > 0 && (
+          canAddPolicy ? (
             <button
               type="button"
               onClick={() => setAdding(true)}
@@ -109,6 +136,7 @@ export default function PoliciesPanel({
         <div className="create-card">
           <PolicyForm
             slug={slug}
+            provider={provider}
             environments={environments}
             onCancel={() => setAdding(false)}
             onSaved={() => {
@@ -123,13 +151,27 @@ export default function PoliciesPanel({
 
       {policies === null ? (
         <p className="help">Chargement…</p>
-      ) : policies.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">{t("empty")}</div>
-          <div>
-            {t("emptyHint")}
-          </div>
-        </div>
+      ) : policies.length === 0 && !adding ? (
+        <EmptyCard
+          icon={<RiShieldCheckLine size={22} aria-hidden />}
+          title={t("empty")}
+          hint={t("emptyHint")}
+          action={
+            effectiveCanManage && !adding ? (
+              canAddPolicy ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setAdding(true)}
+                >
+                  {t("addBtn")}
+                </button>
+              ) : (
+                <span className="help">{t("repoRequired")}</span>
+              )
+            ) : undefined
+          }
+        />
       ) : (
         <div className="row-list">
           {policies.map((p) =>
@@ -137,6 +179,7 @@ export default function PoliciesPanel({
               <div key={p.id} className="card">
                 <PolicyForm
                   slug={slug}
+                  provider={p.provider}
                   environments={environments}
                   initial={p}
                   onCancel={() => setEditingId(null)}
@@ -156,7 +199,10 @@ export default function PoliciesPanel({
                   </div>
                   <div className="row-meta code-mono">
                     <span>
-                      <span className="text-muted">repo</span> {p.repo}
+                      <span className="text-muted">
+                        {PROVIDER_LABEL[p.provider] ?? p.provider}
+                      </span>{" "}
+                      {p.repo}
                     </span>
                   </div>
                 </div>
@@ -191,12 +237,16 @@ export default function PoliciesPanel({
 
 function PolicyForm({
   slug,
+  provider,
   environments,
   initial,
   onCancel,
   onSaved,
 }: {
   slug: string;
+  /** Provider CI du projet — adapte le champ workflow (fichier .yml pour
+   *  github, nom d'environment CI pour gitlab/bitbucket). */
+  provider: string;
   environments: EnvSummary[];
   /** Mode édition : on PATCH /policies/[id] avec uniquement les champs
    *  changés. Si non fourni, mode création (POST). */
@@ -205,7 +255,10 @@ function PolicyForm({
   onSaved: () => void;
 }) {
   const t = useTranslations("projects.policies");
-  const [workflow, setWorkflow] = useState(initial?.workflow ?? "deploy.yml");
+  const isGithub = provider === "github";
+  const [workflow, setWorkflow] = useState(
+    initial?.workflow ?? (isGithub ? "deploy.yml" : ""),
+  );
   const [branch, setBranch] = useState(initial?.branch ?? "main");
   const [environment, setEnvironment] = useState(
     initial?.environment ?? environments[0]?.name ?? "",
@@ -245,13 +298,13 @@ function PolicyForm({
       <div className="form-row">
         <div className="field">
           <label>
-            {t("form.workflowLabel")}
+            {isGithub ? t("form.workflowLabel") : t("form.envCiLabel")}
           </label>
           <input
-            required
+            required={isGithub}
             value={workflow}
             onChange={(e) => setWorkflow(e.target.value)}
-            placeholder="deploy.yml"
+            placeholder={isGithub ? "deploy.yml" : t("form.envCiPlaceholder")}
             className="input input-mono"
           />
         </div>

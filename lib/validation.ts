@@ -95,6 +95,48 @@ export function isValidGitBranch(branch: string): boolean {
   return true;
 }
 
+// ── CI/CD multi-provider (cf. lib/oidc.ts, modèle Project.ci*) ──────────────
+
+// GitLab `project_path` — "group/project" ou "group/subgroup/project".
+// Chaque segment : alphanumérique + `_`/`-`/`.`, sans commencer/finir par un
+// séparateur ; au moins 2 segments. Longueur totale bornée.
+const GITLAB_PROJECT_PATH_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:\/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?){1,20}$/;
+export function isValidGitlabProjectPath(path: string): boolean {
+  return path.length <= 255 && GITLAB_PROJECT_PATH_RE.test(path);
+}
+
+// Bitbucket `repositoryUuid` — UUID, avec ou sans accolades (Bitbucket les
+// inclut, ex. "{11111111-2222-3333-4444-555555555555}").
+const BITBUCKET_UUID_RE =
+  /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
+export function isValidBitbucketRepoUuid(uuid: string): boolean {
+  return BITBUCKET_UUID_RE.test(uuid);
+}
+
+// Nom d'environment CI (claim `environment` GitLab / `deploymentEnvironment`
+// Bitbucket) — stocké dans Policy.workflow pour ces providers. "" = wildcard
+// (tout environment). Permissif mais borné.
+const CI_ENV_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,99}$/;
+export function isValidCiEnvironmentName(name: string): boolean {
+  return name === "" || CI_ENV_NAME_RE.test(name);
+}
+
+// Issuer GitLab self-hosted : URL https d'instance (origin, sans path requis).
+// "" autorisé = gitlab.com (issuer par défaut).
+const HTTPS_ORIGIN_RE = /^https:\/\/[a-z0-9.-]+(:\d{1,5})?(\/[^\s]*)?$/i;
+export function isValidGitlabIssuer(issuer: string): boolean {
+  return issuer === "" || HTTPS_ORIGIN_RE.test(issuer);
+}
+
+// Issuer Bitbucket : URL OIDC du workspace, requise.
+// https://api.bitbucket.org/2.0/workspaces/<workspace>/pipelines-config/identity/oidc
+const BITBUCKET_ISSUER_RE =
+  /^https:\/\/api\.bitbucket\.org\/2\.0\/workspaces\/[^/\s]+\/pipelines-config\/identity\/oidc$/;
+export function isValidBitbucketIssuer(issuer: string): boolean {
+  return BITBUCKET_ISSUER_RE.test(issuer);
+}
+
 /**
  * Sanity check minimal sur un blob de cle privee SSH. On accepte les formats
  * OpenSSH (`-----BEGIN OPENSSH PRIVATE KEY-----`) et PEM RSA/EC/Ed25519.

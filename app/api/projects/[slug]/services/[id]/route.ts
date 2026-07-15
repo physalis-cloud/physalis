@@ -57,6 +57,14 @@ export async function GET(req: Request, { params }: Params) {
       url: service.url,
       user: creds.user,
       password: creds.password,
+      rotationWebhookUrl: service.rotationWebhookUrl,
+      rotationHookToken: service.rotationHookToken,
+      rotationExecMode: service.rotationExecMode,
+      dbType: service.dbType,
+      dbHost: service.dbHost,
+      dbPort: service.dbPort,
+      dbName: service.dbName,
+      dbUser: service.dbUser,
     },
   });
 }
@@ -80,6 +88,15 @@ export async function PATCH(req: Request, { params }: Params) {
         user?: string;
         password?: string;
         tags?: string[];
+        rotationWebhookUrl?: string | null;
+        rotationHookToken?: string | null;
+        rotationExecMode?: string | null;
+        dbType?: string | null;
+        dbHost?: string | null;
+        dbPort?: number | null;
+        dbName?: string | null;
+        dbUser?: string | null;
+        dbPassword?: string | null;
       }
     | null;
   if (!body || typeof body !== "object") {
@@ -93,8 +110,51 @@ export async function PATCH(req: Request, { params }: Params) {
     iv?: string;
     tag?: string;
     tags?: string[];
+    rotationWebhookUrl?: string | null;
+    rotationHookToken?: string | null;
+    rotationExecMode?: string | null;
+    dbType?: string | null;
+    dbHost?: string | null;
+    dbPort?: number | null;
+    dbName?: string | null;
+    dbUser?: string | null;
+    dbPwEncrypted?: string | null;
+    dbPwIv?: string | null;
+    dbPwTag?: string | null;
   } = {};
   const changed: string[] = [];
+
+  // Hook de rotation des comptes liés (service backend). execMode AGENT|DIRECT.
+  if ("rotationWebhookUrl" in body) {
+    data.rotationWebhookUrl = body.rotationWebhookUrl?.trim() || null;
+    changed.push("rotationHook");
+  }
+  if ("rotationHookToken" in body) data.rotationHookToken = body.rotationHookToken?.trim() || null;
+  if ("rotationExecMode" in body) {
+    data.rotationExecMode = body.rotationExecMode === "DIRECT" ? "DIRECT" : body.rotationExecMode === "AGENT" ? "AGENT" : null;
+  }
+
+  // Cible DB de rotation des comptes liés (service base de données managée).
+  if ("dbType" in body) {
+    data.dbType = body.dbType === "POSTGRESQL" ? "POSTGRESQL" : body.dbType === "MYSQL" ? "MYSQL" : null;
+    changed.push("dbTarget");
+  }
+  if ("dbHost" in body) data.dbHost = body.dbHost?.trim() || null;
+  if ("dbName" in body) data.dbName = body.dbName?.trim() || null;
+  if ("dbPort" in body) {
+    data.dbPort =
+      body.dbPort != null && Number.isFinite(Number(body.dbPort)) ? Number(body.dbPort) : null;
+  }
+  if ("dbUser" in body) data.dbUser = body.dbUser?.trim() || null;
+  // Mot de passe admin DB : ré-encrypté seulement si fourni non vide (vide en
+  // édition = inchangé, comme les autres mots de passe).
+  if (typeof body.dbPassword === "string" && body.dbPassword !== "") {
+    const p = encrypt(body.dbPassword);
+    data.dbPwEncrypted = p.encryptedValue;
+    data.dbPwIv = p.iv;
+    data.dbPwTag = p.tag;
+    changed.push("dbPassword");
+  }
 
   if (typeof body.name === "string") {
     const newName = body.name.trim();

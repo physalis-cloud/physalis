@@ -23,7 +23,12 @@ datasource db {
 model User {
   id                   String            @id @default(cuid())
   email                String            @unique
-  password             String
+  /// Nullable depuis le chantier SSO : un compte fédéré (ssoProvider non null)
+  /// n'a pas de mot de passe Physalis. Credentials refuse si password est null.
+  password             String?
+  /// SSO — null pour un compte mot de passe classique ; "google"|"github"|…
+  /// pour un compte fédéré (dénormalisé pour l'affichage UI sécurité).
+  ssoProvider          String?
   role                 Role              @default(MEMBER)
   /// 2FA TOTP — secret chiffré avec la même ENCRYPTION_KEY que les Secrets
   /// (3 colonnes : encryptedValue/iv/tag, base64). Désactivé par défaut.
@@ -55,6 +60,31 @@ model User {
   /// date est rejeté par requireUser(). Posé au reset password / 2FA disable
   /// pour couper les sessions existantes. NULL = jamais invalidé (legacy).
   sessionsValidFrom    DateTime?
+  /// Identités externes liées (social login / SSO perso, Phase F).
+  socialIdentities     UserSocialIdentity[]
+}
+
+/// Identité externe (social login / SSO perso) liée à un User. L'utilisateur lie
+/// explicitement son compte Google/GitHub/Microsoft depuis /account/security
+/// (via l'app OAuth de Physalis, pas celle du tenant) ; au login social on
+/// retrouve le User par (provider, sub). PAS d'auto-provisioning. Voir
+/// steps-docs/todo/sso.md (Phase F).
+model UserSocialIdentity {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Provider social : "google" | "github" | "microsoft".
+  provider  String
+  /// Subject id stable de l'IdP — clé de matching au login.
+  sub       String
+  /// Email au moment du lien (affichage/audit ; PAS la clé de match). Nullable :
+  /// certains IdP (GitHub email masqué) ne le renvoient pas.
+  email     String?
+  createdAt DateTime @default(now())
+
+  @@unique([provider, sub])
+  @@unique([userId, provider])
+  @@index([userId])
 }
 
 model PluginToken {
@@ -78,9 +108,11 @@ model Organization {
   slug                   String                @unique
   members                OrgMember[]
   projects               Project[]
+  projectGroups          ProjectGroup[]
   invitations            Invitation[]
   secrets                OrgSecret[]
   servers                Server[]
+  ciConnections          CiConnection[]
   teamVaultCollections   TeamVaultCollection[]
   oneTimeShares          OneTimeShare[]
   accessLogs             AccessLog[]
@@ -155,6 +187,14 @@ model ProjectBackupConfig {
   gpgPublicKey      String?
   gpgKeyId          String?
   agentRegisteredAt DateTime?
+
+  // Chiffrement par enveloppe + KMS (système ①, cf. backup-clients-kms-plan.md).
+  // Dual-path : null/"gpg-rsa4096" = legacy GPG par-VPS ; "kms-envelope-v1" =
+  // l'agent scelle via OpenBao transit (datakey) → archive .penv.
+  // `kmsKeyName` = nom logique de la KEK transit du tenant (`tenant-<slug>`).
+  // Physalis ne détient JAMAIS la KEK ni de capacité decrypt sur les données.
+  backupKeyScheme   String?
+  kmsKeyName        String?
   /// Hash SHA-256 du token d'agent — vérifie register/plan/report (timingSafeEqual,
   /// sans déchiffrer à chaque poll).
   agentTokenHash    String?
@@ -186,6 +226,7 @@ model ProjectBackupConfig {
 
   databases        ProjectBackupDatabase[]
   entries          ProjectBackupEntry[]
+  restores         ProjectBackupRestore[]
 }
 
 /// Une DB d'un projet à sauvegarder (un projet peut en avoir plusieurs).
@@ -237,6 +278,46 @@ model ProjectBackupEntry {
   @@index([projectId, createdAt(sort: Desc)])
   @@index([projectId, status])
   @@index([configId])
+}
+
+/// Job de restauration orchestré (agent-driven, système ①, cf. backup-clients-kms-plan.md §4).
+/// Le control plane crée la demande (PENDING) ; l'agent la poll, tire l'archive
+/// `.penv` depuis la destination, déchiffre via OpenBao (identité restore = decrypt),
+/// et restaure EN LOCAL sur le VPS. Physalis ne voit jamais le plaintext.
+model ProjectBackupRestore {
+  id              String              @id @default(cuid())
+  projectId       String
+  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  configId        String
+  config          ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  filename        String
+  destLocation    String
+  dbType          BackupDbType
+  dbName          String              // DB source (= clé pour matcher la connexion côté agent)
+  environmentName String
+  targetDbName    String              // DB cible (par défaut = dbName ; distincte pour une restauration sûre)
+  /// true = remplacer en place (la cible peut être non vide ; le dump --clean
+  /// drop+recreate). false = restaurer dans une DB neuve/vide (garde-fou agent).
+  replaceExisting Boolean             @default(false)
+
+  status          RestoreStatus       @default(PENDING)
+  errorMessage    String?
+  requestedById   String?
+  claimedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([configId, status])
+  @@index([projectId, createdAt(sort: Desc)])
+}
+
+enum RestoreStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
 }
 
 enum BackupDbType {
@@ -398,9 +479,21 @@ model Project {
   emailConfig          ProjectEmailConfig?
   backupConfig         ProjectBackupConfig?
   backupEntries        ProjectBackupEntry[]
+  backupRestores       ProjectBackupRestore[]
   docs                 ProjectDoc[]
+  /// Groupe d'organisation (kanban projets). Null = « Sans groupe ».
+  groupId              String?
+  group                ProjectGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  /// Ordre du projet à l'intérieur de son groupe (ou des non-groupés). Posé
+  /// explicitement par le drag-and-drop ; ties cassés par createdAt.
+  position             Int                   @default(0)
   githubRepo           String?
   githubWorkflow       String?
+  /// Connexion CI/CD org-level (provider + issuer + tokens). Cf. modèle public.
+  ciConnectionId       String?
+  ciConnection         CiConnection?         @relation(fields: [ciConnectionId], references: [id], onDelete: SetNull)
+  /// Repo natif quand le provider ≠ github (group/project GitLab ou UUID Bitbucket).
+  ciRepo               String?
   /// Dernier fetch des docs depuis le repo (null = jamais tenté). Distingue
   /// « aucun fichier de doc » de « jamais récupéré ».
   docsFetchedAt        DateTime?
@@ -408,6 +501,83 @@ model Project {
   createdAt            DateTime              @default(now())
 
   @@index([organizationId])
+  @@index([ciConnectionId])
+  @@index([groupId])
+}
+
+/// Groupe de projets au niveau organisation (regroupement type kanban sur la
+/// page Projets). L'ordre des groupes et des projets dedans est piloté par le
+/// drag-and-drop. La suppression d'un groupe détache ses projets (SetNull).
+model ProjectGroup {
+  id             String       @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projects       Project[]
+  /// Ordre de la section groupe sur la page.
+  position       Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
+/// Connexion CI/CD au niveau organisation (cf. modèle public schema.prisma).
+model CiConnection {
+  id             String               @id @default(cuid())
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  provider       String               @default("github")
+  issuer         String?
+  secrets        CiConnectionSecret[]
+  projects       Project[]
+  syncTargets    EnvironmentSyncTarget[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Secret chiffré d'une CiConnection, typé par `kind` (redeploy_token |
+/// registry_url | registry_user | registry_token). Cf. modèle public.
+model CiConnectionSecret {
+  id             String       @id @default(cuid())
+  connectionId   String
+  connection     CiConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  kind           String
+  encryptedValue String
+  iv             String
+  tag            String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([connectionId, kind])
+}
+
+/// Cible de synchronisation sortante d'un environnement (Vercel, puis
+/// Render/Railway). Cf. modèle public + lib/sync/.
+model EnvironmentSyncTarget {
+  id                  String       @id @default(cuid())
+  environmentId       String
+  environment         Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  ciConnectionId      String
+  ciConnection        CiConnection @relation(fields: [ciConnectionId], references: [id], onDelete: Cascade)
+  externalProjectId   String
+  externalProjectName String?
+  externalEnvironmentId String?
+  externalServiceId     String?
+  targets             String[]     @default([])
+  tagFilter           String[]     @default([])
+  lastSyncAt          DateTime?
+  lastSyncStatus      String?
+  lastSyncError       String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@unique([environmentId, ciConnectionId])
+  @@index([ciConnectionId])
+  @@index([lastSyncStatus])
 }
 
 /// Doc projet récupérée depuis le repo GitHub (readme / technique / sécurité) et
@@ -433,7 +603,13 @@ enum ProjectDocKind {
 
 model Policy {
   id            String      @id @default(cuid())
+  /// "github" | "gitlab" | "bitbucket". String, pas enum PG.
+  provider      String      @default("github")
+  /// Issuer OIDC ; null = défaut du provider (github.com / gitlab.com).
+  /// Rempli pour GitLab self-hosted et Bitbucket.
+  issuer        String?
   repo          String
+  /// github : fichier workflow ; gitlab/bitbucket : environment CI ("" = tout).
   workflow      String
   branch        String
   projectId     String
@@ -443,8 +619,8 @@ model Policy {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  @@unique([repo, workflow, branch, projectId, environmentId])
-  @@index([repo, workflow, branch])
+  @@unique([provider, repo, workflow, branch, projectId, environmentId])
+  @@index([provider, repo, workflow, branch])
   @@index([projectId])
   @@index([environmentId])
 }
@@ -464,7 +640,45 @@ model Service {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  /// Comptes applicatifs dont l'URL pointe vers ce service (backend).
+  appAccounts   AppAccount[]
+
+  // Rotation REMINDER (Phase B) — rappel d'âge + rotation assistée des creds DU
+  // service (Stripe-like). Pas de versioning → historique capé à 3.
+  rotationEnabled      Boolean   @default(false)
+  rotationIntervalDays Int?
+  rotationLastAt       DateTime?
+  rotationNextAt       DateTime?
+  rotationLastStatus   String?
+  rotationHistory      Json?
+
+  // Hook de rotation des COMPTES liés (Phase C) — service "backend". Les comptes
+  // en stratégie WEBHOOK liés à ce service rotent via ce hook. Optionnel (un
+  // service Stripe-like n'en a pas). rotationExecMode : "AGENT" | "DIRECT".
+  rotationWebhookUrl   String?
+  rotationHookToken    String?
+  rotationExecMode     String?
+
+  // Cible de rotation DATABASE des COMPTES liés (A3) — service "base de données
+  // managée" (Supabase/RDS/Neon…). La connexion (host/port/base) vit ici, AINSI
+  // QUE des identifiants admin DB DÉDIÉS (dbUser + mot de passe chiffré
+  // dbPw*), DISTINCTS des creds « interface/dashboard » du service
+  // (encryptedData {user,password}). Un compte lié en stratégie DATABASE rote
+  // via cette connexion admin. dbType en TEXT (pas l'enum : absent du schéma public).
+  dbType               String?
+  dbHost               String?
+  dbPort               Int?
+  dbName               String?
+  /// Identifiant admin de connexion DB (ex. `postgres` ou `postgres.<ref>` via
+  /// pooler Supabase). Plaintext comme dbHost (le secret = le mot de passe).
+  dbUser               String?
+  /// Mot de passe admin DB, chiffré (AES-GCM, comme les autres secrets).
+  dbPwEncrypted        String?
+  dbPwIv               String?
+  dbPwTag              String?
+
   @@index([projectId])
+  @@index([rotationNextAt])
 }
 
 model AppAccount {
@@ -480,7 +694,39 @@ model AppAccount {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  /// URL/contexte du compte : lié à UN environnement (frontend) OU UN service
+  /// (backend) — XOR au niveau app. L'URL affichée vient du lien. SetNull si la
+  /// cible est supprimée (le compte survit, sans URL).
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  serviceId     String?
+  service       Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  // Rotation (Phase B REMINDER + Phase C WEBHOOK). Historique capé à 3.
+  rotationEnabled      Boolean   @default(false)
+  rotationIntervalDays Int?
+  rotationLastAt       DateTime?
+  rotationNextAt       DateTime?
+  rotationLastStatus   String?
+  rotationHistory      Json?
+  /// Stratégie de rotation du compte : null/"REMINDER" (rappel manuel assisté,
+  /// défaut), "WEBHOOK" (hook côté app) ou "DATABASE" (rôle/utilisateur d'une DB
+  /// managée via la connexion admin du service lié).
+  rotationStrategy     String?
+  /// WEBHOOK : "AGENT" (hook interne réseau Docker, l'agent appelle) ou "DIRECT"
+  /// (hook joignable depuis Physalis). rotationWebhookUrl + token Bearer optionnel.
+  rotationExecMode     String?
+  rotationWebhookUrl   String?
+  rotationHookToken    String?
+  /// DATABASE : type de cible — null/"role" (rôle PostgreSQL → ALTER ROLE,
+  /// défaut) ou "supabase_auth" (utilisateur Supabase Auth → UPDATE auth.users,
+  /// le `user` du compte = l'email). Le SQL exécuté par l'admin du service.
+  rotationDbTarget     String?
+
   @@index([projectId])
+  @@index([rotationNextAt])
+  @@index([environmentId])
+  @@index([serviceId])
 }
 
 model Environment {
@@ -498,6 +744,9 @@ model Environment {
   policies      Policy[]
   liveApis      Api[]          @relation("apiLiveEnv")
   testApis      Api[]          @relation("apiTestEnv")
+  syncTargets   EnvironmentSyncTarget[]
+  /// Comptes applicatifs dont l'URL pointe vers cet environnement (frontend).
+  appAccounts   AppAccount[]
 
   @@unique([projectId, name])
   @@index([serverId])
@@ -523,6 +772,12 @@ model Secret {
   rotationNextAt        DateTime?
   rotationLastStatus    String?           // "success" | "error" | null
   rotationErrorCount    Int               @default(0)
+  /// Mode d'exécution de la rotation DATABASE : "AGENT" (DB Docker-interne, sidecar
+  /// agent self-rotation) ou "DIRECT" (DB managée joignable, chemin N8n). Défaut AGENT.
+  rotationExecMode      String            @default("AGENT")
+  /// Demande de rotation immédiate (bouton « Forcer ») : bypass la fenêtre horaire
+  /// planifiée. Posé par /rotation/force (mode AGENT), purgé au report. null = pas de force.
+  rotationForceRequestedAt DateTime?
   dbHost                String?
   dbPort                Int?
   dbName                String?
@@ -530,6 +785,10 @@ model Secret {
   dbUser                String?
   rotationNeedsFullDeploy Boolean          @default(false)
   rotationWebhookUrl    String?
+  /// Stratégie WEBHOOK (Phase C) — libellé de la cible (ex. « Compte admin de l'app »)
+  /// pour lever le flou UX, et token Bearer optionnel envoyé au hook pour l'auth.
+  rotationHookLabel     String?
+  rotationHookToken     String?
   jwtRedeployWebhookUrl String?
   apiKeyId              String?
   apiKey                ApiKey?           @relation("secretApiKey", fields: [apiKeyId], references: [id], onDelete: SetNull)
@@ -782,7 +1041,17 @@ model TeamVaultEntry {
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
+  // Rotation REMINDER (Phase B) — rappel d'âge + rotation assistée sur le mot de
+  // passe (encryptedPassword). Historique capé à 3 dans rotationHistory.
+  rotationEnabled      Boolean   @default(false)
+  rotationIntervalDays Int?
+  rotationLastAt       DateTime?
+  rotationNextAt       DateTime?
+  rotationLastStatus   String?
+  rotationHistory      Json?
+
   @@index([collectionId])
+  @@index([rotationNextAt])
 }
 
 model TeamVaultMember {
@@ -894,6 +1163,7 @@ enum AccessAction {
   COMPOSE_FETCHED
   LOGIN_SUCCESS
   LOGIN_FAILURE
+  LOGOUT
   TWO_FACTOR_ENABLED
   TWO_FACTOR_DISABLED
   TWO_FACTOR_SUCCESS
@@ -905,6 +1175,9 @@ enum AccessAction {
   POLICY_CREATE
   POLICY_UPDATE
   POLICY_DELETE
+  PROJECT_GROUP_CREATE
+  PROJECT_GROUP_UPDATE
+  PROJECT_GROUP_DELETE
   DEPLOY_AUTHORIZED
   DEPLOY_DENIED
   PLUGIN_AUTH_SUCCESS
@@ -968,6 +1241,19 @@ enum AccessAction {
   BACKUP_FAILED
   BACKUP_FORCED
   BACKUP_KEY_REVEAL
+  BACKUP_RESTORE_REQUESTED
+  BACKUP_RESTORE_SUCCESS
+  BACKUP_RESTORE_FAILED
+  SECRET_SYNC_PUSH
+  SYNC_TARGET_CREATE
+  SYNC_TARGET_UPDATE
+  SYNC_TARGET_DELETE
+  SSO_CONFIG_CREATED
+  SSO_CONFIG_UPDATED
+  SSO_CONFIG_DELETED
+  SSO_LOGIN_SUCCESS
+  SSO_LOGIN_FAILURE
+  MEMBER_SSO_PROVISIONED
 }
 
 /// Demande de secret externe (Phase 9). Un user DEV+ crée la demande,
@@ -1156,4 +1442,31 @@ model PasswordResetToken {
 
   @@index([email])
   @@index([expiresAt])
+}
+
+// OidcPolicy — allowlist/index OIDC des déploiements (issuer, branche par
+// (repo, workflow, branch, projet, env)). En SaaS c'est un index GLOBAL dans
+// admin.policies (résolu par /api/deploy avant de connaître le tenant) ; en
+// mono-tenant on le garde tel quel (table "policies") — redeploy.ts et
+// policies/route.ts le lisent/écrivent verbatim via adminPrisma(=prisma).
+// tenantSlug conservé pour matcher les requêtes du code (valeur unique en
+// self-host). Pas de collision : le Policy tenant mappe la table "Policy".
+model OidcPolicy {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider      String   @default("github")
+  issuer        String?
+  repo          String
+  workflow      String
+  branch        String
+  tenantSlug    String   @map("tenant_slug") @db.VarChar(100)
+  projectId     String   @map("project_id")
+  environmentId String   @map("environment_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([provider, repo, workflow, branch, tenantSlug, projectId, environmentId])
+  @@index([provider, repo, workflow, branch])
+  @@index([tenantSlug, projectId])
+  @@index([issuer])
+  @@map("policies")
 }

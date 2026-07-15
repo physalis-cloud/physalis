@@ -6,6 +6,7 @@ node_modules
 .env.*.local
 docs
 !docs/documentation
+!docs/tutos
 README.md
 AGENTS.md
 CLAUDE.md

@@ -3,23 +3,36 @@
 // Bouton "Partager un secret" dans le header + modal de creation.
 //
 // Architecture zero-knowledge (cf. lib/share-crypto.ts) :
-//   1. L'user tape le contenu dans la modale.
-//   2. Au submit : on genere une cle AES-256 cote NAVIGATEUR, on encrypt,
-//      on POST { ciphertext, iv, title?, ttlSeconds }. La cle ne quitte
-//      jamais le navigateur.
+//   1. L'user empile un ou plusieurs items dans la modale : des secrets texte
+//      et/ou de petits fichiers texte (cf. lib/share-envelope.ts).
+//   2. Au submit : on serialise les items en enveloppe JSON, on genere une cle
+//      AES-256 cote NAVIGATEUR, on encrypt l'enveloppe, on POST
+//      { ciphertext, iv, title?, ttlSeconds }. La cle ne quitte jamais le
+//      navigateur ; le serveur ignore qu'il y a plusieurs items dedans.
 //   3. Le serveur retourne un token public. On construit l'URL :
 //      `https://<host>/share/<token>#<key>` et on l'affiche pour copy.
 //   4. Le destinataire ouvre l'URL → fetch ciphertext → decrypt avec la
-//      cle du fragment → affiche.
+//      cle du fragment → affiche la liste d'items.
 
 import { useState, useTransition } from "react";
 import { Link } from "@/i18n/navigation";
-import { RiShareForward2Line } from "@remixicon/react";
-import { useTranslations, useLocale } from "next-intl";
 import {
-  encryptShareContent,
-  generateShareKey,
-} from "@/lib/share-crypto";
+  RiShareForward2Line,
+  RiAddLine,
+  RiDeleteBinLine,
+  RiFileTextLine,
+} from "@remixicon/react";
+import { useTranslations, useLocale } from "next-intl";
+import { encryptShareContent, generateShareKey } from "@/lib/share-crypto";
+import {
+  encodeEnvelope,
+  encodedByteLength,
+  type ShareItem,
+  TEXT_ITEM_MAX,
+  FILE_ITEM_MAX,
+  ENVELOPE_PLAINTEXT_MAX,
+  MAX_ITEMS,
+} from "@/lib/share-envelope";
 
 const TTL_OPTIONS: { value: number; label: string }[] = [
   { value: 900, label: "15 minutes" },
@@ -29,7 +42,6 @@ const TTL_OPTIONS: { value: number; label: string }[] = [
 ];
 
 const DEFAULT_TTL = 3600;
-const CONTENT_MAX = 10000;
 
 export default function ShareCreateButton() {
   const t = useTranslations("shares");
@@ -39,7 +51,7 @@ export default function ShareCreateButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="btn btn-primary btn-sm"
+        className="btn btn-primary"
       >
         <RiShareForward2Line size={14} aria-hidden /> {t("createBtn")}
       </button>
@@ -54,10 +66,18 @@ export default function ShareCreateButton() {
 const TTL_PASSWORD_THRESHOLD = 14400;
 const PASSWORD_MIN = 4;
 
+// Item interne (le champ `title` du form est conserve meme vide pour ne pas
+// perdre le focus pendant la frappe ; on le trim seulement au submit).
+type FormItem =
+  | { type: "text"; title: string; content: string }
+  | { type: "file"; filename: string; content: string };
+
 function ShareCreateDialog({ onClose }: { onClose: () => void }) {
   const t = useTranslations("shares");
   const locale = useLocale();
-  const [content, setContent] = useState("");
+  const [items, setItems] = useState<FormItem[]>([
+    { type: "text", title: "", content: "" },
+  ]);
   const [title, setTitle] = useState("");
   const [recipientEmail, setRecipientEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,26 +90,116 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const showPasswordField = ttl >= TTL_PASSWORD_THRESHOLD;
+  const kb = (bytes: number) => Math.round(bytes / 1024);
+
+  function addTextItem() {
+    setError(null);
+    setItems((prev) =>
+      prev.length >= MAX_ITEMS
+        ? prev
+        : [...prev, { type: "text", title: "", content: "" }],
+    );
+    if (items.length >= MAX_ITEMS)
+      setError(t("createDialog.tooManyItems", { max: MAX_ITEMS }));
+  }
+
+  function updateTextItem(
+    idx: number,
+    patch: { title?: string; content?: string },
+  ) {
+    setItems((prev) =>
+      prev.map((it, i) =>
+        i === idx && it.type === "text" ? { ...it, ...patch } : it,
+      ),
+    );
+  }
+
+  function removeItem(idx: number) {
+    setError(null);
+    setItems((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function onFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // permet de re-selectionner le meme fichier
+    if (files.length === 0) return;
+    const read = await Promise.all(
+      files.map((f) => f.text().then((content) => ({ name: f.name, content }))),
+    );
+    let err: string | null = null;
+    const next = [...items];
+    for (const { name, content } of read) {
+      if (next.length >= MAX_ITEMS) {
+        err = t("createDialog.tooManyItems", { max: MAX_ITEMS });
+        break;
+      }
+      if (content.length > FILE_ITEM_MAX) {
+        err = t("createDialog.fileTooLarge", {
+          name,
+          max: kb(FILE_ITEM_MAX),
+        });
+        continue;
+      }
+      next.push({ type: "file", filename: name, content });
+    }
+    setItems(next);
+    setError(err);
+  }
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    if (!content.trim()) {
+
+    // Items effectifs : on garde les fichiers + les secrets texte non vides.
+    const cleaned: ShareItem[] = items
+      .filter((it) => it.type === "file" || it.content.trim().length > 0)
+      .map((it) =>
+        it.type === "text"
+          ? {
+              type: "text",
+              content: it.content,
+              ...(it.title.trim() ? { title: it.title.trim() } : {}),
+            }
+          : { type: "file", filename: it.filename, content: it.content },
+      );
+
+    if (cleaned.length === 0) {
       setError(t("createDialog.errorEmpty"));
       return;
     }
-    if (content.length > CONTENT_MAX) {
-      setError(t("createDialog.errorLength", { max: CONTENT_MAX }));
+    for (const it of cleaned) {
+      if (it.type === "text" && it.content.length > TEXT_ITEM_MAX) {
+        setError(t("createDialog.errorLength", { max: TEXT_ITEM_MAX }));
+        return;
+      }
+      if (it.type === "file" && it.content.length > FILE_ITEM_MAX) {
+        setError(
+          t("createDialog.fileTooLarge", {
+            name: it.filename,
+            max: kb(FILE_ITEM_MAX),
+          }),
+        );
+        return;
+      }
+    }
+    if (encodedByteLength(cleaned) > ENVELOPE_PLAINTEXT_MAX) {
+      setError(
+        t("createDialog.bundleTooLarge", { max: kb(ENVELOPE_PLAINTEXT_MAX) }),
+      );
       return;
     }
     if (showPasswordField && password && password.length < PASSWORD_MIN) {
       setError(t("createDialog.errorPassword", { min: PASSWORD_MIN }));
       return;
     }
+
     startTransition(async () => {
       try {
         const key = await generateShareKey();
-        const { ciphertext, iv } = await encryptShareContent(content, key);
+        const { ciphertext, iv } = await encryptShareContent(
+          encodeEnvelope(cleaned),
+          key,
+        );
         const res = await fetch("/api/share", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -128,7 +238,11 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
             const sendData = (await sendRes.json().catch(() => null)) as
               | { error?: string }
               | null;
-            setError(t("createDialog.errorEmailFailed", { error: sendData?.error ?? "error" }));
+            setError(
+              t("createDialog.errorEmailFailed", {
+                error: sendData?.error ?? "error",
+              }),
+            );
           }
         }
       } catch (err) {
@@ -149,16 +263,19 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const expiresLabel = expiresAt
-    ? new Date(expiresAt).toLocaleString()
-    : "";
+  const expiresLabel = expiresAt ? new Date(expiresAt).toLocaleString() : "";
+  const hasContent = items.some(
+    (it) => it.type === "file" || it.content.trim().length > 0,
+  );
+  const atMaxItems = items.length >= MAX_ITEMS;
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog dialog-lg" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <h2 className="dialog-title">
-            <RiShareForward2Line size={18} aria-hidden /> {t("createDialog.title")}
+            <RiShareForward2Line size={18} aria-hidden />{" "}
+            {t("createDialog.title")}
           </h2>
           <button
             type="button"
@@ -220,7 +337,9 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
                 onClick={copyUrl}
                 className="btn btn-primary btn-sm"
               >
-                {copied ? t("createDialog.copiedBtn") : t("createDialog.copyBtn")}
+                {copied
+                  ? t("createDialog.copiedBtn")
+                  : t("createDialog.copyBtn")}
               </button>
               <button
                 type="button"
@@ -243,18 +362,135 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
                   className="input"
                 />
               </div>
+
               <div className="field">
                 <label>{t("createDialog.contentLabel")}</label>
-                <textarea
-                  required
-                  autoFocus
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={10}
-                  maxLength={CONTENT_MAX}
-                  className="textarea textarea-mono"
-                />
+                <div style={{ display: "grid", gap: 10 }}>
+                  {items.map((it, idx) =>
+                    it.type === "text" ? (
+                      <div
+                        key={idx}
+                        style={{
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          padding: 10,
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            value={it.title}
+                            onChange={(e) =>
+                              updateTextItem(idx, { title: e.target.value })
+                            }
+                            maxLength={200}
+                            placeholder={t("createDialog.itemTitlePlaceholder")}
+                            className="input"
+                            style={{ flex: 1 }}
+                          />
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeItem(idx)}
+                              className="btn btn-ghost btn-sm"
+                              aria-label={t("createDialog.removeItemLabel")}
+                            >
+                              <RiDeleteBinLine size={14} aria-hidden />
+                            </button>
+                          )}
+                        </div>
+                        <textarea
+                          value={it.content}
+                          onChange={(e) =>
+                            updateTextItem(idx, { content: e.target.value })
+                          }
+                          rows={6}
+                          maxLength={TEXT_ITEM_MAX}
+                          className="textarea textarea-mono"
+                          autoFocus={idx === 0}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        key={idx}
+                        style={{
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          padding: "8px 10px",
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <RiFileTextLine
+                          size={16}
+                          aria-hidden
+                          style={{ flexShrink: 0, opacity: 0.7 }}
+                        />
+                        <span
+                          className="code-mono"
+                          style={{
+                            flex: 1,
+                            fontSize: 13,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.filename}
+                        </span>
+                        <span className="help" style={{ fontSize: 12 }}>
+                          {kb(it.content.length) || 1} KB
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(idx)}
+                          className="btn btn-ghost btn-sm"
+                          aria-label={t("createDialog.removeItemLabel")}
+                        >
+                          <RiDeleteBinLine size={14} aria-hidden />
+                        </button>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button
+                    type="button"
+                    onClick={addTextItem}
+                    disabled={atMaxItems}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    <RiAddLine size={14} aria-hidden />{" "}
+                    {t("createDialog.addSecretBtn")}
+                  </button>
+                  <label
+                    className="btn btn-ghost btn-sm"
+                    style={{
+                      cursor: atMaxItems ? "not-allowed" : "pointer",
+                      opacity: atMaxItems ? 0.5 : 1,
+                    }}
+                  >
+                    <RiFileTextLine size={14} aria-hidden />{" "}
+                    {t("createDialog.addFileBtn")}
+                    <input
+                      type="file"
+                      multiple
+                      hidden
+                      disabled={atMaxItems}
+                      onChange={onFilesPicked}
+                    />
+                  </label>
+                </div>
               </div>
+
               <div className="field">
                 <label>{t("createDialog.durationLabel")}</label>
                 <select
@@ -308,10 +544,12 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 type="submit"
-                disabled={pending || !content.trim()}
+                disabled={pending || !hasContent}
                 className="btn btn-primary btn-sm"
               >
-                {pending ? t("createDialog.encryptingBtn") : t("createDialog.submitBtn")}
+                {pending
+                  ? t("createDialog.encryptingBtn")
+                  : t("createDialog.submitBtn")}
               </button>
             </div>
           </form>

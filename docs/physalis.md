@@ -108,9 +108,10 @@ Voir [prisma/tenant-schema.prisma](../prisma/tenant-schema.prisma).
 | `ProjectEmailConfig` | Config email Pink-Floyd au niveau projet | `projectId` unique ; `domain`, `domainId`, `keyId`, **clé API chiffrée** (`encryptedKey`/`iv`/`tag`), `verified Boolean`, `dnsRecords Json` ; rotation blue/green : `rotationEnabled`, `rotationIntervalDays?`, `rotationNextAt?`, `rotationLastAt?`, `rotationLastStatus?`, `pendingRevokeKeyId?`. Injecté dans le `.env` de chaque env au déploiement. Cf. §4.20 |
 | `AppAccount` | Compte de test pour login dans l'app | `name`, blob chiffré JSON `{user, password}` ; lié au projet |
 | `ClientBackupConfig` | Activation + **destination** du backup au niveau client | `tenantSlug` unique ; `enabled` ; `backupServerId?` → Server (`BackupDest`) + `backupPath?` (chemin de base ; chemin projet = `{base}/{slug}`). Cf. §4.21 |
-| `ProjectBackupConfig` | Config backup d'un projet | `projectId` unique ; `enabled`, `environmentName`, planning (`scheduleHour`/`intervalDays`/`backupNextAt`/`backupLastAt`/`backupLastStatus`/`forceRequestedAt`), rétention (`retentionDaily`/`Weekly`/`Monthly`), GPG (`gpgPublicKey?`/`gpgKeyId?`/`agentRegisteredAt?` — **pubkey only**), token agent (`agentTokenHash?` + chiffré `agentTokenEnc/Iv/Tag?`), `overdueAlertedAt?`. Cf. §4.21 |
+| `ProjectBackupConfig` | Config backup d'un projet | `projectId` unique ; `enabled`, `environmentName`, planning (`scheduleHour`/`intervalDays`/`backupNextAt`/`backupLastAt`/`backupLastStatus`/`forceRequestedAt`), rétention (`retentionDaily`/`Weekly`/`Monthly`), **chiffrement** (`backupKeyScheme?` `gpg-rsa4096`\|`kms-envelope-v1`, `kmsKeyName?` `tenant-<slug>`), GPG legacy (`gpgPublicKey?`/`gpgKeyId?`/`agentRegisteredAt?` — **pubkey only**), token agent (`agentTokenHash?` + chiffré `agentTokenEnc/Iv/Tag?`), `overdueAlertedAt?`. Cf. §4.21 |
 | `ProjectBackupDatabase` | DB d'un projet à sauvegarder (**1-N**) | `configId` (Cascade) ; `dbType`, `dbName`, `dbHost`, `dbUser`, `passwordSecretKey?` (clé du secret `.env`), `port?`, `enabled`. Détectée depuis le compose + `.env`, éditable. Cf. §4.21 |
-| `ProjectBackupEntry` | Historique d'un backup (rempli par l'agent) | `configId`/`projectId` ; `filename`, `sizeBytes?`, `dbType`, `dbName`, `environmentName`, `destLocation`, `status` (PENDING/SUCCESS/FAILED), `errorMessage?`. Cf. §4.21 |
+| `ProjectBackupEntry` | Historique d'un backup (rempli par l'agent) | `configId`/`projectId` ; `filename`, `sizeBytes?`, `dbType`, `dbName`, `environmentName`, `destLocation`, `status` (PENDING/SUCCESS/FAILED), `errorMessage?`, `restorable`, `restoreJobId?`. Cf. §4.21 |
+| `ProjectBackupRestore` | Job de restauration orchestré (agent-driven) | `configId`/`projectId` ; `filename`/`destLocation`/`dbType`/`dbName`/`environmentName` (archive source) ; `targetDbName` (DB cible), `replaceExisting` (en place vs nouvelle DB) ; `status RestoreStatus` (PENDING/RUNNING/SUCCESS/FAILED), `requestedById?`/`claimedAt?`/`finishedAt?`/`errorMessage?`. Cf. §4.21 |
 | `MachineToken` | Token Bearer pour VPS | `tokenHash` (sha256, unique) ; lié à `(project, environment)` ; **`createdById`** (FK User, SetNull si user supprimé) ; `revokedAt` pour soft-delete |
 | `PluginToken` | Session 4h pour l'extension navigateur | `tokenHash` (sha256, unique) ; lié à un `User` ; `expiresAt`, `revokedAt`, `lastUsedAt`, `userAgent`. Préfixe `sv_plugin_<hex>`. Cf. §4.8c |
 | `UserToken` | Token Bearer scopé à un User (Phase 11a) | `tokenHash` (SHA-256 unique), `prefix` (12 premiers chars), `userId` (Cascade), `name`, `expiresAt?`, `lastUsedAt?`, `revokedAt?`. Préfixe `sv_user_<32hex>`. Accès READ aux projets dont l'user est ProjectMember. Cf. §4.11 |
@@ -213,6 +214,42 @@ Public signup : `POST /signup` (server action `signupTenant` dans [app/(auth)/si
 | POST | `/api/me/2fa/setup` | session | Génère un secret TOTP, le chiffre et stocke avec `enabled=false`. Retourne `{ secret, otpauthUrl, qrDataUrl }`. 409 si déjà active |
 | POST | `/api/me/2fa/verify` | session | Body : `{ code }`. Si valide, active la 2FA et renvoie 8 backup codes plaintext **une seule fois** (puis bcrypt-hashés) |
 | DELETE | `/api/me/2fa` | session | Body : `{ code }` (TOTP ou backup). Désactive et efface secret + backup codes |
+
+### 4.1b SSO & Social login (Enterprise SSO + SSO perso)
+
+Deux mécanismes de connexion fédérée, en plus des Credentials. **Aucun
+auto-provisioning** : on ne connecte que des membres déjà invités. Doc
+utilisateur : `docs/documentation/*/15-sso.md`.
+
+**Enterprise SSO (par tenant)** — `NextAuth(async (req) => …)` construit les
+providers dynamiquement selon le tenant résolu par le host (`<slug>.physalis.cloud`).
+Multi-provider (`admin.sso_configs`, 1:N, `@@unique(clientIdFk, provider)` +
+`enabled`). `Client.ssoEnforced` (tenant-wide) coupe le password. Providers
+natifs Google/GitHub/Okta/Keycloak ; objet OIDC générique pour Microsoft. id de
+callback **unique par provider** (`/api/auth/callback/{google|github|microsoft|okta|keycloak|oidc}`).
+Natif sous-domaine : `NEXTAUTH_URL` retirée + `PHYSALIS_URL` + wrapper
+`x-forwarded-host` dans `app/api/auth/[...nextauth]/route.ts` (next-auth dérive
+l'origine de `req.url` = `0.0.0.0:3000` en standalone). `lib/sso.ts`.
+
+**Social login / SSO perso (apps OAuth de Physalis, globales)** — un user lie
+explicitement son compte perso (table tenant `UserSocialIdentity`, lien via
+cookie d'intention signé HMAC) ; login = match `(provider, sub)`. Une seule app
+OAuth Physalis/provider → `redirectProxyUrl` (host canonique) gère le
+multi-sous-domaine. ids `<provider>-social`. `Client.socialLoginEnabled`
+(toggle tenant) + dédoublonnage des providers déjà en Enterprise. `lib/social-*.ts`.
+
+| Méthode | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/api/sso/available` | — | Providers Enterprise activés + `social` (dédoublonné) + `enforced`, pour la page de login. Tenant via host ou `?tenant=` |
+| GET/POST/DELETE | `/api/account/sso` | OWNER org principale | Config Enterprise par provider (secret chiffré, jamais réaffiché) ; GET expose aussi `socialLoginEnabled` |
+| POST | `/api/account/sso/enforce` | OWNER | `{ enforced }` → `Client.ssoEnforced` |
+| POST | `/api/account/sso/social` | OWNER | `{ enabled }` → `Client.socialLoginEnabled` |
+| POST | `/api/account/sso/test` | OWNER | Découverte OIDC (`.well-known`) de l'issuer |
+| GET/DELETE | `/api/account/social` | session | Identités sociales liées (liste / délier) |
+| POST | `/api/account/social/link` | session | Pose le cookie d'intention signé avant le flux OAuth de liaison |
+
+Migrations : `sso_config_admin`, `sso_v2_multi_provider`, `client_social_login_enabled`
+(ADMIN-ONLY) + `user_sso_columns`, `user_social_identity` (TENANT).
 
 ### 4.2 Organisations
 
@@ -772,12 +809,15 @@ Routes sous `/api/billing/*` — gardées par `requireUser()` + `requireOrgMembe
 
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/api/cron/rotation` | `X-Cron-Secret` | Déclenche la rotation automatique. Itère tous les tenants ACTIVE/TRIAL, cherche les `Secret` avec `rotationEnabled=true` et `rotationNextAt ≤ now`, **puis** les `ProjectEmailConfig` dus (rotation blue/green de la clé API email, cf. §4.20). Cf. §12. |
-| POST | `/api/cron/trial-expiry` | `X-Cron-Secret` | Expire les tenants dont `trialEndsAt ≤ now` (TRIAL → SUSPENDED) + envoie emails J-7 / J-30. Skip les clients `comped=true`. |
-| POST | `/api/cron/overage-reminders` | `X-Cron-Secret` | Envoie des rappels si quota orgs/users dépassé. |
-| POST | `/api/cron/email-usage` | `X-Cron-Secret` | Resync le quota email (plan + packs) au relais + reset du compteur au passage de cycle (`emailUsageResetAt`). Quotidien (06:10 UTC). Cf. §4.20. |
+| POST | `/api/cron/rotation` | `Bearer` (admin) | Déclenche la rotation automatique. Itère tous les tenants ACTIVE/TRIAL, cherche les `Secret` avec `rotationEnabled=true` et `rotationNextAt ≤ now`, **puis** les `ProjectEmailConfig` dus (rotation blue/green de la clé API email, cf. §4.20). Cf. §12. |
+| POST | `/api/cron/trial-expiry` | `Bearer` (admin) | Expire les tenants dont `trialEndsAt ≤ now` (TRIAL → SUSPENDED) + envoie emails J-7 / J-30. Skip les clients `comped=true`. |
+| POST | `/api/cron/overage-reminders` | `Bearer` (admin) | Envoie des rappels si quota orgs/users dépassé. |
+| POST | `/api/cron/email-usage` | `Bearer` (admin) | Resync le quota email (plan + packs) au relais + reset du compteur au passage de cycle (`emailUsageResetAt`). Quotidien (06:10 UTC). Cf. §4.20. |
 
-Auth : `timingSafeEqual(sha256(X-Cron-Secret), sha256(CRON_SECRET))` — rejet 401 si absent ou invalide.
+Auth : header standardisé `Authorization: Bearer <CRON_SECRET_ADMIN>` (tier admin),
+comparaison `timingSafeEqual` via `requireCronAuth(req, "admin")` (`lib/cron-auth.ts`) —
+rejet 401 si absent ou invalide. Le tier bas-privilège `CRON_SECRET_REPORT` ne couvre
+que `POST /api/admin/infra/backup`.
 
 ---
 
@@ -832,7 +872,7 @@ UI : onglet **Email** au niveau projet (à droite de Coffre), 4 sous-onglets Dé
 
 ### 4.21 Backup automatisé des projets
 
-Sauvegarde automatique et **chiffrée GPG** des bases de données d'un projet, **zéro-touch** : aucun script à installer, aucune action manuelle sur les VPS, **sans changer la posture sécurité** (Physalis ne sort jamais en SSH, ne voit jamais les données en clair, ne détient jamais de clé privée). Validé en prod (2026-06-01). Spec : [steps-docs/backups-auto.md](steps-docs/backups-auto.md) ; contrat agent : [steps-docs/backup-agent-contract.md](steps-docs/backup-agent-contract.md).
+Sauvegarde automatique et **chiffrée** des bases de données d'un projet, **zéro-touch** : aucun script à installer, aucune action manuelle sur les VPS, **sans changer la posture sécurité** (Physalis ne sort jamais en SSH, ne voit jamais les données en clair, ne détient jamais de clé privée). **Deux schémas de chiffrement** (dual-path par projet, `backupKeyScheme`) : **GPG** (legacy, clé par-VPS) et **enveloppe KMS** (recommandé, OpenBao transit — cf. ci-dessous). **Restauration orchestrée** (nouvelle DB ou en place) pour le schéma enveloppe. Validé e2e en prod (GPG 2026-06-01 ; KMS + restore 2026-06-24). Spec : [steps-docs/backups-auto.md](steps-docs/backups-auto.md) ; chantier KMS ① clos archivé : [steps-docs/done/backup-clients-kms-plan.md](steps-docs/done/backup-clients-kms-plan.md) + [steps-docs/done/backup-kms-architecture.md](steps-docs/done/backup-kms-architecture.md) ; contrat agent : [steps-docs/backup-agent-contract.md](steps-docs/backup-agent-contract.md).
 
 **Principe — livraison par FUSION.** À `POST /api/deploy`, si un backup est activé pour l'environnement déployé, Physalis **fusionne** un service `physalis-backup-agent` dans le `dockerCompose` qu'il sert déjà ([lib/compose-merge.ts](../lib/compose-merge.ts)). L'agent monte au `docker compose up` habituel, rejoint **le réseau du service DB** (résolution par nom), et n'a aucun port exposé. Désactivation propagée : si le backup est coupé, le service n'est plus fusionné → l'agent disparaît au prochain deploy.
 
@@ -842,21 +882,27 @@ Sauvegarde automatique et **chiffrée GPG** des bases de données d'un projet, *
 
 **Modèle de données** (schéma tenant) : `ClientBackupConfig` (activation + **destination au niveau client** : `backupServerId` → Server + `backupPath` ; chemin effectif d'un projet = `{base}/{slug}`), `ProjectBackupConfig` (env source, planning, rétention, état, token agent), `ProjectBackupDatabase` (**1-N** : dbType/dbName/dbHost/dbUser/passwordSecretKey/port/enabled), `ProjectBackupEntry` (historique rempli par l'agent). Enums `BackupDbType`/`BackupEntryStatus`, actions `AccessAction` `BACKUP_*`.
 
-**Agent** (repo dédié `argo-web/physalis-backup-service`, image `ghcr.io/argo-web/physalis-backup-agent`) : sidecar alpine. 1ᵉʳ boot → génère la clé GPG (batch `%no-protection`) + publie la pubkey. Boucle (~60 s) : poll planning + `force` ; à l'échéance, pour chaque DB → `pg_dump`/`mysqldump | gzip | gpg --encrypt(pub) | rsync --mkpath` vers le VPS de destination, puis report. **Un agent par projet** (cloisonnement : chaque agent n'a que son réseau + ses secrets + son token).
+**Agent** (repo dédié `argo-web/physalis-backup-service`, image `ghcr.io/argo-web/physalis-backup-agent`, **`pull_policy: always`** → MAJ propagée au redeploy) : sidecar alpine. Boucle (~60 s) : poll planning + `force` (+ restore + rotation) ; à l'échéance, pour chaque DB → `pg_dump --clean --if-exists`/`mysqldump | gzip | <chiffrement> | rsync --mkpath` vers le VPS de destination, puis report. **Fail-hard** : pas de fallback non chiffré. **Un agent par projet** (cloisonnement : chaque agent n'a que son réseau + ses secrets + son token). Selon `BACKUP_KEY_SCHEME` : GPG (génère la clé `%no-protection` + publie la pubkey) **ou** enveloppe (`penv_seal`, cf. ci-dessous).
+
+**Chiffrement par enveloppe KMS (système ①, recommandé).** [lib/kms.ts](../lib/kms.ts) — client OpenBao mince (cert-pinné `node:https`). **1 KEK par tenant** (`transit/keys/tenant-<slug>`, AES-256-GCM, jamais exportée). À l'agent : login **AppRole `agent-tenant-<slug>`** (capacité `datakey` **seule**, `secret_id` CIDR-bound à l'IP du VPS, injecté au deploy par `getAgentInjectionCreds` → `compose-merge`) → `transit/datakey` rend une **DEK** éphémère + sa **wDEK** (DEK enveloppée). L'agent chiffre `pg_dump|gzip` via `penv_seal` (AES-256-CTR + HMAC-SHA256, format `*.sql.gz.penv` : manifest base64 `{scheme,iv,wrappedDek}` + ciphertext + MAC). **Post-quantique par construction** (wrap symétrique). Le control plane Physalis utilise un **AppRole admin scopé** *provisioning-only* (`provisionTenantKey` : KEK + policies figées + rôles, **sans `decrypt`**, pas d'écriture de policy arbitraire). **Bascule** GPG↔KMS par projet via `setProjectBackupScheme` (provisionne + pose `backupKeyScheme`), prend effet au prochain deploy ; les `.penv` déjà produits restent restaurables. Réseau : **8200 exposé TLS, contrôle = AppRole CIDR-bound** (pas d'allowlist ufw par client). Posture/runbook : [steps-docs/done/backup-clients-kms-runbook.md](steps-docs/done/backup-clients-kms-runbook.md). HA OpenBao différée → [steps-docs/todo/ha-openbao.md](steps-docs/todo/ha-openbao.md).
+
+**Restauration orchestrée** (schéma enveloppe). [lib/restore.ts](../lib/restore.ts) + modèle `ProjectBackupRestore`. Le control plane crée un job ; l'agent le poll (`/api/backup/agent/restore-plan`, qui mint un **token `decrypt` court** via l'identité **restore `restore-tenant-<slug>`**), tire l'archive depuis la destination, `transit/decrypt(wDEK)` → DEK → `penv_open` → `psql/mysql` **en local** sur le VPS. **Le plaintext ne transite jamais par Physalis.** Deux modes : **nouvelle DB** (cible vide imposée, garde-fou agent) ou **en place** (`replaceExisting` ; remplace la base courante, possible grâce au dump `--clean`). **Les accès (rôles/mdp) ne sont pas touchés** (`pg_dump` = contenu seulement, pas les rôles cluster-level). Routes : `GET /api/backup/agent/restore-plan`, `POST /api/backup/agent/restore/report` (agent) ; `POST /api/projects/[slug]/backup/restore` (UI, EDITOR+).
 
 **Protocole agent ↔ Physalis** (auth `Authorization: Bearer sv_backup_*`, hors session) :
 
 | Méthode | Route | Description |
 |---|---|---|
-| POST | `/api/backup/agent/register` | Publie la pubkey GPG + fingerprint (1ʳᵉ exécution). |
+| POST | `/api/backup/agent/register` | Publie la pubkey GPG + fingerprint (schéma GPG, 1ʳᵉ exécution). |
 | GET | `/api/backup/agent/plan` | Planning (enabled, schedule, interval, retention, force) + liste DBs. Poll. |
 | POST | `/api/backup/agent/report` | Résultat d'un backup → `ProjectBackupEntry` + maj config + audit. |
+| GET | `/api/backup/agent/restore-plan` | Job de restauration en attente + **token `decrypt` court** (identité restore). Poll (schéma enveloppe). |
+| POST | `/api/backup/agent/restore/report` | Résultat d'une restauration → `ProjectBackupRestore` + audit. |
 
-**API REST (UI)** : `GET/PATCH/DELETE /api/projects/[slug]/backup`, `POST …/backup/enable`, `POST …/backup/force`, `GET …/backup/entries`, `GET …/backup/detect`, `POST …/backup/agent-token` (révéler une fois — fallback hors-Physalis) ; `GET/POST/DELETE/PATCH /api/account/backup` (activation + destination, niveau client). **Watchdog** : [lib/backup-cron.ts](../lib/backup-cron.ts) (dead-man's switch — alerte si un backup attendu ne remonte pas ; n'exécute rien). Gating visibilité UI : `isBackupModuleEnabled(email)` (`BACKUP_ENABLED` ou allowlist `BACKUP_ALLOWED_EMAILS`).
+**API REST (UI)** : `GET/PATCH/DELETE /api/projects/[slug]/backup`, `POST …/backup/enable`, `POST …/backup/force`, `POST …/backup/scheme` (bascule GPG↔KMS), `POST …/backup/restore` (déclenche un restore, body `{entryId, targetDbName?, replaceExisting?}`), `GET …/backup/entries` (paginé `?page=`, 10/page), `GET …/backup/detect`, `POST …/backup/agent-token` (révéler une fois — fallback hors-Physalis) ; `GET/POST/DELETE/PATCH /api/account/backup` (activation + destination, niveau client). Le GET backup expose `kmsAvailable` (UI conditionnelle). **Watchdog** : [lib/backup-cron.ts](../lib/backup-cron.ts) (dead-man's switch — alerte si un backup attendu ne remonte pas ; n'exécute rien). Gating visibilité UI : `isBackupModuleEnabled(email)` (`BACKUP_ENABLED` ou allowlist `BACKUP_ALLOWED_EMAILS`).
 
 **Prérequis destination** (one-time par VPS de backup, comme un serveur de déploiement) : (a) clé SSH du `Server` autorisée pour l'utilisateur SSH ; (b) **chemin de base inscriptible** par cet utilisateur (`chown`). Durcissement prévu (V1.1) : clé en forced-command **`rrsync` append-only**.
 
-UI : onglet **Backup** au niveau projet (select env + table multi-DB éditable, « Forcer » avec loader + auto-refresh, historique) ; activation + destination au niveau client dans **Paramètres → Sécurité**.
+UI : onglet **Backup** au niveau projet (select env + table multi-DB éditable, ligne **Chiffrement** + bouton « Activer le chiffrement KMS »/« Repasser en GPG », « Forcer » avec loader + auto-refresh, historique **paginé** avec bouton **Restaurer** par archive — 2 modes nouvelle DB / en place) ; activation + destination au niveau client dans **Paramètres → Sécurité**. Gating visibilité : `isBackupModuleEnabled(email)` (`BACKUP_ENABLED` ou allowlist).
 
 ---
 
@@ -918,7 +964,8 @@ Le backup de Physalis lui-même (primaire → secondaire, `scripts/backup/`) est
 - **Principe** : DEK AES-256 aléatoire **par archive** (format `.db.penv` = AES-256-CTR + HMAC-SHA256, *encrypt-then-MAC* — `openssl enc -aes-256-gcm` exclu car tag GCM non géré en CLI), wrappée par OpenBao (`transit/datakey`). Le **primaire** a la capacité `datakey` **seule** → il chiffre **sans pouvoir déchiffrer** ses backups ; le **secondaire** a `decrypt` **seule** → il déchiffre via `transit/decrypt`. La DEK ne touche **jamais** le disque. **PQ-safe** (wrap symétrique AES-256).
 - **Identités** : AppRole CIDR-bound, token TTL court ; `secret_id` en fichier `0600` livré en response-wrapping ; cert OpenBao **épinglé**.
 - **Scripts** : `scripts/backup/lib/penv.sh` (AEAD), `primary/physalis-dump-penv.sh`, `secondary/{penv-openbao.sh, physalis-pull-backup-penv.sh, physalis-restore-penv.sh, physalis-test-restore-penv.sh}`. Monitoring seal-status : `scripts/failover/secondary/secretvault-check-openbao.sh` (un reboot **rescelle** OpenBao single-node → backups muets sinon).
-- **À distinguer** des **backups projets clients** (§4.21, système ①, GPG) : ici c'est le backup **de la plateforme** (système ②). Même direction enveloppe+KMS prévue pour ① ensuite.
+- **Accès admin KMS / break-glass** : le root token est **révoqué après bootstrap** (aucun credential admin dormant — par décision). Regagner un accès privilégié = procédure **break-glass** : réactiver `disable_unauthed_generate_root_endpoints` (défaut `true` ≥ OpenBao 2.5.3 → `generate-root` en 405 ; **restart requis**, pas SIGHUP) → unseal 3/5 → `generate-root` avec les parts d'escrow → re-durcir + révoquer. Procédure validée 2026-06-22, détaillée dans [openbao.md §4.5](steps-docs/todo/openbao.md). Ex. : le report de backup (`CRON_SECRET_REPORT`) est désormais lu depuis le KV OpenBao via l'AppRole `secondaire` (plus de plaintext `/etc/cron.d`).
+- **À distinguer** des **backups projets clients** (§4.21, système ①) : ici c'est le backup **de la plateforme** (système ②). Le système ① a depuis adopté la **même direction enveloppe+KMS** (clos 2026-06-24 : 1 KEK/tenant, agent `datakey`, restore orchestré — cf. §4.21).
 - **Cible long terme** : OpenBao remplace aussi la `ENCRYPTION_KEY` statique (ci-dessus) — audit, rotation et scellement de la clé maîtresse — par migration champ par champ.
 
 ---
@@ -1279,7 +1326,8 @@ CMD : `prisma migrate deploy && auto-apply-tenant-migrations.mjs && bootstrap-ad
 | `EMAIL_MAILGUN_DOMAIN` | Domaine vérifié Mailgun (ex. `mail.physalis.cloud`) | dashboard Mailgun (DNS SPF + DKIM actifs) |
 | `EMAIL_MAILGUN_HOST` | Endpoint API Mailgun | `api.mailgun.net` (US) ou `api.eu.mailgun.net` (EU) |
 | `EMAIL_FROM` | Adresse expéditeur. pink-floyd **exige un email pur** (`contact@physalis.cloud`), pas le format RFC `Name <addr>`. Mailgun accepte les deux | défaut `contact@physalis.cloud` |
-| `CRON_SECRET` | Auth `X-Cron-Secret` sur `/api/cron/*` et routes rotation admin N8n. Comparaison en `timingSafeEqual`. | `openssl rand -hex 32` (≥ 32 bytes recommandé) |
+| `CRON_SECRET_ADMIN` | Auth `Authorization: Bearer` (tier admin) sur `/api/cron/*` + routes rotation admin N8n. `timingSafeEqual` via `requireCronAuth`. Détenu par GitHub Actions + N8n. | `openssl rand -hex 32` (≥ 32 bytes) |
+| `CRON_SECRET_REPORT` | Auth `Authorization: Bearer` (tier report bas-privilège) sur `POST /api/admin/infra/backup` uniquement. Détenu par les scripts de backup du VPS secondaire. | `openssl rand -hex 32` (≥ 32 bytes) |
 | `ROTATION_HMAC_KEY` | Signature HMAC-SHA256 des tokens callback N8n (window ±1h). Partagé entre Physalis et le workflow N8n. | `openssl rand -hex 32` |
 | `ROTATION_N8N_WEBHOOK_URL` | URL du webhook N8n pour la stratégie `DATABASE` | URL du workflow N8n |
 | `STRIPE_SECRET_KEY` | Clé secrète Stripe (sk_live_* ou sk_test_*) | Dashboard Stripe |
@@ -1618,7 +1666,7 @@ Rotation des mots de passe DB et secrets applicatifs selon un intervalle configu
 
 ### 12.2 Engine cron
 
-[lib/rotation-cron.ts](../lib/rotation-cron.ts) — appelé toutes les heures via `POST /api/cron/rotation` (auth `X-Cron-Secret`). Itère tous les clients ACTIVE/TRIAL, entre dans chaque schéma tenant, sélectionne les secrets avec `rotationNextAt ≤ now` et `rotationEnabled = true`.
+[lib/rotation-cron.ts](../lib/rotation-cron.ts) — appelé toutes les heures via `POST /api/cron/rotation` (auth `Authorization: Bearer` tier admin). Itère tous les clients ACTIVE/TRIAL, entre dans chaque schéma tenant, sélectionne les secrets avec `rotationNextAt ≤ now` et `rotationEnabled = true`.
 
 **Cron N8n** : workflow Schedule Trigger (toutes les heures) → HTTP POST `/api/cron/rotation`.
 
@@ -1657,7 +1705,8 @@ https://api.github.com/repos/<githubRepo>/actions/workflows/<githubWorkflow>/dis
 
 | Variable | Usage |
 |----------|-------|
-| `CRON_SECRET` | Auth `X-Cron-Secret` sur `/api/cron/rotation` + auth N8n admin routes |
+| `CRON_SECRET_ADMIN` | Auth `Authorization: Bearer` (tier admin) sur `/api/cron/*` + routes rotation admin N8n |
+| `CRON_SECRET_REPORT` | Auth `Authorization: Bearer` (tier report) sur `POST /api/admin/infra/backup` uniquement |
 | `ROTATION_HMAC_KEY` | Signature des tokens callback N8n (window ±1h) |
 | `ROTATION_N8N_WEBHOOK_URL` | URL du webhook N8n pour la stratégie DATABASE |
 | `GITHUB_DISPATCH_TOKEN` | Stocké dans OrgSecrets Physalis (pas en env app) |
