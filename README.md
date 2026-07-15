@@ -1,4 +1,4 @@
-> **Version 1.0.0**
+> **Version 1.1.0**
 >
 > Première version stable du repo self-host de Physalis. L'API, le schéma de
 > base de données et le flux d'installation suivent désormais le versioning
