@@ -96,7 +96,7 @@ Voir [prisma/tenant-schema.prisma](../prisma/tenant-schema.prisma).
 | `Organization` | Espace isolé multi-tenant ; l'org **`isPrimary`** = compte général du tenant | `slug` (unique), `name`, **`isPrimary`** (Boolean — org principale, ses quotas sont dérivés du plan ; les orgs ajoutées portent un bundle isolé), quotas isolés des orgs ajoutées : `maxServers` / `maxOidcProjects` / `maxSeats` (sièges confinés) / `maxEmailsPerMonth` / `extraEmails` (defaults = `ADDON_ORG_BUNDLE`), relations members/projects/invitations/secrets. Cf. [steps-docs/changement_pricing_orga.md](steps-docs/changement_pricing_orga.md) |
 | `OrgMember` | Membership d'un user dans une org | `(userId, organizationId)` unique ; `role` (OWNER \| ADMIN \| ADMIN_DEV \| DEV \| MEMBER) |
 | `OrgSecret` | Secret global org (ex. `GITHUB_DISPATCH_TOKEN`) | `(organizationId, key)` unique ; chiffré AES-256-GCM comme `Secret` |
-| `ClientEmailConfig` | Activation du service email Pink-Floyd au niveau **CLIENT** (singleton par tenant) | `tenantSlug` unique ; `enabled Boolean`, `accountId?` (compte Pink-Floyd **partagé par TOUS les projets/orgs du client**). Le métrage/quota email est au niveau client, pas par org (cf. §4.20). |
+| `ClientEmailConfig` | Activation du service email Physalis Email au niveau **CLIENT** (singleton par tenant) | `tenantSlug` unique ; `enabled Boolean`, `accountId?` (compte Physalis Email **partagé par TOUS les projets/orgs du client**). Le métrage/quota email est au niveau client, pas par org (cf. §4.20). |
 | `Invitation` | Invitation par email (TTL 48 h) | `tokenHash` (sha256, unique) ; `email`, `role`, `expiresAt`, `acceptedAt`, `invitedById` |
 | `AccessLog` | Audit log persistant (append-only) | `action` (enum `AccessAction`), `actorUser*` / `actorToken*` (dénormalisé), `organizationId`/`projectId`/`environmentId` (FK SetNull), `secretKey`, `ipAddress`, `userAgent`, `metadata` (JSON) |
 | `Project` | Conteneur applicatif | `slug` (unique global, **éditable**), `name`, **`organizationId`** (FK), `githubRepo` (`owner/repo`), `githubWorkflow` (par défaut `redeploy.yml`), relations envs/tokens/members/services/appAccounts/policies |
@@ -105,7 +105,7 @@ Voir [prisma/tenant-schema.prisma](../prisma/tenant-schema.prisma).
 | `Environment` | Bucket dans un projet (production, staging, …) | `(projectId, name)` unique ; `url` (URL déployée, optionnel), `dockerCompose` (contenu YAML, optionnel), **`serverId`** (FK Server, SetNull) + **`deployPath`** (chemin de deploy sur le VPS) |
 | `Secret` | Paire clé/valeur chiffrée (env-level) | `(environmentId, key)` unique ; `encryptedValue`/`iv`/`tag` base64 ; `category` (text nullable) ; `tags String[]` (filtrage intégrations) ; champs rotation : `rotationEnabled Boolean`, `rotationStrategy RotationStrategy?` (DATABASE / JWT_SECRET / WEBHOOK / REMINDER / API_KEY), `rotationIntervalDays Int?`, `rotationNextAt DateTime?`, `rotationLastStatus String?`, `dbHost/Port/Name/Type/User?` (pour DATABASE), `rotationWebhookUrl?` (pour WEBHOOK), `apiKeyId?` → `ApiKey` (pour API_KEY) |
 | `Service` | Service tiers du projet (Stripe, Firebase…) | `name`, `url?`, blob chiffré JSON `{user, password}` (`encryptedData`/`iv`/`tag`) ; lié au projet |
-| `ProjectEmailConfig` | Config email Pink-Floyd au niveau projet | `projectId` unique ; `domain`, `domainId`, `keyId`, **clé API chiffrée** (`encryptedKey`/`iv`/`tag`), `verified Boolean`, `dnsRecords Json` ; rotation blue/green : `rotationEnabled`, `rotationIntervalDays?`, `rotationNextAt?`, `rotationLastAt?`, `rotationLastStatus?`, `pendingRevokeKeyId?`. Injecté dans le `.env` de chaque env au déploiement. Cf. §4.20 |
+| `ProjectEmailConfig` | Config email Physalis Email au niveau projet | `projectId` unique ; `domain`, `domainId`, `keyId`, **clé API chiffrée** (`encryptedKey`/`iv`/`tag`), `verified Boolean`, `dnsRecords Json` ; rotation blue/green : `rotationEnabled`, `rotationIntervalDays?`, `rotationNextAt?`, `rotationLastAt?`, `rotationLastStatus?`, `pendingRevokeKeyId?`. Injecté dans le `.env` de chaque env au déploiement. Cf. §4.20 |
 | `AppAccount` | Compte de test pour login dans l'app | `name`, blob chiffré JSON `{user, password}` ; lié au projet |
 | `ClientBackupConfig` | Activation + **destination** du backup au niveau client | `tenantSlug` unique ; `enabled` ; `backupServerId?` → Server (`BackupDest`) + `backupPath?` (chemin de base ; chemin projet = `{base}/{slug}`). Cf. §4.21 |
 | `ProjectBackupConfig` | Config backup d'un projet | `projectId` unique ; `enabled`, `environmentName`, planning (`scheduleHour`/`intervalDays`/`backupNextAt`/`backupLastAt`/`backupLastStatus`/`forceRequestedAt`), rétention (`retentionDaily`/`Weekly`/`Monthly`), **chiffrement** (`backupKeyScheme?` `gpg-rsa4096`\|`kms-envelope-v1`, `kmsKeyName?` `tenant-<slug>`), GPG legacy (`gpgPublicKey?`/`gpgKeyId?`/`agentRegisteredAt?` — **pubkey only**), token agent (`agentTokenHash?` + chiffré `agentTokenEnc/Iv/Tag?`), `overdueAlertedAt?`. Cf. §4.21 |
@@ -829,24 +829,24 @@ que `POST /api/admin/infra/backup`.
 
 ---
 
-### 4.20 Email Pink-Floyd
+### 4.20 Email (Physalis Email)
 
-Module permettant à chaque **projet** d'envoyer ses emails via **Pink-Floyd** (serveur d'envoi auto-hébergé, repo séparé `argo-web/pink-floyd`). 1 service email par projet, activé au niveau org.
+Module permettant à chaque **projet** d'envoyer ses emails via **Physalis Email** (serveur d'envoi auto-hébergé, repo séparé `physalis-cloud/physalis-email`). 1 service email par projet, activé au niveau org.
 
-**Quota & métrage (niveau CLIENT)** : le quota d'envoi est **au niveau du compte client / tenant** (un seul compte Pink-Floyd par tenant, `ClientEmailConfig`), **pas par org**. Quota effectif = `PLAN_QUOTAS[plan].maxEmailsPerMonth` (**Free 3 000 / Shared 12 000 / Dedicated 15 000**/mois) **+ packs email** souscrits (`extraEmailsFromPacks(client)` : +5000·extraEmail5k + 15000·extraEmail15k + 30000·extraEmail30k). Calcul dans [lib/email-usage.ts](../lib/email-usage.ts) `monthlyEmailQuota(plan, packs)` → poussé au relais via `setEmailQuota` (au connect + cron quotidien `/api/cron/email-usage`, qui resette le compteur au passage de cycle `emailUsageResetAt`). Le compteur `used` vit côté relais. *(Isolation email par org = sous-chantier différé ; `Organization.maxEmailsPerMonth`/`extraEmails` posés mais non branchés. Cap journalier Free 100/j à venir côté relais — cf. [todo_v2.md](todo_v2.md).)*
+**Quota & métrage (niveau CLIENT)** : le quota d'envoi est **au niveau du compte client / tenant** (un seul compte Physalis Email par tenant, `ClientEmailConfig`), **pas par org**. Quota effectif = `PLAN_QUOTAS[plan].maxEmailsPerMonth` (**Free 3 000 / Shared 12 000 / Dedicated 15 000**/mois) **+ packs email** souscrits (`extraEmailsFromPacks(client)` : +5000·extraEmail5k + 15000·extraEmail15k + 30000·extraEmail30k). Calcul dans [lib/email-usage.ts](../lib/email-usage.ts) `monthlyEmailQuota(plan, packs)` → poussé au relais via `setEmailQuota` (au connect + cron quotidien `/api/cron/email-usage`, qui resette le compteur au passage de cycle `emailUsageResetAt`). Le compteur `used` vit côté relais. *(Isolation email par org = sous-chantier différé ; `Organization.maxEmailsPerMonth`/`extraEmails` posés mais non branchés. Cap journalier Free 100/j à venir côté relais — cf. [todo_v2.md](todo_v2.md).)*
 
 **Architecture**
-- Physalis dialogue avec la **management API** de Pink-Floyd (header `X-Service-Key`, hors chemin runtime) : création de compte, domaines, clés, expéditeurs, historique.
+- Physalis dialogue avec la **management API** de Physalis Email (header `X-Service-Key`, hors chemin runtime) : création de compte, domaines, clés, expéditeurs, historique.
 - L'app cliente **envoie** via `POST /v1/send` (header `x-api-key` = clé du projet).
-- Stockage : `ClientEmailConfig` (activation + compte Pink-Floyd partagé par tenant) et `ProjectEmailConfig` (domaine + **clé API chiffrée** + DNS). Les variables runtime (`PINK_FLOYD_API_KEY`, `PINK_FLOYD_DOMAIN`, `PINK_FLOYD_URL`) sont injectées dans le `.env` de chaque environnement **au déploiement** ([app/api/deploy/route.ts](../app/api/deploy/route.ts)), jamais stockées en `Secret` éditable.
-- **Gating** (phase de test) : `isEmailModuleEnabled(email)` = `PINK_FLOYD_EMAIL_ENABLED === "true"` **ou** email ∈ `PINK_FLOYD_EMAIL_ALLOWED_EMAILS` ; routes → 404 si non autorisé (fail-closed).
+- Stockage : `ClientEmailConfig` (activation + compte Physalis Email partagé par tenant) et `ProjectEmailConfig` (domaine + **clé API chiffrée** + DNS). Les variables runtime (`PHYSALIS_EMAIL_API_KEY`, `PHYSALIS_EMAIL_DOMAIN`, `PHYSALIS_EMAIL_URL`) sont injectées dans le `.env` de chaque environnement **au déploiement** ([app/api/deploy/route.ts](../app/api/deploy/route.ts)), jamais stockées en `Secret` éditable. *(Renommées depuis `PINK_FLOYD_*` en 2026-07 — rename sec, aucun client n'avait configuré le service à ce stade.)*
+- **Gating** (phase de test) : `isEmailModuleEnabled(email)` = `PHYSALIS_EMAIL_ENABLED === "true"` **ou** email ∈ `PHYSALIS_EMAIL_ALLOWED_EMAILS` ; routes → 404 si non autorisé (fail-closed).
 
 **Routes org**
 
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
 | GET | `/api/orgs/[slug]/email` | session, MEMBER | État du service (configuré / activé / compte). |
-| POST | `/api/orgs/[slug]/email` | session, ADMIN | Active : crée/lie le compte Pink-Floyd (idempotent via `externalRef = org.slug`). |
+| POST | `/api/orgs/[slug]/email` | session, ADMIN | Active : crée/lie le compte Physalis Email (idempotent via `externalRef = org.slug`). |
 | DELETE | `/api/orgs/[slug]/email` | session, ADMIN | Désactive (conserve compte + configs projet). |
 
 **Routes projet**
@@ -864,7 +864,7 @@ Module permettant à chaque **projet** d'envoyer ses emails via **Pink-Floyd** (
 | POST | `/api/projects/[slug]/email/reveal` | session, EDITOR | Révèle la clé API (audité `SECRET_REVEAL`, rate-limit 30/min/user). |
 | PATCH | `/api/projects/[slug]/email/rotation` | session, EDITOR | Active/règle la rotation auto (gated `org.rotationFeatureEnabled`). |
 
-**Rotation blue/green** : l'app lit la clé depuis son `.env` (propagé au redeploy), donc la révocation de l'ancienne clé est **différée d'un cycle** (fenêtre de grâce). Le cron (§4.18) crée la nouvelle clé + déclenche un redeploy, puis révoque l'ancienne au cycle suivant. Cf. [lib/rotators/pink-floyd-email.ts](../lib/rotators/pink-floyd-email.ts).
+**Rotation blue/green** : l'app lit la clé depuis son `.env` (propagé au redeploy), donc la révocation de l'ancienne clé est **différée d'un cycle** (fenêtre de grâce). Le cron (§4.18) crée la nouvelle clé + déclenche un redeploy, puis révoque l'ancienne au cycle suivant. Cf. [lib/rotators/physalis-email.ts](../lib/rotators/physalis-email.ts).
 
 UI : onglet **Email** au niveau projet (à droite de Coffre), 4 sous-onglets Détails / Envoi / Expéditeurs / Historique. Sécurité : cf. [security.md §3.15](security.md).
 
@@ -1320,12 +1320,12 @@ CMD : `prisma migrate deploy && auto-apply-tenant-migrations.mjs && bootstrap-ad
 | `NEXTAUTH_URL` | URL canonique (https). Fallback pour `buildAcceptUrl` si pas de `Host` header | — |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Bootstrap 1er admin | utilisé si `User` table vide |
 | `ALLOW_REGISTRATION` | `"true"` ouvre `/register` | défaut `"false"` |
-| `EMAIL_PINKFLOYD_URL` | URL du relay pink-floyd (active le transport principal). Sans cette var, fallback automatique vers Mailgun puis stub | `https://pink-floyd.argoweb.fr` |
-| `EMAIL_PINKFLOYD_API_KEY` | Clé API pink-floyd (`ph_live_sk_*`) — header `x-api-key` | côté pink-floyd, à régénérer en cas de fuite |
+| `EMAIL_PHYSALIS_URL` | URL du relay physalis-email (active le transport principal). Sans cette var, fallback automatique vers Mailgun puis stub | `https://physalis-email.argoweb.fr` |
+| `EMAIL_PHYSALIS_API_KEY` | Clé API physalis-email (`ph_live_sk_*`) — header `x-api-key` | côté physalis-email, à régénérer en cas de fuite |
 | `EMAIL_MAILGUN_API_KEY` | Clé API Mailgun (fallback historique, conservé pendant la transition) | dashboard Mailgun |
 | `EMAIL_MAILGUN_DOMAIN` | Domaine vérifié Mailgun (ex. `mail.physalis.cloud`) | dashboard Mailgun (DNS SPF + DKIM actifs) |
 | `EMAIL_MAILGUN_HOST` | Endpoint API Mailgun | `api.mailgun.net` (US) ou `api.eu.mailgun.net` (EU) |
-| `EMAIL_FROM` | Adresse expéditeur. pink-floyd **exige un email pur** (`contact@physalis.cloud`), pas le format RFC `Name <addr>`. Mailgun accepte les deux | défaut `contact@physalis.cloud` |
+| `EMAIL_FROM` | Adresse expéditeur. physalis-email **exige un email pur** (`contact@physalis.cloud`), pas le format RFC `Name <addr>`. Mailgun accepte les deux | défaut `contact@physalis.cloud` |
 | `CRON_SECRET_ADMIN` | Auth `Authorization: Bearer` (tier admin) sur `/api/cron/*` + routes rotation admin N8n. `timingSafeEqual` via `requireCronAuth`. Détenu par GitHub Actions + N8n. | `openssl rand -hex 32` (≥ 32 bytes) |
 | `CRON_SECRET_REPORT` | Auth `Authorization: Bearer` (tier report bas-privilège) sur `POST /api/admin/infra/backup` uniquement. Détenu par les scripts de backup du VPS secondaire. | `openssl rand -hex 32` (≥ 32 bytes) |
 | `ROTATION_HMAC_KEY` | Signature HMAC-SHA256 des tokens callback N8n (window ±1h). Partagé entre Physalis et le workflow N8n. | `openssl rand -hex 32` |
@@ -1342,23 +1342,27 @@ CMD : `prisma migrate deploy && auto-apply-tenant-migrations.mjs && bootstrap-ad
 
 [scripts/bootstrap-admin.mjs](../scripts/bootstrap-admin.mjs) — appelé par le CMD du runtime. Si la table `User` est vide : crée le 1er user avec `User.role = ADMIN` ET son organisation par défaut (slug = handle email, déduplication automatique en cas de collision) avec un OrgMember(OWNER). No-op sinon.
 
-### 9.5 Email transport (pink-floyd + Mailgun fallback)
+### 9.5 Email transport (physalis-email + Mailgun fallback)
 
 [lib/email.ts](../lib/email.ts) expose `sendEmail()` et `sendInvitationEmail()`. Le transport est sélectionné au runtime selon les variables d'environnement présentes (premier match) :
 
-1. `EMAIL_PINKFLOYD_URL` + `EMAIL_PINKFLOYD_API_KEY` → **pink-floyd** (provider actif en prod depuis 2026-05)
+1. `EMAIL_PHYSALIS_URL` + `EMAIL_PHYSALIS_API_KEY` → **physalis-email** (provider actif en prod depuis 2026-05)
 2. `EMAIL_MAILGUN_API_KEY` + `EMAIL_MAILGUN_DOMAIN` → **Mailgun** (fallback de transition)
 3. *(rien)* → stdout stub (dev par défaut, log le message au lieu de l'envoyer)
 
-L'instance du transport est mise en cache au niveau module (lazy + une seule fois pour la durée du process). Retirer les 2 env vars `EMAIL_PINKFLOYD_*` rollback vers Mailgun sans modifier le code ni redéployer l'image.
+L'instance du transport est mise en cache au niveau module (lazy + une seule fois pour la durée du process). Retirer les 2 env vars `EMAIL_PHYSALIS_*` rollback vers Mailgun sans modifier le code ni redéployer l'image.
 
-#### pink-floyd
+> **Rename `pink-floyd` → `physalis-email` (2026-07) — repli sur les anciens noms d'env, TEMPORAIRE.** Les vars **serveur** sont lues d'abord au nouveau nom puis en repli sur l'ancien : `EMAIL_PHYSALIS_URL ?? EMAIL_PINKFLOYD_URL`, `EMAIL_PHYSALIS_API_KEY ?? EMAIL_PINKFLOYD_API_KEY`, et côté module email par projet `PHYSALIS_EMAIL_SERVICE_URL ?? PINK_FLOYD_SERVICE_URL`, `PHYSALIS_EMAIL_SERVICE_KEY ?? PINK_FLOYD_SERVICE_KEY`, `PHYSALIS_EMAIL_ENABLED ?? PINK_FLOYD_EMAIL_ENABLED`, `PHYSALIS_EMAIL_ALLOWED_EMAILS ?? PINK_FLOYD_EMAIL_ALLOWED_EMAILS`. L'env prod et OpenBao peuvent donc être basculés **après** le déploiement, sans fenêtre de coupure. **À retirer une fois la bascule faite** : `function env(` dans [lib/physalis-email.ts](../lib/physalis-email.ts) et `physalisEmailUrl`/`physalisEmailApiKey` dans [lib/email.ts](../lib/email.ts).
+>
+> Les vars injectées dans le `.env` des **clients** (`PHYSALIS_EMAIL_API_KEY`/`_DOMAIN`/`_URL`) ont fait l'objet d'un **rename sec, sans doublon** : aucun client n'avait configuré le service à la date du rename.
 
-Relay HTTP self-hosted (Nodemailer + Redis derrière) sur `https://pink-floyd.argoweb.fr`. Permet de couper la dépendance Mailgun, d'utiliser un sender propre (`contact@physalis.cloud`) et de centraliser la délivrabilité avec les autres services Argoweb.
+#### physalis-email
 
-- Endpoint : `POST ${EMAIL_PINKFLOYD_URL}/v1/send`
+Relay HTTP self-hosted (Nodemailer + Redis derrière) sur `https://physalis-email.argoweb.fr`. Permet de couper la dépendance Mailgun, d'utiliser un sender propre (`contact@physalis.cloud`) et de centraliser la délivrabilité avec les autres services Argoweb.
+
+- Endpoint : `POST ${EMAIL_PHYSALIS_URL}/v1/send`
 - Auth : header `x-api-key: <key>`
-- Body : `{ from, to, subject, text, html? }` — `from` doit être un email pur (pas le format RFC `Display Name <addr>`), validation Zod stricte côté pink-floyd
+- Body : `{ from, to, subject, text, html? }` — `from` doit être un email pur (pas le format RFC `Display Name <addr>`), validation Zod stricte côté physalis-email
 - Succès : `202 Accepted` + `{ success: true, messageId, queued: true }` — l'email est enfilé dans Redis, l'envoi réel est asynchrone
 - Erreurs : `400` sender non enregistré, `401` clé invalide, `500` backend down
 
@@ -1375,9 +1379,9 @@ Les URLs d'invitation sont dérivées du `Host` header de la requête HTTP (cf. 
 
 Prérequis délivrabilité (vrai pour les deux providers) :
 
-- Domaine `physalis.cloud` configuré avec SPF + DKIM côté provider (pink-floyd : DNS sur le relay ; Mailgun : statut « Active »).
+- Domaine `physalis.cloud` configuré avec SPF + DKIM côté provider (physalis-email : DNS sur le relay ; Mailgun : statut « Active »).
 - Pour Gmail : ajouter un record DMARC `p=none` minimum (sinon les premiers emails partent en Promotions ou en Spam).
-- Sender utilisé : `contact@physalis.cloud` (pas de display name dans `EMAIL_FROM`, pink-floyd ajoute lui-même le nom d'expéditeur côté backend si configuré).
+- Sender utilisé : `contact@physalis.cloud` (pas de display name dans `EMAIL_FROM`, physalis-email ajoute lui-même le nom d'expéditeur côté backend si configuré).
 
 ---
 

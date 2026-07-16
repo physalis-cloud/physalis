@@ -137,8 +137,8 @@ model Organization {
   createdAt              DateTime              @default(now())
 }
 
-/// Configuration email Pink-Floyd au niveau CLIENT (tenant) — singleton par
-/// schéma tenant. Le compte Pink-Floyd est créé avec `externalRef = tenantSlug`
+/// Configuration email Physalis Email au niveau CLIENT (tenant) — singleton par
+/// schéma tenant. Le compte Physalis Email est créé avec `externalRef = tenantSlug`
 /// (globalement unique, contrairement au slug d'org qui ne l'est qu'au sein du
 /// tenant). `accountId` = compte partagé par TOUS les projets/orgs du client.
 /// `enabled` : interrupteur explicite. `tenantSlug` sert de clé d'upsert.
@@ -332,7 +332,7 @@ enum BackupEntryStatus {
   FAILED
 }
 
-/// Configuration email Pink-Floyd au niveau projet : un domaine + une clé API
+/// Configuration email Physalis Email au niveau projet : un domaine + une clé API
 /// par projet, partagés par tous ses environnements (injectés dans le .env au
 /// déploiement). La clé API est chiffrée au repos (même schéma AES-256-GCM que
 /// Secret/Service). Les enregistrements DNS sont mémorisés en JSON.

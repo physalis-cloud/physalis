@@ -1052,7 +1052,7 @@
     "email": {
       "title": "Email",
       "intro": "Configurez l'envoi d'emails du projet. Le domaine et la clé API sont injectés dans le .env de chaque environnement au déploiement.",
-      "serviceDisabled": "Le service email n'est pas activé pour ce client. Activez-le depuis la page Sécurité (clic sur votre email dans l'en-tête).",
+      "serviceDisabled": "Le service email n'est pas activé pour ce client. Activez-le depuis Mon compte → onglet Services.",
       "notConfigured": "Service email indisponible (non configuré côté serveur).",
       "notConnected": "Aucun domaine email connecté pour ce projet.",
       "domainLabel": "Domaine d'envoi",

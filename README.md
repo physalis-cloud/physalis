@@ -47,9 +47,9 @@ L'application supporte plusieurs organisations isolées, chacune avec ses propre
 
 **Pour les machines** — authentification OIDC GitHub Actions. Au moment du déploiement, le workflow GitHub obtient un token signé par GitHub (sans aucun secret stocké dans GitHub Secrets) et le présente à Physalis. Le vault vérifie la signature cryptographiquement, contrôle que le repo, le workflow et la branche correspondent exactement à une règle autorisée, puis retourne en une seule requête l'ensemble du bundle de déploiement : variables d'environnement déchiffrées, clé SSH du serveur cible, chemin de déploiement, docker-compose, et credentials du registry Docker.
 
-### Envoi d'emails par projet (Pink-Floyd)
+### Envoi d'emails par projet (Physalis Email)
 
-Chaque projet peut être relié à **Pink-Floyd**, un serveur d'envoi d'emails auto-hébergé, pour envoyer ses emails depuis son propre domaine. L'organisation active le service une fois (compte partagé), puis chaque projet connecte son domaine, configure les DNS (SPF/DKIM/DMARC) et gère ses expéditeurs autorisés depuis l'interface — onglet **Email** avec sous-sections Détails, Envoi, Expéditeurs, Historique. La clé API est chiffrée au repos et injectée automatiquement dans le `.env` de chaque environnement au déploiement, avec **rotation automatique** optionnelle (blue/green). Physalis n'est jamais dans le chemin runtime d'envoi.
+Chaque projet peut être relié à **Physalis Email**, un serveur d'envoi d'emails auto-hébergé, pour envoyer ses emails depuis son propre domaine. L'organisation active le service une fois (compte partagé), puis chaque projet connecte son domaine, configure les DNS (SPF/DKIM/DMARC) et gère ses expéditeurs autorisés depuis l'interface — onglet **Email** avec sous-sections Détails, Envoi, Expéditeurs, Historique. La clé API est chiffrée au repos et injectée automatiquement dans le `.env` de chaque environnement au déploiement, avec **rotation automatique** optionnelle (blue/green). Physalis n'est jamais dans le chemin runtime d'envoi.
 
 ### Traçabilité complète
 
@@ -198,7 +198,7 @@ RPO 24h, RTO 5-20 min (restore DB) + propagation DNS. Failover manuel
 Next.js 15 (App Router) · TypeScript · Prisma 6 + PostgreSQL 16 ·
 NextAuth v5 (Credentials, JWT) · bcryptjs (salt 12) · AES-256-GCM ·
 jose 6 (OIDC JWKS) · 2FA TOTP (otplib) · Tailwind 3 · Mailgun · Docker
-multi-stage (node:22-alpine) · intégration Pink-Floyd (emails par projet).
+multi-stage (node:22-alpine) · intégration Physalis Email (emails par projet).
 
 ## Tests
 

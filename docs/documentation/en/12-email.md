@@ -89,12 +89,12 @@ The **Details → Environment variables** tab lists the variables injected into
 **each environment's** `.env` at deployment:
 
 ```
-PINK_FLOYD_API_KEY=...           # project API key (secret)
-PINK_FLOYD_DOMAIN=mydomain.com   # your sending domain
-PINK_FLOYD_URL=https://...       # sending service endpoint
+PHYSALIS_EMAIL_API_KEY=...           # project API key (secret)
+PHYSALIS_EMAIL_DOMAIN=mydomain.com   # your sending domain
+PHYSALIS_EMAIL_URL=https://...       # sending service endpoint
 ```
 
-- `PINK_FLOYD_API_KEY` is never stored in clear text: it is encrypted
+- `PHYSALIS_EMAIL_API_KEY` is never stored in clear text: it is encrypted
   (AES-256-GCM) and decrypted only at deployment. You can **Reveal** it
   occasionally from the UI (EDITOR+, audited action).
 - Your application reads these variables to call the sending service.

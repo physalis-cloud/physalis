@@ -5,12 +5,13 @@ icon: RiMailSendLine
 summary: Envoyer des emails depuis son propre domaine — connexion du domaine, DNS (SPF/DKIM/DMARC), expéditeurs, email de test, et clé API injectée dans les environnements.
 level: intermédiaire
 duration: ~15 min
-published: false
+published: true
 ---
 
 # Configurer le service d'emails
 
 Ce guide branche l'**envoi d'emails depuis votre propre domaine** sur un projet.
+
 À la fin, votre application enverra ses emails via le service Physalis, avec une
 clé API et un domaine **injectés automatiquement** dans le `.env` de chaque
 environnement au déploiement.
@@ -23,8 +24,7 @@ environnement au déploiement.
 
 ## Prérequis
 
-- Le **service email activé pour le client** : un **OWNER** l'active depuis la
-  page **Sécurité** (clic sur votre email dans l'en-tête).
+- Le **service email activé pour le client**.
 - Le rôle **EDITOR** ou supérieur sur le projet (connexion, DNS, envoi).
 - L'accès à votre **registrar DNS** pour créer des enregistrements.
 - Un **projet** existant (cf. [Créer un projet…](tuto:premier-deploiement-github)).
@@ -32,12 +32,23 @@ environnement au déploiement.
 ### Notes
 
 L'**activation du service email** est un réglage **client**, à faire **une seule
-fois** (par un OWNER). Ensuite, chaque projet connecte son propre domaine. Un
-projet ne peut connecter **qu'un seul domaine** à la fois.
+fois**.
+
+Ensuite, chaque projet connecte son propre domaine. Un projet ne peut connecter
+**qu'un seul domaine** à la fois.
 
 ---
 
-## 1. Connecter votre domaine
+## 1. Activer le service et connecter votre domaine
+
+### Service email
+
+Allez dans **Mon compte** → onglet **Services** → cliquez sur le bouton
+**« Activer le service email »**.
+
+![Activation du service email depuis Mon compte](/tutos/fr/configurer-service-email-01.png)
+
+### Connecter votre domaine
 
 > Réservé au rôle **EDITOR** ou supérieur.
 
@@ -45,6 +56,8 @@ projet ne peut connecter **qu'un seul domaine** à la fois.
 2. Saisissez votre **domaine d'envoi** (ex. `mondomaine.com`) → **Connecter**.
 3. Physalis enregistre le domaine, génère une **clé API dédiée** (chiffrée
    immédiatement) et affiche les **enregistrements DNS à créer**.
+
+![Connexion du domaine d'envoi dans l'onglet Email du projet](/tutos/fr/configurer-service-email-02.png)
 
 ## 2. Créer les enregistrements DNS
 
@@ -55,7 +68,7 @@ votre registrar :
 - **DKIM** — signe cryptographiquement vos emails
 - **DMARC** — politique d'authentification et de reporting
 
-![Enregistrements DNS à créer](/tutos/configurer-service-email-02.png)
+![Enregistrements DNS à créer](/tutos/fr/configurer-service-email-03.png)
 
 Ajoutez ces trois enregistrements chez votre **registrar DNS**.
 
@@ -65,10 +78,13 @@ Ajoutez ces trois enregistrements chez votre **registrar DNS**.
 ## 3. Vérifier les DNS
 
 De retour dans l'onglet **Détails**, cliquez sur **« Vérifier les DNS »**.
-Physalis contrôle SPF / DKIM / DMARC et affiche le résultat (ex. *« SPF : oui ·
-DKIM : oui · DMARC : oui »*). Une fois tout valide, le badge passe à **Vérifié**.
 
-![Vérification des DNS](/tutos/configurer-service-email-03.png)
+Physalis contrôle SPF / DKIM / DMARC et affiche le résultat (ex. *« SPF : oui ·
+DKIM : oui · DMARC : oui »*).
+
+Une fois tout validé, le badge passe à **Vérifié**.
+
+![Vérification des DNS](/tutos/fr/configurer-service-email-04.png)
 
 ## 4. Ajouter un expéditeur autorisé
 
@@ -76,6 +92,8 @@ Avant d'envoyer, déclarez au moins une adresse « From » sur votre domaine.
 
 Onglet **Expéditeurs** → renseignez l'**Adresse** (ex. `hello@mondomaine.com`)
 et le **Nom** (ex. `Support`) → **Ajouter**.
+
+![Ajout d'un expéditeur autorisé dans l'onglet Expéditeurs](/tutos/fr/configurer-service-email-05.png)
 
 > Un expéditeur est une **identité d'envoi** autorisée, pas une boîte de
 > réception.
@@ -88,7 +106,7 @@ Onglet **Envoi** (EDITOR+) :
 2. renseignez **Destinataire**, **Objet** et **Message (HTML)** ;
 3. **Envoyer**.
 
-![Envoi d'un email de test](/tutos/configurer-service-email-05.png)
+![Envoi d'un email de test](/tutos/fr/configurer-service-email-06.png)
 
 > Les envois depuis l'UI sont **limités en débit** (anti-abus) : cet onglet sert
 > aux tests. Pour l'envoi applicatif, utilisez les variables injectées (étape 6).
@@ -99,9 +117,9 @@ L'onglet **Détails → Variables d'environnement** liste ce qui est injecté da
 le `.env` de **chaque environnement** au déploiement :
 
 ```
-PINK_FLOYD_API_KEY=...            # clé API du projet (secrète, chiffrée)
-PINK_FLOYD_DOMAIN=mondomaine.com  # votre domaine d'envoi
-PINK_FLOYD_URL=https://...        # endpoint du service d'envoi
+PHYSALIS_EMAIL_API_KEY=...            # clé API du projet (secrète, chiffrée)
+PHYSALIS_EMAIL_DOMAIN=mondomaine.com  # votre domaine d'envoi
+PHYSALIS_EMAIL_URL=https://...        # endpoint du service d'envoi
 ```
 
 Votre application lit ces variables pour appeler le service. La clé n'est
@@ -119,22 +137,25 @@ une section **Rotation automatique** :
 2. définissez l'**intervalle (en jours)** ;
 3. **Enregistrer**.
 
-La rotation suit une stratégie **blue/green** : nouvelle clé générée →
-redéploiement → l'ancienne n'est révoquée qu'au cycle suivant (le temps que tous
-les environnements aient redéployé).
+La rotation suit une stratégie **blue/green** :
+
+nouvelle clé générée → redéploiement → l'ancienne n'est révoquée qu'au cycle
+suivant (le temps que tous les environnements aient redéployé).
+
+![Section Rotation automatique de la clé API dans l'onglet Détails](/tutos/fr/configurer-service-email-07.png)
 
 ## Vérifier que tout fonctionne
 
 - Le domaine affiche le badge **Vérifié** (étape 3).
 - L'**email de test** est bien reçu (étape 5).
 - L'onglet **Historique** liste l'envoi avec le statut **Envoyé**.
-- Après un déploiement, votre application trouve les variables `PINK_FLOYD_*`
-  dans son environnement.
+- Après un déploiement, votre application trouve les variables
+  `PHYSALIS_EMAIL_*` dans son environnement.
 
 ## En cas de problème
 
-- **« Le service email n'est pas activé pour ce client »** → un OWNER doit
-  l'activer depuis la page Sécurité (voir Prérequis).
+- **« Le service email n'est pas activé pour ce client »** → activez-le depuis
+  **Mon compte → onglet Services** (étape 1).
 - **La vérification DNS échoue** → propagation en cours, ou un enregistrement
   mal recopié. Attendez et re-vérifiez ; comparez au tableau de l'étape 2.
 - **Impossible d'envoyer** → aucun **expéditeur** déclaré (étape 4), ou domaine

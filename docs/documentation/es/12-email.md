@@ -92,12 +92,12 @@ La pestaña **Detalles → Variables de entorno** lista las variables inyectadas
 en el `.env` de **cada entorno** durante el despliegue:
 
 ```
-PINK_FLOYD_API_KEY=...          # clave API del proyecto (secreta)
-PINK_FLOYD_DOMAIN=midominio.com # tu dominio de envío
-PINK_FLOYD_URL=https://...      # endpoint del servicio de envío
+PHYSALIS_EMAIL_API_KEY=...          # clave API del proyecto (secreta)
+PHYSALIS_EMAIL_DOMAIN=midominio.com # tu dominio de envío
+PHYSALIS_EMAIL_URL=https://...      # endpoint del servicio de envío
 ```
 
-- `PINK_FLOYD_API_KEY` nunca se almacena en claro: se cifra (AES-256-GCM) y
+- `PHYSALIS_EMAIL_API_KEY` nunca se almacena en claro: se cifra (AES-256-GCM) y
   solo se descifra en el despliegue. Puedes **Revelarla** puntualmente desde la
   interfaz (EDITOR+, acción auditada).
 - Tu aplicación lee estas variables para llamar al servicio de envío.

@@ -4,7 +4,7 @@
 > Mise à jour 2026-05-15 : intègre les phases 11 (intégration tokens), 12 (rotation automatique),
 > 13 (API Gateway), le timing-attack fix, l'isolation multi-tenant complète,
 > les tests E2E Playwright et les nouvelles lacunes identifiées.
-> Mise à jour 2026-05-30 : module Email Pink-Floyd (§3.15) — revue manuelle + durcissements
+> Mise à jour 2026-05-30 : module Email (Physalis Email) (§3.15) — revue manuelle + durcissements
 > (scoping expéditeurs au domaine, rate-limit send/reveal, historique indexé par compte).
 
 ---
@@ -38,7 +38,7 @@
 | Trufflehog CI | ✅ | Scan git history sur PR + push full history (`--only-verified`) |
 | Scans DAST (ZAP / Nuclei) | ✅ | À chaque push `staging` post-déploiement : OWASP ZAP baseline + Nuclei (cve/misconfig/exposure/headers). Cf. §3.16 |
 | HTTP 405 | ✅ | ~80 tests integ sur les méthodes non autorisées |
-| Module Email Pink-Floyd | ✅ | Config par projet, clé API chiffrée AES-256-GCM, gating allowlist fail-closed, RBAC, historique scopé par compte ; revu 2026-05-30 (§3.15) |
+| Module Email (Physalis Email) | ✅ | Config par projet, clé API chiffrée AES-256-GCM, gating allowlist fail-closed, RBAC, historique scopé par compte ; revu 2026-05-30 (§3.15) |
 | npm audit / CVE CI (SCA) | ✅ | Job `npm-audit` (`--omit=dev --audit-level=high`) dans `security.yml`, bloque sur high/critical. Cf. §3.14.2 |
 | Session fixation (password change / 2FA) | ⚠️ | Non vérifié — les JWT NextAuth existants sont-ils invalidés ? |
 | ENCRYPTION_KEY re-keying | ✅ | Script `scripts/rekey-encryption.mjs` (dual-key, idempotent, dry-run) + procédure ops. Cf. §3.14.4 |
@@ -332,32 +332,32 @@ Le middleware `routing locale` ([middleware.ts](../middleware.ts), cf. `physalis
 
 **Limite du mitigant** : un futur `<Link>` ou `router.push("/foo")` ajouté par erreur (oubli de l'import depuis `@/i18n/navigation`) recrée le bug silencieusement. Pas de garde-fou compilation/lint — la convention est documentée mais reposée sur la discipline. Cf. `todo_v2.md → i18n — root cause cross-domain` pour le fix à la source (utiliser `x-forwarded-host` côté middleware).
 
-### 3.15 Module Email Pink-Floyd (✅ — revu 2026-05-30)
+### 3.15 Module Email (Physalis Email) (✅ — revu 2026-05-30)
 
-Module permettant à chaque projet d'envoyer ses emails via Pink-Floyd (serveur d'envoi auto-hébergé, repo séparé). Physalis dialogue avec Pink-Floyd via la **management API** (header `X-Service-Key`, hors chemin runtime) ; l'app cliente envoie via `POST /v1/send` avec la **clé API du projet** (`ph_live_sk_…`).
+Module permettant à chaque projet d'envoyer ses emails via Physalis Email (serveur d'envoi auto-hébergé, repo séparé). Physalis dialogue avec Physalis Email via la **management API** (header `X-Service-Key`, hors chemin runtime) ; l'app cliente envoie via `POST /v1/send` avec la **clé API du projet** (`ph_live_sk_…`).
 
 **Architecture & stockage**
 - Config **par projet** dans `ProjectEmailConfig` (tenant schema) : domaine, IDs PF, **clé API chiffrée AES-256-GCM** (`encryptedKey/iv/tag`), DNS en JSON. Activation **par org** dans `OrgEmailConfig` (`enabled`, `accountId` PF partagé).
-- Variables runtime (`PINK_FLOYD_API_KEY`, `PINK_FLOYD_DOMAIN`, `PINK_FLOYD_URL`) injectées dans le `.env` de chaque environnement **au déploiement** ([app/api/deploy/route.ts](../app/api/deploy/route.ts)) — jamais stockées en `Secret` éditable.
-- Rotation auto **blue/green** de la clé API ([lib/rotators/pink-floyd-email.ts](../lib/rotators/pink-floyd-email.ts)) : nouvelle clé + redeploy, révocation de l'ancienne différée d'un cycle (fenêtre de grâce). Branchée sur le cron de rotation existant, gated `org.rotationFeatureEnabled`.
+- Variables runtime (`PHYSALIS_EMAIL_API_KEY`, `PHYSALIS_EMAIL_DOMAIN`, `PHYSALIS_EMAIL_URL`) injectées dans le `.env` de chaque environnement **au déploiement** ([app/api/deploy/route.ts](../app/api/deploy/route.ts)) — jamais stockées en `Secret` éditable.
+- Rotation auto **blue/green** de la clé API ([lib/rotators/physalis-email.ts](../lib/rotators/physalis-email.ts)) : nouvelle clé + redeploy, révocation de l'ancienne différée d'un cycle (fenêtre de grâce). Branchée sur le cron de rotation existant, gated `org.rotationFeatureEnabled`.
 
 **Contrôles d'accès**
-- **Gating fail-closed** : `isEmailModuleEnabled(email)` = `PINK_FLOYD_EMAIL_ENABLED === "true"` **ou** email ∈ `PINK_FLOYD_EMAIL_ALLOWED_EMAILS`. Routes → **404** si non autorisé (masque l'existence). Le rôle SUPERADMIN n'est pas porté par la session tenant — d'où le choix de l'allowlist par email.
+- **Gating fail-closed** : `isEmailModuleEnabled(email)` = `PHYSALIS_EMAIL_ENABLED === "true"` **ou** email ∈ `PHYSALIS_EMAIL_ALLOWED_EMAILS`. Routes → **404** si non autorisé (masque l'existence). Le rôle SUPERADMIN n'est pas porté par la session tenant — d'où le choix de l'allowlist par email.
 - **RBAC** : lecture VIEWER, mutations EDITOR, activation org ADMIN, rotation EDITOR + feature org. Toutes les routes passent par `requireProjectMember`/`requireOrgMember` (→ 401 sans session).
 - **Pas d'IDOR** : `accountId` (org) et `domainId` (projet) sont dérivés côté serveur depuis la config du projet autorisé, jamais pris du client.
 - **Révélation de la clé** (`POST /email/reveal`) : EDITOR + **auditée** (`SECRET_REVEAL`) + rate-limitée (30/min/user). Bouton masqué aux non-EDITOR côté UI.
 
 **Audit 2026-05-30 — findings traités**
-- **#1 (moyen)** Mutation d'expéditeur scopée au **domaine** et non plus seulement au compte (Pink-Floyd `getSender` + check `domainId`) — empêchait un projet de muter l'expéditeur d'un autre projet du même compte.
+- **#1 (moyen)** Mutation d'expéditeur scopée au **domaine** et non plus seulement au compte (Physalis Email `getSender` + check `domainId`) — empêchait un projet de muter l'expéditeur d'un autre projet du même compte.
 - **#2 (faible)** Rate-limit par utilisateur sur `/email/send` (20/min) et `/email/reveal` (30/min).
-- **#3** Historique des envois indexé **par compte** (liste Redis `accounts:<id>:emails` écrite best-effort par le worker, bornée à 500) → scoping natif par compte, découplé de la rétention globale de la queue. L'endpoint **admin** Pink-Floyd a aussi été re-scopé sur le compte du JWT (corrige une exposition cross-compte du filtre par domaine seul).
+- **#3** Historique des envois indexé **par compte** (liste Redis `accounts:<id>:emails` écrite best-effort par le worker, bornée à 500) → scoping natif par compte, découplé de la rétention globale de la queue. L'endpoint **admin** Physalis Email a aussi été re-scopé sur le compte du JWT (corrige une exposition cross-compte du filtre par domaine seul).
 - **#4 / #5** Bouton Révéler masqué aux non-EDITOR ; renommage d'expéditeur audité.
 
-**Isolation** : client `prisma` strict (search_path par tenant), rotator cron via `withTenantSchema`/`getTenantPrisma`. Pas de SSRF (URL construite sur `PINK_FLOYD_SERVICE_URL` de confiance + `encodeURIComponent`). `X-Service-Key` jamais loggée ni renvoyée.
+**Isolation** : client `prisma` strict (search_path par tenant), rotator cron via `withTenantSchema`/`getTenantPrisma`. Pas de SSRF (URL construite sur `PHYSALIS_EMAIL_SERVICE_URL` de confiance + `encodeURIComponent`). `X-Service-Key` jamais loggée ni renvoyée.
 
 **Résidus / à surveiller avant ouverture large (au-delà de l'allowlist)**
 - La revue des findings ci-dessus est **manuelle** ; la surface déployée est par ailleurs scannée à chaque push `staging` par **OWASP ZAP + Nuclei** (§3.16).
-- Les `details` d'erreur renvoient le texte d'erreur upstream Pink-Floyd (pas de secret ; acceptable pour outil admin).
+- Les `details` d'erreur renvoient le texte d'erreur upstream Physalis Email (pas de secret ; acceptable pour outil admin).
 - CSRF : routes mutantes via `fetch` + cookie SameSite, modèle identique au reste de l'app (§2.9).
 
 ### 3.16 Scans dynamiques (DAST) — OWASP ZAP + Nuclei (✅)

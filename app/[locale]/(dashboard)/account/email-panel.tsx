@@ -11,8 +11,8 @@ type State = {
 };
 
 /**
- * Activation du service email Pink-Floyd au niveau CLIENT (tenant). Un compte
- * Pink-Floyd par client. Réservé aux OWNER/ADMIN d'une org du client (le
+ * Activation du service email Physalis Email au niveau CLIENT (tenant). Un compte
+ * Physalis Email par client. Réservé aux OWNER/ADMIN d'une org du client (le
  * serveur l'impose ; le bouton est masqué sinon).
  */
 export default function AccountEmailPanel() {

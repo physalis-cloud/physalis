@@ -93,12 +93,12 @@ L'onglet **Détails → Variables d'environnement** liste les variables injecté
 dans le `.env` de **chaque environnement** au déploiement :
 
 ```
-PINK_FLOYD_API_KEY=...            # clé API du projet (secrète)
-PINK_FLOYD_DOMAIN=mondomaine.com  # votre domaine d'envoi
-PINK_FLOYD_URL=https://...        # endpoint du service d'envoi
+PHYSALIS_EMAIL_API_KEY=...            # clé API du projet (secrète)
+PHYSALIS_EMAIL_DOMAIN=mondomaine.com  # votre domaine d'envoi
+PHYSALIS_EMAIL_URL=https://...        # endpoint du service d'envoi
 ```
 
-- `PINK_FLOYD_API_KEY` n'est jamais stockée en clair : elle est chiffrée
+- `PHYSALIS_EMAIL_API_KEY` n'est jamais stockée en clair : elle est chiffrée
   (AES-256-GCM) et déchiffrée uniquement au déploiement. Vous pouvez la
   **Révéler** ponctuellement depuis l'UI (EDITOR+, action auditée).
 - Votre application lit ces variables pour appeler le service d'envoi.

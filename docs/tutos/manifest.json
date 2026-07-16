@@ -59,7 +59,7 @@
   {
     "order": 4,
     "icon": "RiMailSendLine",
-    "published": false,
+    "published": true,
     "translations": {
       "fr": {
         "file": "04-configurer-service-email.md",
