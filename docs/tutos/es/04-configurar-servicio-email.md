@@ -90,12 +90,35 @@ Una vez todo validado, la insignia pasa a **Verificado**.
 
 Antes de enviar, declara al menos una dirección «From» en tu dominio.
 
-Pestaña **Remitentes** → rellena la **Dirección** (p. ej. `hola@midominio.com`)
-y el **Nombre** (p. ej. `Soporte`) → **Añadir**.
+Pestaña **Remitentes** → escribe la parte izquierda de la **Dirección** (p. ej.
+`contact`): el dominio conectado se añade automáticamente. Rellena el **Nombre**
+(p. ej. `Contact`) → **Añadir**.
 
 ![Añadir un remitente autorizado en la pestaña Remitentes](/tutos/es/configurar-servicio-email-05.png)
 
 > Un remitente es una **identidad de envío** autorizada, no un buzón de entrada.
+
+### El remitente principal
+
+El **primer remitente creado se convierte en el remitente principal**. Su
+dirección se inyecta en el `.env` de tus entornos como `PHYSALIS_EMAIL_FROM` al
+desplegar (paso 6): no tienes que **crear ningún secreto a mano**.
+
+Si declaras varios remitentes, la insignia **Principal** indica cuál se inyecta,
+y el botón **Definir como principal** permite cambiarlo.
+
+![Dos remitentes declarados: la insignia Principal y el botón Definir como principal](/tutos/es/configurar-servicio-email-05.1.png)
+
+> **El nombre no va en la dirección.** `PHYSALIS_EMAIL_FROM` solo contiene la
+> dirección (`contact@midominio.com`); el servicio compone él mismo la cabecera
+> `"Contact" <contact@midominio.com>` a partir del campo **Nombre**. Por tanto,
+> renombrar un remitente no requiere volver a desplegar.
+
+> **Tras cambiar el remitente principal, vuelve a desplegar**: tus aplicaciones
+> leen el valor en su `.env`, que solo se actualiza al desplegar.
+
+> Eliminar el remitente principal deja el proyecto **sin** remitente: tus envíos
+> serán rechazados hasta que designes otro y vuelvas a desplegar.
 
 ## 5. Enviar un correo de prueba
 
@@ -117,9 +140,10 @@ La pestaña **Detalles → Variables de entorno** lista lo que se inyecta en el
 `.env` de **cada entorno** durante el despliegue:
 
 ```
-PHYSALIS_EMAIL_API_KEY=...           # clave API del proyecto (secreta, cifrada)
-PHYSALIS_EMAIL_DOMAIN=midominio.com  # tu dominio de envío
-PHYSALIS_EMAIL_URL=https://...       # endpoint del servicio de envío
+PHYSALIS_EMAIL_API_KEY=...                 # clave API del proyecto (secreta, cifrada)
+PHYSALIS_EMAIL_DOMAIN=midominio.com        # tu dominio de envío
+PHYSALIS_EMAIL_URL=https://...             # endpoint del servicio de envío
+PHYSALIS_EMAIL_FROM=contact@midominio.com  # tu remitente principal (paso 4)
 ```
 
 Tu aplicación lee estas variables para llamar al servicio. La clave nunca se

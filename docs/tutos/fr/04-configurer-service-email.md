@@ -90,13 +90,37 @@ Une fois tout validé, le badge passe à **Vérifié**.
 
 Avant d'envoyer, déclarez au moins une adresse « From » sur votre domaine.
 
-Onglet **Expéditeurs** → renseignez l'**Adresse** (ex. `hello@mondomaine.com`)
-et le **Nom** (ex. `Support`) → **Ajouter**.
+Onglet **Expéditeurs** → saisissez la partie gauche de l'**Adresse** (ex.
+`contact`) : le domaine connecté est ajouté automatiquement. Renseignez le
+**Nom** (ex. `Contact`) → **Ajouter**.
 
 ![Ajout d'un expéditeur autorisé dans l'onglet Expéditeurs](/tutos/fr/configurer-service-email-05.png)
 
 > Un expéditeur est une **identité d'envoi** autorisée, pas une boîte de
 > réception.
+
+### L'expéditeur principal
+
+Le **premier expéditeur créé devient l'expéditeur principal**. Son adresse est
+injectée dans le `.env` de vos environnements sous `PHYSALIS_EMAIL_FROM` au
+déploiement (étape 6) : vous n'avez **aucun secret à créer à la main**.
+
+Si vous déclarez plusieurs expéditeurs, le badge **Principal** indique celui qui
+est injecté, et le bouton **Définir comme principal** permet d'en changer.
+
+![Deux expéditeurs déclarés : le badge Principal et le bouton Définir comme principal](/tutos/fr/configurer-service-email-05.1.png)
+
+> **Le nom ne va pas dans l'adresse.** `PHYSALIS_EMAIL_FROM` ne contient que
+> l'adresse (`contact@mondomaine.com`) ; le service compose lui-même l'en-tête
+> `"Contact" <contact@mondomaine.com>` à partir du champ **Nom**. Renommer un
+> expéditeur ne demande donc pas de redéploiement.
+
+> **Après avoir changé l'expéditeur principal, redéployez** : vos applications
+> lisent la valeur dans leur `.env`, mis à jour seulement au déploiement.
+
+> Supprimer l'expéditeur principal laisse le projet **sans** expéditeur : vos
+> envois seront refusés tant que vous n'en aurez pas désigné un autre et
+> redéployé.
 
 ## 5. Envoyer un email de test
 
@@ -117,9 +141,10 @@ L'onglet **Détails → Variables d'environnement** liste ce qui est injecté da
 le `.env` de **chaque environnement** au déploiement :
 
 ```
-PHYSALIS_EMAIL_API_KEY=...            # clé API du projet (secrète, chiffrée)
-PHYSALIS_EMAIL_DOMAIN=mondomaine.com  # votre domaine d'envoi
-PHYSALIS_EMAIL_URL=https://...        # endpoint du service d'envoi
+PHYSALIS_EMAIL_API_KEY=...                 # clé API du projet (secrète, chiffrée)
+PHYSALIS_EMAIL_DOMAIN=mondomaine.com       # votre domaine d'envoi
+PHYSALIS_EMAIL_URL=https://...             # endpoint du service d'envoi
+PHYSALIS_EMAIL_FROM=contact@mondomaine.com # votre expéditeur principal (étape 4)
 ```
 
 Votre application lit ces variables pour appeler le service. La clé n'est

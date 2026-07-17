@@ -1063,6 +1063,8 @@
       "verifiedBadge": "Vérifié",
       "unverifiedBadge": "Non vérifié",
       "domainTitle": "Domaine : {domain}",
+      "noSendersWarn": "Aucun expéditeur n'a encore été créé : vos applications ne pourront pas envoyer d'email.",
+      "noSendersWarnHint": "Ajoutez-en un dans l'onglet Expéditeurs — le premier créé devient l'expéditeur principal, injecté en PHYSALIS_EMAIL_FROM au déploiement.",
       "dnsTitle": "Enregistrements DNS à créer",
       "dnsTitleDone": "Enregistrements DNS créés",
       "dnsType": "Type",
@@ -1106,7 +1108,13 @@
         "adding": "Ajout…",
         "empty": "Aucun expéditeur autorisé.",
         "deleteConfirm": "Supprimer cet expéditeur ?",
-        "deleteBtn": "Supprimer"
+        "deleteBtn": "Supprimer",
+        "defaultCol": "Principal",
+        "defaultBadge": "Principal",
+        "setDefaultBtn": "Définir comme principal",
+        "defaultHint": "L'expéditeur principal est injecté dans le .env de vos environnements en PHYSALIS_EMAIL_FROM au déploiement. Le premier expéditeur créé le devient d'office. Après changement, redéployez pour que vos applications le reçoivent.",
+        "noDefaultWarn": "Aucun expéditeur principal : PHYSALIS_EMAIL_FROM ne sera pas injectée et vos envois seront refusés faute d'expéditeur.",
+        "defaultDeletedConfirm": "Cet expéditeur est le principal. Le supprimer laissera le projet sans expéditeur principal, et vos envois seront refusés jusqu'à ce que vous en choisissiez un autre et redéployiez. Continuer ?"
       },
       "history": {
         "status": "Statut",

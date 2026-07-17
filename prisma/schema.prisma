@@ -348,6 +348,12 @@ model ProjectEmailConfig {
   tag          String
   verified     Boolean  @default(false)
   dnsRecords   Json     @default("[]")
+  /// Expéditeur principal du projet, injecté en `PHYSALIS_EMAIL_FROM` au
+  /// déploiement. On ne stocke que l'ADRESSE : le nom d'affichage vit côté
+  /// relais (sur le sender) et y est appliqué à l'envoi, donc le renommer ne
+  /// demande pas de redeploy. Le premier expéditeur créé le devient d'office ;
+  /// supprimer l'expéditeur principal remet ce champ à null.
+  defaultSender String?
   /// Rotation automatique de la clé API (blue/green). À la rotation, on crée
   /// une nouvelle clé + redeploy, et on diffère la révocation de l'ancienne au
   /// cycle suivant (fenêtre de grâce — l'app lit la clé depuis son .env, mis à

@@ -89,12 +89,35 @@ Once everything is validated, the badge switches to **Verified**.
 
 Before sending, declare at least one “From” address on your domain.
 
-**Senders** tab → fill in the **Address** (e.g. `hello@mydomain.com`) and the
-**Name** (e.g. `Support`) → **Add**.
+**Senders** tab → type the left-hand part of the **Address** (e.g. `contact`):
+the connected domain is appended automatically. Fill in the **Name** (e.g.
+`Contact`) → **Add**.
 
 ![Adding an authorized sender in the Senders tab](/tutos/en/configure-email-service-05.png)
 
 > A sender is an authorized **sending identity**, not an inbox.
+
+### The primary sender
+
+The **first sender you create becomes the primary sender**. Its address is
+injected into your environments' `.env` as `PHYSALIS_EMAIL_FROM` at deployment
+(step 6): there is **no secret to create by hand**.
+
+If you declare several senders, the **Primary** badge marks the one being
+injected, and the **Set as primary** button switches to another.
+
+![Two declared senders: the Primary badge and the Set as primary button](/tutos/en/configure-email-service-05.1.png)
+
+> **The name does not go into the address.** `PHYSALIS_EMAIL_FROM` holds the
+> address only (`contact@mydomain.com`); the service builds the
+> `"Contact" <contact@mydomain.com>` header itself from the **Name** field.
+> Renaming a sender therefore needs no redeployment.
+
+> **After changing the primary sender, redeploy**: your applications read the
+> value from their `.env`, which is only refreshed at deployment.
+
+> Deleting the primary sender leaves the project **without** one: your sends
+> will be rejected until you designate another and redeploy.
 
 ## 5. Send a test email
 
@@ -115,9 +138,10 @@ The **Details → Environment variables** tab lists what gets injected into the
 `.env` of **every environment** at deployment:
 
 ```
-PHYSALIS_EMAIL_API_KEY=...           # project API key (secret, encrypted)
-PHYSALIS_EMAIL_DOMAIN=mydomain.com   # your sending domain
-PHYSALIS_EMAIL_URL=https://...       # sending service endpoint
+PHYSALIS_EMAIL_API_KEY=...               # project API key (secret, encrypted)
+PHYSALIS_EMAIL_DOMAIN=mydomain.com       # your sending domain
+PHYSALIS_EMAIL_URL=https://...           # sending service endpoint
+PHYSALIS_EMAIL_FROM=contact@mydomain.com # your primary sender (step 4)
 ```
 
 Your application reads these variables to call the service. The key is never

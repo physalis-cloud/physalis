@@ -1063,6 +1063,8 @@
       "verifiedBadge": "Verificado",
       "unverifiedBadge": "No verificado",
       "domainTitle": "Dominio: {domain}",
+      "noSendersWarn": "Aún no se ha creado ningún remitente: sus aplicaciones no podrán enviar correos.",
+      "noSendersWarnHint": "Añada uno en la pestaña Remitentes — el primero creado será el remitente principal, inyectado como PHYSALIS_EMAIL_FROM al desplegar.",
       "dnsTitle": "Registros DNS a crear",
       "dnsTitleDone": "Registros DNS creados",
       "dnsType": "Tipo",
@@ -1106,7 +1108,13 @@
         "adding": "Añadiendo…",
         "empty": "Ningún remitente autorizado.",
         "deleteConfirm": "¿Eliminar este remitente?",
-        "deleteBtn": "Eliminar"
+        "deleteBtn": "Eliminar",
+        "defaultCol": "Principal",
+        "defaultBadge": "Principal",
+        "setDefaultBtn": "Definir como principal",
+        "defaultHint": "El remitente principal se inyecta en el .env de sus entornos como PHYSALIS_EMAIL_FROM al desplegar. El primer remitente creado lo será de oficio. Tras cambiarlo, vuelva a desplegar para que sus aplicaciones lo reciban.",
+        "noDefaultWarn": "Ningún remitente principal: PHYSALIS_EMAIL_FROM no se inyectará y sus envíos serán rechazados por falta de remitente.",
+        "defaultDeletedConfirm": "Este remitente es el principal. Eliminarlo dejará el proyecto sin remitente principal, y sus envíos serán rechazados hasta que elija otro y vuelva a desplegar. ¿Continuar?"
       },
       "history": {
         "status": "Estado",

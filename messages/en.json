@@ -1063,6 +1063,8 @@
       "verifiedBadge": "Verified",
       "unverifiedBadge": "Unverified",
       "domainTitle": "Domain: {domain}",
+      "noSendersWarn": "No sender has been created yet: your applications won't be able to send email.",
+      "noSendersWarnHint": "Add one from the Senders tab — the first one created becomes the primary sender, injected as PHYSALIS_EMAIL_FROM at deployment.",
       "dnsTitle": "DNS records to create",
       "dnsTitleDone": "DNS records created",
       "dnsType": "Type",
@@ -1106,7 +1108,13 @@
         "adding": "Adding…",
         "empty": "No authorized senders.",
         "deleteConfirm": "Delete this sender?",
-        "deleteBtn": "Delete"
+        "deleteBtn": "Delete",
+        "defaultCol": "Primary",
+        "defaultBadge": "Primary",
+        "setDefaultBtn": "Set as primary",
+        "defaultHint": "The primary sender is injected into your environments' .env as PHYSALIS_EMAIL_FROM at deployment. The first sender you create becomes the primary one. After changing it, redeploy so your applications pick it up.",
+        "noDefaultWarn": "No primary sender: PHYSALIS_EMAIL_FROM won't be injected and your sends will be rejected for lack of a sender.",
+        "defaultDeletedConfirm": "This sender is the primary one. Deleting it will leave the project without a primary sender, and your sends will be rejected until you pick another one and redeploy. Continue?"
       },
       "history": {
         "status": "Status",
