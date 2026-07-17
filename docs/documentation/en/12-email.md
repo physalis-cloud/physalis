@@ -77,11 +77,27 @@ your registrar (Type / Name / Value):
 
 Before sending, declare at least one sending ("From") address on your domain.
 
-- **Senders** tab → fill in **Address** (e.g. `hello@mydomain.com`) and
-  **Name** (e.g. `Support`), then **Add**.
+- **Senders** tab → type the left-hand part of the **Address** (e.g.
+  `contact`) — the connected domain is appended automatically — then the
+  **Name** (e.g. `Contact`), and **Add**.
 - You can delete a sender at any time.
 
 > A sender is an authorised sending identity on your domain, not a mailbox.
+
+### Primary sender
+
+The **first sender you create becomes the primary sender**. Its address is
+injected as `PHYSALIS_EMAIL_FROM` at deployment: there is no secret to create by
+hand. The **Primary** badge marks the one being injected, and the **Set as
+primary** button switches to another — followed by a redeployment so your
+applications pick up the new value.
+
+Only the **address** is kept: the display **name** stays attached to the sender,
+and the service builds the `"Contact" <contact@mydomain.com>` header itself.
+Renaming a sender therefore needs no redeployment.
+
+> Deleting the primary sender leaves the project without one: your sends are
+> rejected until you designate another and redeploy.
 
 ## Injected environment variables
 
@@ -89,18 +105,121 @@ The **Details → Environment variables** tab lists the variables injected into
 **each environment's** `.env` at deployment:
 
 ```
-PHYSALIS_EMAIL_API_KEY=...           # project API key (secret)
-PHYSALIS_EMAIL_DOMAIN=mydomain.com   # your sending domain
-PHYSALIS_EMAIL_URL=https://...       # sending service endpoint
+PHYSALIS_EMAIL_API_KEY=...               # project API key (secret)
+PHYSALIS_EMAIL_DOMAIN=mydomain.com       # your sending domain
+PHYSALIS_EMAIL_URL=https://...           # sending service endpoint
+PHYSALIS_EMAIL_FROM=contact@mydomain.com # your primary sender
 ```
 
 - `PHYSALIS_EMAIL_API_KEY` is never stored in clear text: it is encrypted
   (AES-256-GCM) and decrypted only at deployment. You can **Reveal** it
   occasionally from the UI (EDITOR+, audited action).
+- `PHYSALIS_EMAIL_FROM` only appears once a primary sender is set.
 - Your application reads these variables to call the sending service.
 
 > ⚠️ Revealing the key is rate-limited (anti-abuse) and logged
 > (`SECRET_REVEAL`).
+
+### Passing the variables to your container
+
+Physalis writes these variables into the `.env` of the deployment directory. If
+your `docker-compose.yml` declares an `environment:` list, **only the keys
+listed there reach the container** — the `.env` is then only used for `${...}`
+interpolation:
+
+```yaml
+services:
+  backend:
+    environment:
+      PHYSALIS_EMAIL_URL: ${PHYSALIS_EMAIL_URL}
+      PHYSALIS_EMAIL_API_KEY: ${PHYSALIS_EMAIL_API_KEY}
+      PHYSALIS_EMAIL_FROM: ${PHYSALIS_EMAIL_FROM}
+```
+
+With `env_file: .env`, the whole file is passed: nothing to do. This is the most
+common oversight — the variables are in the `.env`, but the application cannot
+see them.
+
+## Calling the service from your application
+
+A single call: `POST /v1/send` on `PHYSALIS_EMAIL_URL`, with your key in the
+`x-api-key` header.
+
+### Node / TypeScript
+
+```ts
+// utils/physalis-email.ts
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+export async function sendEmail({ to, subject, html, text }: {
+  to: string; subject: string; html: string; text?: string;
+}): Promise<void> {
+  const baseUrl = env("PHYSALIS_EMAIL_URL").replace(/\/+$/, "");
+
+  const res = await fetch(`${baseUrl}/v1/send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env("PHYSALIS_EMAIL_API_KEY"),
+    },
+    body: JSON.stringify({
+      from: env("PHYSALIS_EMAIL_FROM"),
+      to,
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    }),
+  });
+
+  // 202 = accepted and queued for sending.
+  if (res.status !== 202 && res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`physalis-email HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+```
+
+### curl
+
+```bash
+curl -X POST "$PHYSALIS_EMAIL_URL/v1/send" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $PHYSALIS_EMAIL_API_KEY" \
+  -d '{
+    "from": "'"$PHYSALIS_EMAIL_FROM"'",
+    "to": "you@example.com",
+    "subject": "Test",
+    "html": "<p>Hello</p>"
+  }'
+# → 202 {"success":true,"messageId":"...","queued":true}
+```
+
+### Request body
+
+| Field | Required | Detail |
+|---|---|---|
+| `from` | yes | **Bare** address (`contact@mydomain.com`), not the `Name <address>` format. Must be a declared sender. |
+| `to` | yes | One address, or an array (50 max). |
+| `subject` | yes | |
+| `html` / `text` | one of them | Both may be sent together. |
+| `replyTo` | no | |
+| `category` | no | `transactional` (default) or `bulk`. |
+| `attachments` | no | `{ filename, content, encoding }`, 25 max. |
+
+### Good practices
+
+- **Require the variables, don't provide a default.** A fallback such as
+  `EMAIL_FROM || "noreply@" + domain` builds a sender that isn't declared: the
+  service rejects it. A clear error is better.
+- **`202` means "accepted and queued"**, not "delivered". The final status is in
+  the **History** tab.
+- **`400` errors are explicit**: *Sender (from) required*, *Sender domain not
+  registered*, *Sender not authorised*.
+- **`401`** = invalid key, **`429`** = monthly quota or daily limit reached.
 
 ## Send a test email
 

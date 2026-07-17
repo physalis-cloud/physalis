@@ -80,12 +80,29 @@ créer chez votre registrar (Type / Nom / Valeur) :
 Avant d'envoyer, déclarez au moins une adresse d'expédition (« From ») sur
 votre domaine.
 
-- Onglet **Expéditeurs** → renseignez **Adresse** (ex : `hello@mondomaine.com`)
-  et **Nom** (ex : `Support`), puis **Ajouter**.
+- Onglet **Expéditeurs** → saisissez la partie gauche de l'**Adresse** (ex :
+  `contact`) — le domaine connecté est ajouté automatiquement — puis le **Nom**
+  (ex : `Contact`), et **Ajouter**.
 - Vous pouvez supprimer un expéditeur à tout moment.
 
 > Un expéditeur est une identité d'envoi autorisée sur votre domaine, pas une
 > boîte de réception.
+
+### Expéditeur principal
+
+Le **premier expéditeur créé devient l'expéditeur principal**. Son adresse est
+injectée en `PHYSALIS_EMAIL_FROM` au déploiement : vous n'avez aucun secret à
+créer à la main. Le badge **Principal** indique celui qui est injecté, et le
+bouton **Définir comme principal** permet d'en changer — suivi d'un
+redéploiement pour que vos applications reçoivent la nouvelle valeur.
+
+Seule l'**adresse** est retenue : le **nom** d'affichage reste attaché à
+l'expéditeur et le service compose lui-même l'en-tête `"Contact"
+<contact@mondomaine.com>`. Renommer un expéditeur ne demande donc pas de
+redéploiement.
+
+> Supprimer l'expéditeur principal laisse le projet sans expéditeur : vos envois
+> sont refusés tant que vous n'en désignez pas un autre et ne redéployez pas.
 
 ## Variables d'environnement injectées
 
@@ -93,18 +110,122 @@ L'onglet **Détails → Variables d'environnement** liste les variables injecté
 dans le `.env` de **chaque environnement** au déploiement :
 
 ```
-PHYSALIS_EMAIL_API_KEY=...            # clé API du projet (secrète)
-PHYSALIS_EMAIL_DOMAIN=mondomaine.com  # votre domaine d'envoi
-PHYSALIS_EMAIL_URL=https://...        # endpoint du service d'envoi
+PHYSALIS_EMAIL_API_KEY=...                 # clé API du projet (secrète)
+PHYSALIS_EMAIL_DOMAIN=mondomaine.com       # votre domaine d'envoi
+PHYSALIS_EMAIL_URL=https://...             # endpoint du service d'envoi
+PHYSALIS_EMAIL_FROM=contact@mondomaine.com # votre expéditeur principal
 ```
 
 - `PHYSALIS_EMAIL_API_KEY` n'est jamais stockée en clair : elle est chiffrée
   (AES-256-GCM) et déchiffrée uniquement au déploiement. Vous pouvez la
   **Révéler** ponctuellement depuis l'UI (EDITOR+, action auditée).
+- `PHYSALIS_EMAIL_FROM` n'apparaît que si un expéditeur principal est défini.
 - Votre application lit ces variables pour appeler le service d'envoi.
 
 > ⚠️ La révélation de la clé est limitée (anti-abus) et journalisée
 > (`SECRET_REVEAL`).
+
+### Transmettre les variables à votre conteneur
+
+Physalis écrit ces variables dans le `.env` du répertoire de déploiement. Si
+votre `docker-compose.yml` déclare une liste `environment:`, **seules les clés
+qui y sont énumérées atteignent le conteneur** — le `.env` ne sert alors qu'à
+l'interpolation `${...}` :
+
+```yaml
+services:
+  backend:
+    environment:
+      PHYSALIS_EMAIL_URL: ${PHYSALIS_EMAIL_URL}
+      PHYSALIS_EMAIL_API_KEY: ${PHYSALIS_EMAIL_API_KEY}
+      PHYSALIS_EMAIL_FROM: ${PHYSALIS_EMAIL_FROM}
+```
+
+Avec `env_file: .env`, tout le fichier est transmis : rien à faire. C'est
+l'oubli le plus fréquent — les variables sont bien dans le `.env`, mais
+l'application ne les voit pas.
+
+## Appeler le service depuis votre application
+
+Un seul appel : `POST /v1/send` sur `PHYSALIS_EMAIL_URL`, avec votre clé dans
+l'en-tête `x-api-key`.
+
+### Node / TypeScript
+
+```ts
+// utils/physalis-email.ts
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+export async function sendEmail({ to, subject, html, text }: {
+  to: string; subject: string; html: string; text?: string;
+}): Promise<void> {
+  const baseUrl = env("PHYSALIS_EMAIL_URL").replace(/\/+$/, "");
+
+  const res = await fetch(`${baseUrl}/v1/send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env("PHYSALIS_EMAIL_API_KEY"),
+    },
+    body: JSON.stringify({
+      from: env("PHYSALIS_EMAIL_FROM"),
+      to,
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    }),
+  });
+
+  // 202 = accepté et mis en file d'envoi.
+  if (res.status !== 202 && res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`physalis-email HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+```
+
+### curl
+
+```bash
+curl -X POST "$PHYSALIS_EMAIL_URL/v1/send" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $PHYSALIS_EMAIL_API_KEY" \
+  -d '{
+    "from": "'"$PHYSALIS_EMAIL_FROM"'",
+    "to": "vous@exemple.com",
+    "subject": "Test",
+    "html": "<p>Bonjour</p>"
+  }'
+# → 202 {"success":true,"messageId":"...","queued":true}
+```
+
+### Corps de la requête
+
+| Champ | Requis | Détail |
+|---|---|---|
+| `from` | oui | Adresse **nue** (`contact@mondomaine.com`), pas le format `Nom <adresse>`. Doit être un expéditeur déclaré. |
+| `to` | oui | Une adresse, ou un tableau (50 max). |
+| `subject` | oui | |
+| `html` / `text` | l'un des deux | Les deux sont acceptés simultanément. |
+| `replyTo` | non | |
+| `category` | non | `transactional` (défaut) ou `bulk`. |
+| `attachments` | non | `{ filename, content, encoding }`, 25 max. |
+
+### Bonnes pratiques
+
+- **Exigez les variables, ne prévoyez pas de défaut.** Un repli du type
+  `EMAIL_FROM || "noreply@" + domaine` fabrique un expéditeur qui n'est pas
+  déclaré : le service le refuse. Mieux vaut une erreur claire.
+- **`202` signifie « accepté et mis en file »**, pas « reçu ». Le statut final
+  est dans l'onglet **Historique**.
+- **Les erreurs `400` sont explicites** : *Expéditeur (from) requis*, *Domaine
+  expéditeur non enregistré*, *Expéditeur non autorisé*.
+- **`401`** = clé invalide, **`429`** = quota mensuel ou limite journalière
+  atteinte.
 
 ## Envoyer un email de test
 

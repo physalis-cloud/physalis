@@ -80,11 +80,28 @@ en tu registrador (Tipo / Nombre / Valor):
 Antes de enviar, declara al menos una dirección de envío («From») en tu
 dominio.
 
-- Pestaña **Remitentes** → rellena **Dirección** (p. ej. `hola@midominio.com`)
-  y **Nombre** (p. ej. `Soporte`), luego **Añadir**.
+- Pestaña **Remitentes** → escribe la parte izquierda de la **Dirección** (p.
+  ej. `contact`) — el dominio conectado se añade automáticamente — luego el
+  **Nombre** (p. ej. `Contact`), y **Añadir**.
 - Puedes eliminar un remitente en cualquier momento.
 
 > Un remitente es una identidad de envío autorizada en tu dominio, no un buzón.
+
+### Remitente principal
+
+El **primer remitente creado se convierte en el remitente principal**. Su
+dirección se inyecta como `PHYSALIS_EMAIL_FROM` al desplegar: no hay ningún
+secreto que crear a mano. La insignia **Principal** indica cuál se inyecta, y el
+botón **Definir como principal** permite cambiarlo — seguido de un nuevo
+despliegue para que tus aplicaciones reciban el nuevo valor.
+
+Solo se guarda la **dirección**: el **nombre** de visualización queda asociado
+al remitente y el servicio compone él mismo la cabecera `"Contact"
+<contact@midominio.com>`. Por tanto, renombrar un remitente no requiere volver a
+desplegar.
+
+> Eliminar el remitente principal deja el proyecto sin remitente: tus envíos se
+> rechazan hasta que designes otro y vuelvas a desplegar.
 
 ## Variables de entorno inyectadas
 
@@ -92,18 +109,122 @@ La pestaña **Detalles → Variables de entorno** lista las variables inyectadas
 en el `.env` de **cada entorno** durante el despliegue:
 
 ```
-PHYSALIS_EMAIL_API_KEY=...          # clave API del proyecto (secreta)
-PHYSALIS_EMAIL_DOMAIN=midominio.com # tu dominio de envío
-PHYSALIS_EMAIL_URL=https://...      # endpoint del servicio de envío
+PHYSALIS_EMAIL_API_KEY=...                # clave API del proyecto (secreta)
+PHYSALIS_EMAIL_DOMAIN=midominio.com       # tu dominio de envío
+PHYSALIS_EMAIL_URL=https://...            # endpoint del servicio de envío
+PHYSALIS_EMAIL_FROM=contact@midominio.com # tu remitente principal
 ```
 
 - `PHYSALIS_EMAIL_API_KEY` nunca se almacena en claro: se cifra (AES-256-GCM) y
   solo se descifra en el despliegue. Puedes **Revelarla** puntualmente desde la
   interfaz (EDITOR+, acción auditada).
+- `PHYSALIS_EMAIL_FROM` solo aparece si hay un remitente principal definido.
 - Tu aplicación lee estas variables para llamar al servicio de envío.
 
 > ⚠️ La revelación de la clave está limitada (anti-abuso) y registrada
 > (`SECRET_REVEAL`).
+
+### Pasar las variables a tu contenedor
+
+Physalis escribe estas variables en el `.env` del directorio de despliegue. Si
+tu `docker-compose.yml` declara una lista `environment:`, **solo llegan al
+contenedor las claves enumeradas** — el `.env` sirve entonces únicamente para la
+interpolación `${...}`:
+
+```yaml
+services:
+  backend:
+    environment:
+      PHYSALIS_EMAIL_URL: ${PHYSALIS_EMAIL_URL}
+      PHYSALIS_EMAIL_API_KEY: ${PHYSALIS_EMAIL_API_KEY}
+      PHYSALIS_EMAIL_FROM: ${PHYSALIS_EMAIL_FROM}
+```
+
+Con `env_file: .env`, se pasa todo el archivo: no hay nada que hacer. Es el
+olvido más frecuente — las variables están en el `.env`, pero la aplicación no
+las ve.
+
+## Llamar al servicio desde tu aplicación
+
+Una sola llamada: `POST /v1/send` en `PHYSALIS_EMAIL_URL`, con tu clave en la
+cabecera `x-api-key`.
+
+### Node / TypeScript
+
+```ts
+// utils/physalis-email.ts
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+export async function sendEmail({ to, subject, html, text }: {
+  to: string; subject: string; html: string; text?: string;
+}): Promise<void> {
+  const baseUrl = env("PHYSALIS_EMAIL_URL").replace(/\/+$/, "");
+
+  const res = await fetch(`${baseUrl}/v1/send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env("PHYSALIS_EMAIL_API_KEY"),
+    },
+    body: JSON.stringify({
+      from: env("PHYSALIS_EMAIL_FROM"),
+      to,
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    }),
+  });
+
+  // 202 = aceptado y puesto en cola de envío.
+  if (res.status !== 202 && res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`physalis-email HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+```
+
+### curl
+
+```bash
+curl -X POST "$PHYSALIS_EMAIL_URL/v1/send" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $PHYSALIS_EMAIL_API_KEY" \
+  -d '{
+    "from": "'"$PHYSALIS_EMAIL_FROM"'",
+    "to": "tu@ejemplo.com",
+    "subject": "Test",
+    "html": "<p>Hola</p>"
+  }'
+# → 202 {"success":true,"messageId":"...","queued":true}
+```
+
+### Cuerpo de la petición
+
+| Campo | Obligatorio | Detalle |
+|---|---|---|
+| `from` | sí | Dirección **desnuda** (`contact@midominio.com`), no el formato `Nombre <dirección>`. Debe ser un remitente declarado. |
+| `to` | sí | Una dirección, o un array (50 máx.). |
+| `subject` | sí | |
+| `html` / `text` | uno de los dos | Se aceptan ambos a la vez. |
+| `replyTo` | no | |
+| `category` | no | `transactional` (por defecto) o `bulk`. |
+| `attachments` | no | `{ filename, content, encoding }`, 25 máx. |
+
+### Buenas prácticas
+
+- **Exige las variables, no pongas un valor por defecto.** Un repliegue del tipo
+  `EMAIL_FROM || "noreply@" + dominio` fabrica un remitente no declarado: el
+  servicio lo rechaza. Es mejor un error claro.
+- **`202` significa «aceptado y en cola»**, no «recibido». El estado final está
+  en la pestaña **Historial**.
+- **Los errores `400` son explícitos**: *Remitente (from) requerido*, *Dominio
+  del remitente no registrado*, *Remitente no autorizado*.
+- **`401`** = clave inválida, **`429`** = cuota mensual o límite diario
+  alcanzado.
 
 ## Enviar un email de prueba
 

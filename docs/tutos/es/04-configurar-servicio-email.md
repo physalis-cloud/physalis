@@ -132,7 +132,7 @@ Pestaña **Envío** (EDITOR+):
 
 > Los envíos desde la interfaz están **limitados en frecuencia** (anti-abuso):
 > esta pestaña sirve para pruebas. Para el envío desde la aplicación, usa las
-> variables inyectadas (paso 6).
+> variables inyectadas (paso 6) desde tu código (paso 7).
 
 ## 6. Usar las variables inyectadas
 
@@ -152,7 +152,98 @@ almacena en claro: solo se descifra en el momento del despliegue.
 > Puedes **Revelar** la clave puntualmente desde la interfaz (EDITOR+, acción
 > limitada y registrada como `SECRET_REVEAL`).
 
-## 7. (Opcional) Activar la rotación automática de la clave
+### Pásalas a tu contenedor
+
+Physalis escribe estas variables en el `.env` del directorio de despliegue. Si
+tu `docker-compose.yml` declara una lista `environment:`, **solo llegan al
+contenedor las claves enumeradas** — el `.env` sirve entonces únicamente para la
+interpolación `${...}`. Acuérdate de añadirlas:
+
+```yaml
+services:
+  backend:
+    environment:
+      PHYSALIS_EMAIL_URL: ${PHYSALIS_EMAIL_URL}
+      PHYSALIS_EMAIL_API_KEY: ${PHYSALIS_EMAIL_API_KEY}
+      PHYSALIS_EMAIL_FROM: ${PHYSALIS_EMAIL_FROM}
+```
+
+> Con `env_file: .env`, se pasa todo el archivo: no hay nada que hacer. Es el
+> olvido más frecuente — las variables están en el `.env`, pero la aplicación no
+> las ve.
+
+## 7. Enviar desde tu aplicación
+
+Una sola llamada: `POST /v1/send` en `PHYSALIS_EMAIL_URL`, con tu clave en la
+cabecera `x-api-key`.
+
+### Node / TypeScript
+
+```ts
+// utils/physalis-email.ts
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+export async function sendEmail({ to, subject, html, text }: {
+  to: string; subject: string; html: string; text?: string;
+}): Promise<void> {
+  const baseUrl = env("PHYSALIS_EMAIL_URL").replace(/\/+$/, "");
+
+  const res = await fetch(`${baseUrl}/v1/send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env("PHYSALIS_EMAIL_API_KEY"),
+    },
+    body: JSON.stringify({
+      from: env("PHYSALIS_EMAIL_FROM"),
+      to,
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    }),
+  });
+
+  // 202 = aceptado y puesto en cola de envío.
+  if (res.status !== 202 && res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`physalis-email HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+```
+
+### curl
+
+Práctico para probar fuera de tu aplicación:
+
+```bash
+curl -X POST "$PHYSALIS_EMAIL_URL/v1/send" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $PHYSALIS_EMAIL_API_KEY" \
+  -d '{
+    "from": "'"$PHYSALIS_EMAIL_FROM"'",
+    "to": "tu@ejemplo.com",
+    "subject": "Test",
+    "html": "<p>Hola</p>"
+  }'
+# → 202 {"success":true,"messageId":"...","queued":true}
+```
+
+Tres cosas que conviene saber:
+
+- **Exige las variables, no pongas un valor por defecto.** Un repliegue del tipo
+  `EMAIL_FROM || "noreply@" + dominio` fabrica un remitente no declarado: el
+  servicio lo rechaza. Es mejor un error claro.
+- **`202` significa «aceptado y en cola»**, no «recibido». El estado final está
+  en la pestaña **Historial**.
+- **Los errores `400` son explícitos**: *Remitente (from) requerido*, *Dominio
+  del remitente no registrado*, *Remitente no autorizado* — en este último caso
+  la dirección no está entre tus remitentes declarados (paso 4).
+
+## 8. (Opcional) Activar la rotación automática de la clave
 
 Si la rotación está activada para tu organización, la pestaña **Detalles**
 ofrece una sección **Rotación automática**:

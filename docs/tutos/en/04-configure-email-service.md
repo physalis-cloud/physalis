@@ -130,7 +130,8 @@ injected, and the **Set as primary** button switches to another.
 ![Sending a test email](/tutos/en/configure-email-service-06.png)
 
 > Sends from the UI are **rate-limited** (anti-abuse): this tab is for testing.
-> For application sending, use the injected variables (step 6).
+> For application sending, use the injected variables (step 6) from your own
+> code (step 7).
 
 ## 6. Use the injected variables
 
@@ -150,7 +151,98 @@ stored in plain text: it is decrypted only at deployment.
 > You can **Reveal** the key occasionally from the UI (EDITOR+, a rate-limited
 > action logged as `SECRET_REVEAL`).
 
-## 7. (Optional) Enable automatic key rotation
+### Pass them to your container
+
+Physalis writes these variables into the `.env` of the deployment directory. If
+your `docker-compose.yml` declares an `environment:` list, **only the keys
+listed there reach the container** — the `.env` is then only used for `${...}`
+interpolation. Remember to add them:
+
+```yaml
+services:
+  backend:
+    environment:
+      PHYSALIS_EMAIL_URL: ${PHYSALIS_EMAIL_URL}
+      PHYSALIS_EMAIL_API_KEY: ${PHYSALIS_EMAIL_API_KEY}
+      PHYSALIS_EMAIL_FROM: ${PHYSALIS_EMAIL_FROM}
+```
+
+> With `env_file: .env`, the whole file is passed: nothing to do. This is the
+> most common oversight — the variables are in the `.env`, but the application
+> cannot see them.
+
+## 7. Send from your application
+
+A single call: `POST /v1/send` on `PHYSALIS_EMAIL_URL`, with your key in the
+`x-api-key` header.
+
+### Node / TypeScript
+
+```ts
+// utils/physalis-email.ts
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+export async function sendEmail({ to, subject, html, text }: {
+  to: string; subject: string; html: string; text?: string;
+}): Promise<void> {
+  const baseUrl = env("PHYSALIS_EMAIL_URL").replace(/\/+$/, "");
+
+  const res = await fetch(`${baseUrl}/v1/send`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": env("PHYSALIS_EMAIL_API_KEY"),
+    },
+    body: JSON.stringify({
+      from: env("PHYSALIS_EMAIL_FROM"),
+      to,
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    }),
+  });
+
+  // 202 = accepted and queued for sending.
+  if (res.status !== 202 && res.status !== 200) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`physalis-email HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+```
+
+### curl
+
+Handy to test outside your application:
+
+```bash
+curl -X POST "$PHYSALIS_EMAIL_URL/v1/send" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $PHYSALIS_EMAIL_API_KEY" \
+  -d '{
+    "from": "'"$PHYSALIS_EMAIL_FROM"'",
+    "to": "you@example.com",
+    "subject": "Test",
+    "html": "<p>Hello</p>"
+  }'
+# → 202 {"success":true,"messageId":"...","queued":true}
+```
+
+Three things worth knowing:
+
+- **Require the variables, don't provide a default.** A fallback such as
+  `EMAIL_FROM || "noreply@" + domain` builds a sender that isn't declared: the
+  service rejects it. A clear error at send time is better.
+- **`202` means "accepted and queued"**, not "delivered". The final status is in
+  the **History** tab.
+- **`400` errors are explicit**: *Sender (from) required*, *Sender domain not
+  registered*, *Sender not authorised* — in the latter case the address is not
+  among your declared senders (step 4).
+
+## 8. (Optional) Enable automatic key rotation
 
 If rotation is enabled for your organization, the **Details** tab offers an
 **Automatic rotation** section:
