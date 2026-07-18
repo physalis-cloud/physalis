@@ -359,6 +359,49 @@ describe("Coffre d'équipe PROJET — RBAC hérité", () => {
     };
     expect(data.collections.every((c) => c.role === "OWNER")).toBe(true);
   });
+
+  // `ProjectMember.hidden` est une BARRIÈRE (requireProjectMember règle 2 → 403).
+  // Les resolvers du coffre d'équipe (lib/vault-access.ts requireProjectScope +
+  // requireProjectCollectionAccess) re-dérivaient le rôle depuis ProjectMember
+  // sans lire `hidden` → un membre masqué gardait un accès R/W au coffre projet
+  // que l'UI lui ferme. Carol est OrgMEMBER + ProjectVIEWER : sans sa ligne, elle
+  // n'a aucun accès, donc masquer la ligne doit tout couper.
+  it("Carol masquée (hidden=true) perd l'accès au coffre projet (les 2 resolvers)", async () => {
+    await execSql(
+      `UPDATE "${TENANT_SCHEMA}"."ProjectMember" SET hidden = true WHERE "userId" = '${carolId}' AND "projectId" = '${projectId}'`,
+    );
+
+    // requireProjectScope (LIST) : la collection projet disparaît de sa liste.
+    const list = await carolSession.fetch(
+      `/api/vault/project/${projectSlug}/collections`,
+    );
+    if (list.status === 200) {
+      const data = (await list.json()) as {
+        collections: Array<{ slug: string }>;
+      };
+      expect(
+        data.collections.find((c) => c.slug === projectCollectionSlug),
+      ).toBeUndefined();
+    } else {
+      expect([403, 404]).toContain(list.status);
+    }
+
+    // requireProjectCollectionAccess : reveal de l'entrée refusé (était 200).
+    const reveal = await carolSession.fetch(
+      `/api/vault/project/${projectSlug}/collections/${projectCollectionSlug}/entries/${projectEntryId}`,
+    );
+    expect([403, 404]).toContain(reveal.status);
+  });
+
+  it("Carol dé-masquée (hidden=false) retrouve l'accès (anti sur-restriction)", async () => {
+    await execSql(
+      `UPDATE "${TENANT_SCHEMA}"."ProjectMember" SET hidden = false WHERE "userId" = '${carolId}' AND "projectId" = '${projectId}'`,
+    );
+    const reveal = await carolSession.fetch(
+      `/api/vault/project/${projectSlug}/collections/${projectCollectionSlug}/entries/${projectEntryId}`,
+    );
+    expect(reveal.status).toBe(200);
+  });
 });
 
 describe("CHECK constraint XOR org/projet", () => {

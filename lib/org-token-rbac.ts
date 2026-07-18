@@ -63,6 +63,19 @@ export function validateDevTokenCreation(opts: {
     };
   }
 
+  // Défense en profondeur : `expiresInDays` arrive de `readJson` non typé.
+  // Sans ce garde, une valeur non-numérique (`"abc"`, `true`) satisfaisait le
+  // `> max` ci-dessous (`"abc" > 90` = false, comparaison NaN) → la contrainte
+  // d'expiration était contournée, et la persistance (`typeof === "number"`)
+  // laissait `expiresAt = null` → token DEV ÉTERNEL. Le prédicat ne doit pas
+  // faire confiance au type de son entrée.
+  if (typeof opts.expiresInDays !== "number" || !Number.isFinite(opts.expiresInDays)) {
+    return {
+      code: 400,
+      error: `DEV users must set a valid numeric expiration (max ${DEV_TOKEN_CONSTRAINTS.maxExpiresInDays} days).`,
+    };
+  }
+
   if (opts.expiresInDays > DEV_TOKEN_CONSTRAINTS.maxExpiresInDays) {
     return {
       code: 400,

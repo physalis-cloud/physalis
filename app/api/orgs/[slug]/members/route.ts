@@ -13,7 +13,11 @@ import { logAction } from "@/lib/audit";
 
 type Params = { params: Promise<{ slug: string }> };
 
-const VALID_ROLES: OrgRole[] = ["OWNER", "ADMIN", "DEV", "MEMBER"];
+// ADMIN_DEV coule dans le self-host (enum force-ajoute a l'OrgRole, cf.
+// public-overlay/manifest.json). Le chemin de changement de role
+// (members/[userId], verbatim) l'accepte → on l'accepte aussi ici pour eviter
+// une asymetrie invite/changement dans le self-host.
+const VALID_ROLES: OrgRole[] = ["OWNER", "ADMIN", "ADMIN_DEV", "DEV", "MEMBER"];
 
 export async function GET(_req: Request, { params }: Params) {
   const { slug } = await params;

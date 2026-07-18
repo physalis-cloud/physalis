@@ -337,7 +337,7 @@ export async function patchEntry(
           select: {
             members: {
               where: { userId: access.user.id },
-              select: { role: true },
+              select: { role: true, hidden: true },
             },
             organization: {
               select: {
@@ -401,19 +401,22 @@ export async function patchEntry(
         targetRole = implicit ?? memberRole;
       }
     } else if (sourceIsProject) {
-      const projectRole = target.project?.members[0]?.role;
+      const membership = target.project?.members[0];
       const orgRole = target.project?.organization?.members[0]?.role;
       if (
         isPlatformAdmin(access.user.role) ||
         orgRole === "OWNER" ||
         orgRole === "ADMIN"
       ) {
+        // Regle 1 : OrgADMIN/OWNER ignorent hidden.
         targetRole = "OWNER";
-      } else if (projectRole) {
-        targetRole = PROJECT_TO_VAULT_LOCAL[projectRole];
+      } else if (membership) {
+        // Regle 2 : une ligne masquee bloque le deplacement vers ce projet,
+        // sans retomber sur l'EDITOR implicite du DEV.
+        if (!membership.hidden) targetRole = PROJECT_TO_VAULT_LOCAL[membership.role];
       } else if (hasDevPrivileges(orgRole)) {
         // Aligne avec requireProjectCollectionAccess : OrgDEV sans
-        // ProjectMember explicite obtient EDITOR implicite.
+        // ProjectMember explicite obtient EDITOR implicite (regle 4).
         targetRole = "EDITOR";
       }
     }

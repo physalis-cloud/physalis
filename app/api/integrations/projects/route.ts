@@ -32,7 +32,9 @@ export async function GET(req: Request) {
   const projects = await withTenantSchema(ctx.tenantSlug, async (tx) => {
     if (ctx.kind === "user") {
       const memberships = await tx.projectMember.findMany({
-        where: { userId: ctx.userId },
+        // Cf. /api/integrations/credentials : un UserToken ne doit pas lister
+        // les projets masqués pour son porteur.
+        where: { userId: ctx.userId, hidden: false },
         select: {
           role: true,
           project: {

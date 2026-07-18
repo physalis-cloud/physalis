@@ -119,7 +119,13 @@ export async function GET(req: Request) {
       select: { organizationId: true },
     });
     const projectMemberships = await prisma.projectMember.findMany({
-      where: { userId },
+      // `hidden: true` = projet masqué pour cet user → requireProjectMember
+      // lui répond 403 (règle 2). Sans ce filtre, l'extension autofillait les
+      // credentials DÉCHIFFRÉS (Service.user/password, AppAccount) d'un projet
+      // que l'UI lui ferme — sur simple match de domaine, sans action de sa part.
+      // La branche org ci-dessus reste OWNER/ADMIN seulement : eux ignorent
+      // `hidden` à raison (règle 1).
+      where: { userId, hidden: false },
       select: { projectId: true },
     });
     const orgProjects = orgMemberships.length

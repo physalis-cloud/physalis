@@ -64,6 +64,7 @@ export async function GET() {
         where: { userId: user.id },
         select: {
           role: true,
+          hidden: true,
           project: {
             select: {
               id: true,
@@ -115,8 +116,18 @@ export async function GET() {
     orgSlug: string;
     role: "OWNER" | "EDITOR" | "VIEWER";
   };
+  // `hidden: true` = projet masqué pour ce user → requireProjectMember répond
+  // 403 (règle 2). Miroir de accessibleProjectsWhere : une ligne masquée ne
+  // sème PAS de destination, ET le projet est exclu du chemin d'héritage DEV
+  // ci-dessous — sinon un DEV masqué le récupérerait en implicite (règles 2+4).
+  // OrgADMIN/OWNER, eux, ignorent hidden (règle 1) via la branche admin.
+  const hiddenProjectIds = new Set(
+    projectMemberships.filter((pm) => pm.hidden).map((pm) => pm.project.id),
+  );
+
   const projectMap = new Map<string, ProjectInfo>();
   for (const pm of projectMemberships) {
+    if (pm.hidden) continue;
     projectMap.set(pm.project.id, {
       id: pm.project.id,
       slug: pm.project.slug,
@@ -127,17 +138,20 @@ export async function GET() {
     });
   }
   for (const p of inheritedProjects) {
-    if (!projectMap.has(p.id)) {
-      projectMap.set(p.id, {
-        id: p.id,
-        slug: p.slug,
-        name: p.name,
-        organizationId: p.organizationId,
-        orgSlug: p.organization.slug,
-        // ADMIN/OWNER orga → OWNER implicite ; DEV orga → EDITOR implicite.
-        role: adminOrgIdSet.has(p.organizationId) ? "OWNER" : "EDITOR",
-      });
-    }
+    if (projectMap.has(p.id)) continue;
+    const isAdminOrg = adminOrgIdSet.has(p.organizationId);
+    // Règle 2 : un projet masqué reste masqué pour l'héritage DEV. Les
+    // OrgADMIN/OWNER (règle 1) l'ignorent → seul le cas non-admin est filtré.
+    if (!isAdminOrg && hiddenProjectIds.has(p.id)) continue;
+    projectMap.set(p.id, {
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      organizationId: p.organizationId,
+      orgSlug: p.organization.slug,
+      // ADMIN/OWNER orga → OWNER implicite ; DEV orga → EDITOR implicite.
+      role: isAdminOrg ? "OWNER" : "EDITOR",
+    });
   }
 
   // 3. Toutes les collections potentiellement reachables : org du user OU

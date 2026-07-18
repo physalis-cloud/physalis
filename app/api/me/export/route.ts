@@ -179,7 +179,11 @@ export async function GET(req: Request) {
         })
       : [];
   const projectsViaMember = await prisma.projectMember.findMany({
-    where: { userId },
+    // `hidden: true` = projet masqué pour cet user → requireProjectMember lui
+    // répond 403 (règle 2). Sans ce filtre, l'export RGPD servait les secrets
+    // DÉCHIFFRÉS d'un projet que l'UI lui ferme — l'endpoint le plus permissif
+    // du code (seul à déchiffrer par conception) était le seul à ne pas filtrer.
+    where: { userId, hidden: false },
     select: {
       role: true,
       project: {

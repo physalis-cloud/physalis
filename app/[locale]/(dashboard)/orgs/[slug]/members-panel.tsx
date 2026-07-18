@@ -456,7 +456,11 @@ export default function OrgMembersPanel({
                         changeRole(m.user.id, e.target.value as OrgRole)
                       }
                       className="select"
-                      style={{ padding: "5px 8px", fontSize: 12, width: "auto" }}
+                      // Réserve à droite pour le chevron custom (.select pose
+                      // padding-right: 40px ; le shorthand `padding` l'écrasait
+                      // → chevron mal placé). On garde le padding compact mais
+                      // avec la gouttière du chevron.
+                      style={{ padding: "5px 32px 5px 8px", fontSize: 12, width: "auto" }}
                     >
                       {ROLES.filter((r) => r !== "OWNER" || isOwner).map(
                         (r) => (

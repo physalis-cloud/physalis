@@ -31,7 +31,14 @@ export async function GET(_req: Request, { params }: Params) {
     : await prisma.project.findMany({
         where: {
           organizationId: access.organization.id,
-          members: { some: { userId: access.user.id } },
+          // `hidden: false` : une ligne masquée reste une ligne — sans ce
+          // filtre, le sélecteur proposait des projets que requireProjectMember
+          // refuse (403). NB : la restriction aux membres explicites est
+          // VOULUE ici (cf. en-tête) — elle colle à validateDevTokenCreation,
+          // qui interdit à un DEV de déléguer un projet dont il n'est pas
+          // membre. Ne pas l'élargir à `accessibleProjectsWhere` : le POST
+          // rejetterait ce que la liste proposerait.
+          members: { some: { userId: access.user.id, hidden: false } },
         },
         select: { id: true, slug: true, name: true },
         orderBy: { name: "asc" },

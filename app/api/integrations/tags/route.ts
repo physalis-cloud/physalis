@@ -64,13 +64,15 @@ export async function GET(req: Request) {
     if (!project) return null;
 
     if (ctx.kind === "user") {
+      // Cf. /api/integrations/credentials : `hidden` doit être lu, un projet
+      // masqué est refusé (403) partout ailleurs.
       const member = await tx.projectMember.findUnique({
         where: {
           userId_projectId: { userId: ctx.userId, projectId: project.id },
         },
-        select: { role: true },
+        select: { role: true, hidden: true },
       });
-      if (!member) return "forbidden" as const;
+      if (!member || member.hidden) return "forbidden" as const;
     } else if (ctx.kind === "org") {
       if (project.organizationId !== ctx.organizationId) {
         return "forbidden" as const;

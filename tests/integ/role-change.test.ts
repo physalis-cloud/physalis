@@ -4,7 +4,7 @@
 //
 // Route : PATCH /api/orgs/[slug]/members/[userId] { role }
 //   - requireOrgMember(slug, "ADMIN") (un MEMBER ne peut pas)
-//   - rôle ∈ {OWNER, ADMIN, DEV, MEMBER}, sinon 400
+//   - rôle ∈ {OWNER, ADMIN, ADMIN_DEV, DEV, MEMBER}, sinon 400
 //   - seul un OWNER peut accorder OWNER, sinon 403
 //   - interdiction de rétrograder le dernier OWNER (409)
 //   - log AccessLog MEMBER_ROLE_CHANGE (fromRole/toRole)
@@ -181,5 +181,19 @@ describe("Changement de rôle d'un membre (Orgs & Users #5)", () => {
     );
     expect(res.status).toBe(409);
     expect(await roleOf(adminUserId)).toBe("OWNER"); // inchangé
+  });
+
+  // ADMIN_DEV (rang 3) manquait de VALID_ROLES → 400 « Invalid role » sur TOUTE
+  // tentative d'assignation, alors que l'UI le propose et que 8 endpoints le
+  // gatent. Rôle mort. Assignable désormais (gate ADMIN, rang < ADMIN → sûr).
+  it("Admin (OWNER) peut assigner ADMIN_DEV (etait inassignable)", async () => {
+    // Bob est ADMIN à ce stade.
+    const res = await patchJson(
+      admin,
+      `/api/orgs/${ORG_SLUG}/members/${bobUserId}`,
+      { role: "ADMIN_DEV" },
+    );
+    expect(res.status).toBe(200);
+    expect(await roleOf(bobUserId)).toBe("ADMIN_DEV");
   });
 });

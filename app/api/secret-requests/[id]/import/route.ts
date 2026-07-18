@@ -12,7 +12,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encrypt } from "@/lib/crypto";
-import { readJson, requireUser } from "@/lib/api";
+import { readJson, requireEnvironment, requireUser } from "@/lib/api";
 import { isValidSecretKey } from "@/lib/validation";
 import { logAction } from "@/lib/audit";
 import { deleteTokenIndex } from "@/lib/token-index";
@@ -37,19 +37,8 @@ export async function POST(req: Request, { params }: Params) {
       tokenHash: true,
       label: true,
       organizationId: true,
-      organization: {
-        select: {
-          members: {
-            where: {
-              userId: userRes.user.id,
-              role: { in: ["OWNER", "ADMIN", "DEV"] },
-            },
-            select: { role: true },
-          },
-        },
-      },
       projectId: true,
-      project: { select: { id: true, name: true } },
+      project: { select: { id: true, name: true, slug: true } },
       environmentName: true,
       secretKey: true,
       revokedAt: true,
@@ -57,9 +46,6 @@ export async function POST(req: Request, { params }: Params) {
     },
   });
   if (!sr) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (sr.organization.members.length === 0) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
   if (sr.revokedAt) {
     return NextResponse.json({ error: "Revoked" }, { status: 410 });
   }
@@ -69,7 +55,7 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 },
     );
   }
-  if (!sr.projectId || !sr.environmentName || !sr.secretKey) {
+  if (!sr.projectId || !sr.project || !sr.environmentName || !sr.secretKey) {
     return NextResponse.json(
       { error: "Import target (project + environment + key) not specified at creation" },
       { status: 400 },
@@ -82,17 +68,19 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  // Résout l'environnement par (projectId, name).
-  const env = await prisma.environment.findFirst({
-    where: { projectId: sr.projectId, name: sr.environmentName },
-    select: { id: true },
-  });
-  if (!env) {
-    return NextResponse.json(
-      { error: `Environment "${sr.environmentName}" not found in project` },
-      { status: 404 },
-    );
-  }
+  // Autorisation : importer un secret EST une écriture projet → même garde que
+  // toute autre écriture de secret. requireEnvironment applique
+  // requireProjectMember(EDITOR) — `hidden` compris (règle 2) — puis résout
+  // l'environnement cible. L'ancien check org-role (OWNER/ADMIN/DEV de l'org,
+  // `hidden` jamais lu) laissait un DEV MASQUÉ du projet écrire un secret dans
+  // un projet que l'UI lui ferme : élévation de privilège.
+  const access = await requireEnvironment(
+    sr.project.slug,
+    sr.environmentName,
+    "EDITOR",
+  );
+  if ("error" in access) return access.error;
+  const env = access.environment;
 
   const payload = encrypt(value);
 

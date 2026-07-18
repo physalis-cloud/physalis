@@ -29,15 +29,20 @@ export default async function ProjectAuditPage({
   if (!project) notFound();
 
   const orgRole = project.organization.members[0]?.role;
-  const projectRole = project.members[0]?.role;
+  const projectMember = project.members[0];
   const isGlobalAdmin = isPlatformAdmin(session.user.role);
 
+  // Aligné avec requireProjectMember (règle 2) et le route handler
+  // /api/projects/[slug]/audit qui répond 403 sur un projet masqué : une ligne
+  // `hidden` ne donne aucun accès, mais OrgADMIN/OWNER l'ignorent (règle 1).
+  // Cf. projects/[slug]/page.tsx qui fait déjà `if (projectMember.hidden)`.
   const canSee =
     isGlobalAdmin ||
     orgRole === "OWNER" ||
     orgRole === "ADMIN" ||
-    projectRole === "EDITOR" ||
-    projectRole === "OWNER";
+    (!!projectMember &&
+      !projectMember.hidden &&
+      (projectMember.role === "EDITOR" || projectMember.role === "OWNER"));
   if (!canSee) notFound();
 
   return (

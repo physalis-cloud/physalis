@@ -102,7 +102,9 @@ export async function getAccessibleCollectionIds(
       select: { organizationId: true, role: true },
     }),
     prisma.projectMember.findMany({
-      where: { userId },
+      // `hidden: true` = projet masqué → requireProjectMember répond 403
+      // (règle 2). Cf. accessibleProjectsWhere dans lib/api.ts.
+      where: { userId, hidden: false },
       select: { projectId: true },
     }),
   ]);
@@ -114,6 +116,18 @@ export async function getAccessibleCollectionIds(
   // compte separement via la branche projectMemberIds.
   const orgScopeOrgIds = orgMemberships.map((o) => o.organizationId);
   const projectMemberIds = projectMemberships.map((p) => p.projectId);
+  // Héritage transitif org → projet : `hidden` ne se comporte PAS pareil
+  // selon le rôle (cf. accessibleProjectsWhere, lib/api.ts).
+  //   - OrgADMIN/OWNER (règle 1) : voient tout, `hidden` est ignoré.
+  //   - OrgDEV (règles 2+4) : EDITOR implicite partout SAUF si une ligne
+  //     les masque explicitement — sinon un DEV récupérait par héritage
+  //     le projet que la branche 3 vient justement de lui refuser.
+  const adminOrgIds = orgMemberships
+    .filter((o) => o.role === "ADMIN" || o.role === "OWNER")
+    .map((o) => o.organizationId);
+  const devOrgIds = orgMemberships
+    .filter((o) => o.role === "DEV")
+    .map((o) => o.organizationId);
 
   const collections = await prisma.teamVaultCollection.findMany({
     where: {
@@ -128,17 +142,31 @@ export async function getAccessibleCollectionIds(
         ...(projectMemberIds.length > 0
           ? [{ projectId: { in: projectMemberIds } }]
           : []),
-        // 4. Collections projet dont le projet appartient a une org ou
-        //    l'user est OrgDEV/ADMIN/OWNER (heritage transitif). Un
-        //    ProjectMember=VIEWER explicite obtient quand meme VIEWER
-        //    via la branche 3 (qui shadow l'EDITOR implicite, mais ici
-        //    on s'en moque : on ne calcule que la VISIBILITE, pas le
-        //    role effectif).
-        ...(orgScopeOrgIds.length > 0
+        // 4a. Collections projet dont le projet appartient a une org ou
+        //     l'user est OrgADMIN/OWNER (heritage transitif). Regle 1 :
+        //     `hidden` est ignore pour eux. Un ProjectMember=VIEWER
+        //     explicite obtient quand meme VIEWER via la branche 3 (qui
+        //     shadow l'EDITOR implicite, mais ici on s'en moque : on ne
+        //     calcule que la VISIBILITE, pas le role effectif).
+        ...(adminOrgIds.length > 0
           ? [
               {
                 projectId: { not: null },
-                project: { organizationId: { in: orgScopeOrgIds } },
+                project: { organizationId: { in: adminOrgIds } },
+              } as const,
+            ]
+          : []),
+        // 4b. Idem pour OrgDEV, MAIS un projet explicitement masque pour
+        //     lui est exclu (regles 2+4) — sans ce `none`, le DEV
+        //     recuperait par heritage le projet que la branche 3 filtre.
+        ...(devOrgIds.length > 0
+          ? [
+              {
+                projectId: { not: null },
+                project: {
+                  organizationId: { in: devOrgIds },
+                  members: { none: { userId, hidden: true } },
+                },
               } as const,
             ]
           : []),
@@ -272,7 +300,7 @@ export async function requireProjectCollectionAccess(
       organizationId: true,
       members: {
         where: { userId: user.id },
-        select: { role: true },
+        select: { role: true, hidden: true },
       },
       organization: {
         select: {
@@ -313,13 +341,14 @@ export async function requireProjectCollectionAccess(
   //   - projects/[slug]/page.tsx (RBAC effectif affiche)
   //   - requireProjectScope plus bas dans ce fichier
   //
-  // Mapping :
-  //   1. Global ADMIN / OrgADMIN / OrgOWNER → OWNER implicite
-  //   2. ProjectMember explicite → role du member (mapping 1:1 vers Vault)
-  //   3. Pas de row + OrgDEV → EDITOR implicite (les DEV peuvent operer
-  //      sur tous les projets de leur org sauf restriction explicite)
-  //   4. Sinon → null → 404
-  const projectRole = project.members[0]?.role;
+  // Mapping (miroir STRICT de requireProjectMember, hidden compris) :
+  //   1. Global ADMIN / OrgADMIN / OrgOWNER → OWNER implicite (hidden ignore)
+  //   2. ProjectMember.hidden=true → AUCUN acces (404) — barriere explicite qui
+  //      prime meme sur l'EDITOR implicite du DEV (regle 3).
+  //   3. ProjectMember explicite non masque → role du member (mapping 1:1 Vault)
+  //   4. Pas de row + OrgDEV → EDITOR implicite (sauf restriction explicite)
+  //   5. Sinon → null → 404
+  const membership = project.members[0];
   const orgRole = project.organization.members[0]?.role;
 
   let effective: VaultRole | null = null;
@@ -329,8 +358,14 @@ export async function requireProjectCollectionAccess(
     orgRole === "ADMIN"
   ) {
     effective = "OWNER";
-  } else if (projectRole) {
-    effective = PROJECT_TO_VAULT[projectRole];
+  } else if (membership) {
+    // Regle 2 : une ligne masquee bloque, sans retomber sur le fallback DEV.
+    if (membership.hidden) {
+      return {
+        error: NextResponse.json({ error: "Not found" }, { status: 404 }),
+      };
+    }
+    effective = PROJECT_TO_VAULT[membership.role];
   } else if (orgRole === "DEV") {
     effective = "EDITOR";
   }
@@ -432,7 +467,7 @@ export async function requireProjectScope(
       organizationId: true,
       members: {
         where: { userId: user.id },
-        select: { role: true },
+        select: { role: true, hidden: true },
       },
       organization: {
         select: {
@@ -451,11 +486,13 @@ export async function requireProjectScope(
   }
 
   const PROJECT_RANK = { VIEWER: 1, EDITOR: 2, OWNER: 3 } as const;
-  const projectRole = project.members[0]?.role;
+  const membership = project.members[0];
   const orgRole = project.organization.members[0]?.role;
 
-  // Mapping aligne avec requireProjectMember (lib/api.ts) et page.tsx :
-  // OrgDEV sans ProjectMember explicite obtient EDITOR implicite.
+  // Mapping aligne avec requireProjectMember (lib/api.ts) et page.tsx, hidden
+  // compris : OrgADMIN/OWNER ignorent hidden (regle 1) ; une ligne masquee
+  // bloque (regle 2) meme l'EDITOR implicite du DEV ; OrgDEV sans ligne obtient
+  // EDITOR implicite (regle 4).
   let effective: ProjectRole | null = null;
   if (
     isPlatformAdmin(user.role) ||
@@ -463,8 +500,13 @@ export async function requireProjectScope(
     orgRole === "ADMIN"
   ) {
     effective = "OWNER";
-  } else if (projectRole) {
-    effective = projectRole;
+  } else if (membership) {
+    if (membership.hidden) {
+      return {
+        error: NextResponse.json({ error: "Not found" }, { status: 404 }),
+      };
+    }
+    effective = membership.role;
   } else if (orgRole === "DEV") {
     effective = "EDITOR";
   }

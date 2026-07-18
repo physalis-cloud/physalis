@@ -53,6 +53,34 @@ describe("lib/org-token-rbac — validateDevTokenCreation", () => {
     expect(r?.code).toBe(400);
   });
 
+  // Défense en profondeur : `expiresInDays` vient de `readJson` non typé. Une
+  // valeur non-numérique satisfaisait `"abc" > 90` (= false) → contrainte
+  // d'expiration contournée → token DEV éternel. cf. commit type-confusion.
+  it("rejette une expiration non numérique (string)", () => {
+    const r = validateDevTokenCreation({
+      ...baseValid,
+      // @ts-expect-error — simule une entrée readJson non validée
+      expiresInDays: "abc",
+    });
+    expect(r?.code).toBe(400);
+  });
+
+  it("rejette une expiration booléenne", () => {
+    const r = validateDevTokenCreation({
+      ...baseValid,
+      // @ts-expect-error — simule une entrée readJson non validée
+      expiresInDays: true,
+    });
+    expect(r?.code).toBe(400);
+  });
+
+  it("rejette NaN / Infinity", () => {
+    expect(validateDevTokenCreation({ ...baseValid, expiresInDays: NaN })?.code).toBe(400);
+    expect(
+      validateDevTokenCreation({ ...baseValid, expiresInDays: Infinity })?.code,
+    ).toBe(400);
+  });
+
   it("rejette expiration > maxExpiresInDays", () => {
     const r = validateDevTokenCreation({
       ...baseValid,

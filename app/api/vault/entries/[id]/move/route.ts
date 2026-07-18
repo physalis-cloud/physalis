@@ -133,7 +133,7 @@ async function resolveTarget(
         organizationId: true,
         members: {
           where: { userId },
-          select: { role: true },
+          select: { role: true, hidden: true },
         },
         organization: {
           select: {
@@ -156,16 +156,17 @@ async function resolveTarget(
       select: { id: true, name: true, organizationId: true, projectId: true },
     });
     if (!collection) return null;
-    const projectRole = project.members[0]?.role;
+    const membership = project.members[0];
     const orgRole = project.organization.members[0]?.role;
-    // Mapping aligne avec lib/vault-access.ts#requireProjectCollectionAccess :
-    // OrgDEV sans ProjectMember explicite obtient EDITOR implicite (peut
-    // donc deplacer un secret perso vers une collection projet).
+    // Mapping aligne avec lib/vault-access.ts#requireProjectCollectionAccess,
+    // hidden compris : OrgADMIN/OWNER ignorent hidden (regle 1) ; une ligne
+    // masquee bloque (regle 2) SANS retomber sur l'EDITOR implicite du DEV ;
+    // OrgDEV sans ligne obtient EDITOR implicite (regle 4).
     let role: VaultRole | null = null;
     if (isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN") {
       role = "OWNER";
-    } else if (projectRole) {
-      role = PROJECT_TO_VAULT[projectRole];
+    } else if (membership) {
+      if (!membership.hidden) role = PROJECT_TO_VAULT[membership.role];
     } else if (hasDevPrivileges(orgRole)) {
       role = "EDITOR";
     }
@@ -225,20 +226,21 @@ export async function POST(req: Request, { params }: Params) {
       select: {
         id: true,
         organizationId: true,
-        members: { where: { userId: user.id }, select: { role: true } },
+        members: { where: { userId: user.id }, select: { role: true, hidden: true } },
         organization: { select: { members: { where: { userId: user.id }, select: { role: true } } } },
       },
     });
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Rôle effectif aligné sur requireProjectCollectionAccess (cf. team_project).
-    const projectRole = project.members[0]?.role;
+    // Rôle effectif aligné sur requireProjectCollectionAccess (cf. team_project),
+    // hidden compris : une ligne masquee bloque (regle 2) sans fallback DEV.
+    const membership = project.members[0];
     const orgRole = project.organization.members[0]?.role;
     let role: VaultRole | null = null;
     if (isPlatformAdmin(user.role) || orgRole === "OWNER" || orgRole === "ADMIN") {
       role = "OWNER";
-    } else if (projectRole) {
-      role = PROJECT_TO_VAULT[projectRole];
+    } else if (membership) {
+      if (!membership.hidden) role = PROJECT_TO_VAULT[membership.role];
     } else if (hasDevPrivileges(orgRole)) {
       role = "EDITOR";
     }

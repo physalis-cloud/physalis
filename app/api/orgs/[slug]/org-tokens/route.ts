@@ -161,6 +161,32 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
+  // `expiresInDays` vient de `readJson` non typé. On le valide/normalise ICI,
+  // une fois, AVANT la garde RBAC DEV et la persistance — qui divergeaient :
+  // la garde utilisait `> 90` (laxiste : `"abc" > 90` = false → passait), la
+  // persistance `typeof === "number"` (→ expiresAt = null). Un DEV postant
+  // `"abc"` obtenait donc un token ÉTERNEL, contournant maxExpiresInDays.
+  // null/undefined = pas d'expiration (autorisé ADMIN, rejeté DEV par la garde).
+  let expiresInDays: number | null;
+  const rawExpiry = body?.expiresInDays;
+  if (rawExpiry === null || rawExpiry === undefined) {
+    expiresInDays = null;
+  } else if (typeof rawExpiry === "number" && Number.isFinite(rawExpiry)) {
+    const days = Math.floor(rawExpiry);
+    if (days < 1 || days > 365) {
+      return NextResponse.json(
+        { error: "expiresInDays must be 1-365 or null" },
+        { status: 400 },
+      );
+    }
+    expiresInDays = days;
+  } else {
+    return NextResponse.json(
+      { error: "expiresInDays must be a number (1-365) or null" },
+      { status: 400 },
+    );
+  }
+
   const allProjects = body?.allProjects === true;
   let allowedProjectIds: string[] = [];
 
@@ -196,6 +222,11 @@ export async function POST(req: Request, { params }: Params) {
       where: {
         userId: access.user.id,
         project: { organizationId: access.organization.id },
+        // `hidden: true` = projet masqué pour ce DEV → requireProjectMember lui
+        // répond 403 (règle 2). Sans ce filtre il pouvait émettre un token vers
+        // un projet que l'UI lui ferme, puis en lire les secrets via
+        // /api/integrations/credentials — élévation de privilège.
+        hidden: false,
       },
       select: { projectId: true },
     });
@@ -204,7 +235,7 @@ export async function POST(req: Request, { params }: Params) {
     const rbacError = validateDevTokenCreation({
       allProjects,
       allowedProjectIds,
-      expiresInDays: body?.expiresInDays,
+      expiresInDays,
       scopes,
       devMemberProjectIds,
     });
@@ -217,15 +248,8 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   let expiresAt: Date | null = null;
-  if (typeof body?.expiresInDays === "number") {
-    const days = Math.floor(body.expiresInDays);
-    if (days < 1 || days > 365) {
-      return NextResponse.json(
-        { error: "expiresInDays must be 1-365 or null" },
-        { status: 400 },
-      );
-    }
-    expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  if (expiresInDays !== null) {
+    expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
   }
 
   // Quota : DEV = 10/user, ADMIN = 50/org. Compte les tokens actifs

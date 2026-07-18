@@ -357,7 +357,7 @@ async function resolveTeamProjectAccess(
       organizationId: true,
       members: {
         where: { userId },
-        select: { role: true },
+        select: { role: true, hidden: true },
       },
       organization: {
         select: {
@@ -379,13 +379,15 @@ async function resolveTeamProjectAccess(
   });
   if (!collection) return null;
 
-  const projectRole = project.members[0]?.role;
+  const membership = project.members[0];
   const orgRole = project.organization.members[0]?.role;
   let role: VaultRole | null = null;
   if (isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN") {
+    // Regle 1 : OrgADMIN/OWNER (et admin plateforme) ignorent hidden.
     role = "OWNER";
-  } else if (projectRole) {
-    role = PROJECT_TO_VAULT[projectRole];
+  } else if (membership && !membership.hidden) {
+    // Regle 2 : une ligne masquee = 403 ailleurs → aucun acces coffre ici.
+    role = PROJECT_TO_VAULT[membership.role];
   }
   if (!role) return null;
 

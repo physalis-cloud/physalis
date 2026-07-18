@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { auth } from "./auth";
 import { prisma } from "./prisma";
-import type { OrgRole, ProjectRole, Role } from "@prisma/client";
+import type { OrgRole, Prisma, ProjectRole, Role } from "@prisma/client";
 import { isPlatformAdmin, hasDevPrivileges } from "./roles";
 import { isSessionInvalidated } from "./session-validity";
 
@@ -200,6 +200,48 @@ export async function requireProjectMember(
   }
 
   return { user, project, role: effectiveRole, orgRole, tenantSlug: null as string | null };
+}
+
+/**
+ * Clause Prisma « projets de `orgId` visibles par `userId` » — source unique
+ * pour TOUT listing de projets (sélecteurs, audit, API).
+ *
+ * ⚠️ MIROIR des règles de `requireProjectMember` ci-dessus : les deux doivent
+ * être modifiés ensemble. Une divergence se paie dans les deux sens — trop
+ * large, on liste des projets que l'utilisateur ne peut pas ouvrir et le flag
+ * `hidden` perd son sens ; trop étroite, des écrans se vident sans erreur.
+ * C'est exactement ce qui était arrivé : 4 listings, 4 filtres différents,
+ * aucun conforme (cf. `api/projects` qui ne filtrait que par org).
+ *
+ * `orgRole` est celui renvoyé par `requireOrgMember`/`requireProjectMember` —
+ * donc déjà « OWNER » pour un admin plateforme.
+ *
+ * Ne dit RIEN du rôle effectif sur chaque projet : pour agir sur un projet
+ * précis, passer par `requireProjectMember`.
+ */
+export function accessibleProjectsWhere(
+  orgId: string,
+  userId: string,
+  orgRole: OrgRole | null,
+): Prisma.ProjectWhereInput {
+  // Règle 1 — OrgOWNER/ADMIN (et admin plateforme) : tout, `hidden` ignoré.
+  if (orgRole === "OWNER" || orgRole === "ADMIN") {
+    return { organizationId: orgId };
+  }
+  // Règles 2 + 4 — DEV/ADMIN_DEV : EDITOR implicite partout, SAUF si une ligne
+  // les masque explicitement.
+  if (hasDevPrivileges(orgRole)) {
+    return {
+      organizationId: orgId,
+      members: { none: { userId, hidden: true } },
+    };
+  }
+  // Règles 3 + 5 + 6 — MEMBER (ou non-membre) : uniquement les projets où il a
+  // une ligne explicite non masquée.
+  return {
+    organizationId: orgId,
+    members: { some: { userId, hidden: false } },
+  };
 }
 
 export async function requireEnvironment(

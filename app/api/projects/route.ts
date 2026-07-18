@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  accessibleProjectsWhere,
   getCurrentOrgSlug,
   isValidEnvName,
   readJson,
@@ -29,7 +30,14 @@ export async function GET(req: Request) {
   if ("error" in access) return access.error;
 
   const projects = await prisma.project.findMany({
-    where: { organizationId: access.organization.id },
+    // Ne filtrait que par org : tout MEMBER voyait les noms/slugs de TOUS les
+    // projets, y compris ceux masqués pour lui (le POST de secret-requests, lui,
+    // les refuse — c'était donc une divulgation, pas une élévation).
+    where: accessibleProjectsWhere(
+      access.organization.id,
+      access.user.id,
+      access.role,
+    ),
     select: {
       id: true,
       name: true,

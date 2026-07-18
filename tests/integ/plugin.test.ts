@@ -981,3 +981,194 @@ describe("/api/plugin/vault — auto-save credentials", () => {
     },
   );
 });
+
+// Un PluginToken est une SESSION au même titre qu'un JWT web : il doit mourir
+// quand l'user coupe ses sessions (reset password / 2FA disable, qui posent
+// User.sessionsValidFrom = now). Sans ce contrôle, un token volé survivait au
+// reset censé l'évincer — pire, il pouvait être échangé contre une session web
+// fraîche via le provider Credentials `pluginToken` (auth.ts), qui appelle
+// validatePluginToken en premier. Le fix vit dans lib/plugin-token.ts, donc les
+// DEUX vecteurs (API plugin directe + échange NextAuth) tombent d'un coup.
+describe("/api/plugin — token vs invalidation de session (sessionsValidFrom)", () => {
+  async function mintPluginToken(): Promise<string> {
+    const res = await pluginFetch("/api/plugin/auth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: PLUGIN_USER_EMAIL,
+        password: PLUGIN_USER_PASSWORD,
+        totp: await totpGenerate({ secret: totpSecret }),
+        tenantSlug: TENANT_SLUG,
+      }),
+    });
+    if (!res.ok) throw new Error(`mint plugin token: HTTP ${res.status}`);
+    return ((await res.json()) as { sessionToken: string }).sessionToken;
+  }
+
+  it.runIf(pluginOriginConfigured)(
+    "⑤ un token émis AVANT sessionsValidFrom est rejeté (401) ; un token émis APRÈS survit (200)",
+    async () => {
+      // 1. Token émis maintenant → vivant.
+      const before = await mintPluginToken();
+      const alive = await pluginFetch(
+        "/api/plugin/match?domain=does-not-exist-anywhere.example",
+        { headers: { authorization: `Bearer ${before}` } },
+      );
+      expect(alive.status).toBe(200);
+
+      // 2. L'user coupe ses sessions (simule un reset password / 2FA disable).
+      //    NOW() se place ENTRE le token `before` (minté avant, des dizaines de
+      //    ms plus tôt → strictement antérieur) et le token réémis à l'étape 4
+      //    (minté après → strictement postérieur). Un `+interval` casserait ce
+      //    second invariant en poussant la borne au-delà du token réémis.
+      await execSql(
+        `UPDATE ${T}"User" SET "sessionsValidFrom" = NOW() WHERE id = '${userId}'`,
+      );
+
+      // 3. Le MÊME token est désormais mort (barrière = validatePluginToken).
+      const killed = await pluginFetch(
+        "/api/plugin/match?domain=does-not-exist-anywhere.example",
+        { headers: { authorization: `Bearer ${before}` } },
+      );
+      expect(killed.status).toBe(401);
+
+      // 4. Anti sur-restriction : un token RÉÉMIS après la borne (createdAt >
+      //    sessionsValidFrom) doit fonctionner — sinon l'user ne pourrait plus
+      //    jamais se reconnecter via l'extension après un reset.
+      const after = await mintPluginToken();
+      const revived = await pluginFetch(
+        "/api/plugin/match?domain=does-not-exist-anywhere.example",
+        { headers: { authorization: `Bearer ${after}` } },
+      );
+      expect(revived.status).toBe(200);
+
+      // 5. Reset de la borne pour ne pas polluer d'éventuels tests suivants.
+      await execSql(
+        `UPDATE ${T}"User" SET "sessionsValidFrom" = NULL WHERE id = '${userId}'`,
+      );
+    },
+  );
+});
+
+// L'auto-save de l'extension (POST /api/plugin/vault target=team_project) écrit
+// dans la collection d'équipe d'un projet. resolveTeamProjectAccess re-dérivait
+// le rôle depuis ProjectMember sans lire `hidden` → un membre masqué du projet
+// pouvait y injecter des credentials via l'extension. Le user plugin principal
+// est OrgOWNER (immune, règle 1) — on provisionne Mallory, OrgMEMBER +
+// ProjectMember EDITOR masqué, le profil qui subit réellement `hidden`.
+const MALLORY_EMAIL = `mallory-plugin-${SUFFIX}@test.local`;
+const MALLORY_PASSWORD = "mallorytestpassword12";
+
+describe("/api/plugin/vault — hidden (resolveTeamProjectAccess)", () => {
+  let malloryToken = "";
+  let malloryProjectMemberId = "";
+  let colSlug = "";
+
+  beforeAll(async () => {
+    if (!pluginOriginConfigured) return;
+
+    const malloryId = "ck" + randomBytes(11).toString("hex");
+    const hash = await bcrypt.hash(MALLORY_PASSWORD, 12);
+    await execSql(
+      `INSERT INTO ${T}"User" (id, email, password, role, "createdAt")
+       VALUES ('${malloryId}', '${MALLORY_EMAIL}', '${hash}', 'MEMBER', NOW())`,
+    );
+    // OrgMEMBER (PAS OWNER/ADMIN → n'échappe pas à hidden par la règle 1).
+    await execSql(
+      `INSERT INTO ${T}"OrgMember" (id, "userId", "organizationId", role, "createdAt")
+       VALUES ('ck${randomBytes(11).toString("hex")}', '${malloryId}', '${orgId}', 'MEMBER', NOW())`,
+    );
+    // ProjectMember EDITOR, MASQUÉ au départ.
+    malloryProjectMemberId = "ck" + randomBytes(11).toString("hex");
+    await execSql(
+      `INSERT INTO ${T}"ProjectMember" (id, "userId", "projectId", role, hidden)
+       VALUES ('${malloryProjectMemberId}', '${malloryId}', '${projectId}', 'EDITOR', true)`,
+    );
+
+    // 2FA (requis pour obtenir un token plugin).
+    const sess = await loginAs(MALLORY_EMAIL, MALLORY_PASSWORD);
+    const setup = await sess.fetch("/api/me/2fa/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    if (!setup.ok) throw new Error(`mallory 2fa setup: ${setup.status}`);
+    const { secret } = (await setup.json()) as { secret: string };
+    const verify = await sess.fetch("/api/me/2fa/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: await totpGenerate({ secret }) }),
+    });
+    if (!verify.ok) throw new Error(`mallory 2fa verify: ${verify.status}`);
+
+    // Collection d'équipe dans le projet plugin, créée par l'OWNER.
+    const col = await postJson(
+      pluginUserSession,
+      `/api/vault/project/plugin-proj-${SUFFIX}/collections`,
+      { name: "Cible hidden" },
+    );
+    if (col.status === 201) {
+      colSlug = ((await col.json()) as { collection: { slug: string } })
+        .collection.slug;
+    }
+
+    // Token plugin de Mallory.
+    const auth = await pluginFetch("/api/plugin/auth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: MALLORY_EMAIL,
+        password: MALLORY_PASSWORD,
+        totp: await totpGenerate({ secret }),
+        tenantSlug: TENANT_SLUG,
+      }),
+    });
+    if (auth.ok) {
+      malloryToken = ((await auth.json()) as { sessionToken: string })
+        .sessionToken;
+    }
+  });
+
+  afterAll(async () => {
+    await execSql(`DELETE FROM ${T}"User" WHERE email = '${MALLORY_EMAIL}'`);
+  });
+
+  function saveEntry() {
+    return pluginFetch("/api/plugin/vault", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${malloryToken}`,
+      },
+      body: JSON.stringify({
+        action: "create",
+        target: "team_project",
+        projectSlug: `plugin-proj-${SUFFIX}`,
+        collectionSlug: colSlug,
+        name: "injected",
+        password: "p",
+      }),
+    });
+  }
+
+  it.runIf(pluginOriginConfigured)(
+    "Mallory masquée → l'auto-save vers le coffre projet est refusé (404)",
+    async () => {
+      if (!malloryToken || !colSlug) return; // rate-limit / setup skip
+      const res = await saveEntry();
+      expect([403, 404]).toContain(res.status);
+    },
+  );
+
+  it.runIf(pluginOriginConfigured)(
+    "Mallory dé-masquée → l'auto-save réussit (201) [anti sur-restriction]",
+    async () => {
+      if (!malloryToken || !colSlug) return;
+      await execSql(
+        `UPDATE ${T}"ProjectMember" SET hidden = false WHERE id = '${malloryProjectMemberId}'`,
+      );
+      const res = await saveEntry();
+      expect(res.status).toBe(201);
+    },
+  );
+});

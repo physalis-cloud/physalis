@@ -19,6 +19,7 @@ import { createHash, randomBytes } from "crypto";
 // admin.token_index (cf. scripts/migrate-tokens-to-admin.mjs).
 import { resolveTokenIndex } from "./token-index";
 import { withTenantSchema } from "./tenant";
+import { isSessionInvalidated } from "./session-validity";
 
 const TOKEN_PREFIX = "sv_plugin_";
 const DEFAULT_TTL_SECONDS = 14400; // 4h
@@ -67,6 +68,14 @@ export function isPluginTokenFormat(value: string): boolean {
  *   - Hash existe en base
  *   - Pas revoque (revokedAt = null)
  *   - Pas expire (expiresAt > now)
+ *   - Pas anterieur a la borne d'invalidation de l'user (sessionsValidFrom) :
+ *     un reset de mot de passe / 2FA disable coupe TOUTES les sessions emises
+ *     avant. Un PluginToken est une session au meme titre qu'un JWT web — son
+ *     `createdAt` est l'equivalent du `loginAt` du JWT (instant ou le flux
+ *     /api/plugin/auth a prouve email+password+TOTP). Sans ce controle, un
+ *     token vole survivait au reset cense l'evincer, ET pouvait etre echange
+ *     contre une session web fraiche via le provider Credentials `pluginToken`
+ *     (auth.ts) — qui appelle CETTE fonction en premier.
  */
 export async function validatePluginToken(token: string) {
   if (!isPluginTokenFormat(token)) return null;
@@ -84,6 +93,16 @@ export async function validatePluginToken(token: string) {
   if (!pluginToken) return null;
   if (pluginToken.revokedAt) return null;
   if (pluginToken.expiresAt <= new Date()) return null;
+  // Meme borne que les JWT web (cf. isSessionInvalidated) : le token est mort
+  // s'il precede la borne. `createdAt` = instant d'emission du token.
+  if (
+    isSessionInvalidated(
+      pluginToken.createdAt.getTime(),
+      pluginToken.user.sessionsValidFrom,
+    )
+  ) {
+    return null;
+  }
 
   withTenantSchema(indexEntry.tenantSlug, (tx) =>
     tx.pluginToken.update({

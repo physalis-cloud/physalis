@@ -186,6 +186,9 @@ export async function PATCH(req: Request, { params }: Params) {
         where: {
           userId: access.user.id,
           project: { organizationId: access.organization.id },
+          // Cf. POST : un projet masqué ne doit pas pouvoir être ajouté aux
+          // allowedProjectIds, sinon l'update rouvre ce que le create ferme.
+          hidden: false,
         },
         select: { projectId: true },
       });

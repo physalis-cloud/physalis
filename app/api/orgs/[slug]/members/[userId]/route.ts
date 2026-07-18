@@ -6,7 +6,11 @@ import { logAction } from "@/lib/audit";
 
 type Params = { params: Promise<{ slug: string; userId: string }> };
 
-const VALID_ROLES: OrgRole[] = ["OWNER", "ADMIN", "DEV", "MEMBER"];
+// ADMIN_DEV (rang 3, cf. ORG_ROLE_RANK) manquait ici → un membre ne pouvait
+// jamais être PROMU/rétrogradé vers ce rôle. cf. members/route.ts (invite).
+// Gate ADMIN + rang inférieur à ADMIN → pas d'escalade ; garde OWNER/last-owner
+// ci-dessous inchangées.
+const VALID_ROLES: OrgRole[] = ["OWNER", "ADMIN", "ADMIN_DEV", "DEV", "MEMBER"];
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, userId } = await params;

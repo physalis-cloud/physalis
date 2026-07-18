@@ -112,13 +112,16 @@ export async function GET(req: Request) {
     if (!project) return { kind: "not_found" as const };
 
     if (ctx.kind === "user") {
+      // Un UserToken agit AU NOM du user : il ne doit pas ouvrir ce que l'UI
+      // lui ferme. On lit `hidden` — vérifier la seule EXISTENCE de la ligne
+      // laissait passer les projets masqués (requireProjectMember, règle 2).
       const member = await tx.projectMember.findUnique({
         where: {
           userId_projectId: { userId: ctx.userId, projectId: project.id },
         },
-        select: { role: true },
+        select: { role: true, hidden: true },
       });
-      if (!member) return { kind: "forbidden" as const };
+      if (!member || member.hidden) return { kind: "forbidden" as const };
     } else if (ctx.kind === "org") {
       // Check 1 : projet appartient à la même org que le token
       if (project.organizationId !== ctx.organizationId) {
