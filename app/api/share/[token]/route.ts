@@ -68,20 +68,39 @@ export async function POST(req: Request, { params }: Params) {
         { status: 401 },
       );
     }
+    // Incrément ATOMIQUE, AVANT le bcrypt (§2.12). L'implémentation précédente
+    // écrivait `share.passwordAttempts + 1`, dérivé d'un instantané pris avant
+    // ~250 ms de bcrypt, sans verrou : N requêtes concurrentes lisaient toutes
+    // N0 et écrivaient N0+1, donc le seuil de 5 ne bornait plus rien. C'est la
+    // base qui compte et qui décide, comme le `consume` plus bas.
+    const bumped = await prisma.oneTimeShare.update({
+      where: { id: share.id },
+      data: { passwordAttempts: { increment: 1 } },
+      select: { passwordAttempts: true },
+    });
+    const attempts = bumped.passwordAttempts;
+    const revoke = () =>
+      prisma.oneTimeShare.update({
+        where: { id: share.id },
+        data: { revokedAt: new Date(), ciphertext: "", iv: "" },
+      });
+
+    // Seuil DÉJÀ dépassé avant cette tentative (course concurrente) : on
+    // révoque et on refuse sans même payer le bcrypt.
+    if (attempts > MAX_PASSWORD_ATTEMPTS) {
+      await revoke();
+      return NextResponse.json(
+        { requiresPassword: true, attemptsRemaining: 0, revoked: true },
+        { status: 401 },
+      );
+    }
+
     const ok = await bcrypt.compare(provided, share.passwordHash);
     if (!ok) {
-      // Incremente le compteur, revoke si 5e echec.
-      const newAttempts = share.passwordAttempts + 1;
-      const shouldRevoke = newAttempts >= MAX_PASSWORD_ATTEMPTS;
-      await prisma.oneTimeShare.update({
-        where: { id: share.id },
-        data: {
-          passwordAttempts: newAttempts,
-          ...(shouldRevoke
-            ? { revokedAt: new Date(), ciphertext: "", iv: "" }
-            : {}),
-        },
-      });
+      // Révocation UNIQUEMENT sur échec : un utilisateur légitime qui se trompe
+      // 4 fois puis saisit le bon mot de passe au 5e essai doit passer.
+      const shouldRevoke = attempts >= MAX_PASSWORD_ATTEMPTS;
+      if (shouldRevoke) await revoke();
       logAction({
         action: "SHARE_PASSWORD_FAILURE",
         actor: { kind: "anonymous" },
@@ -89,7 +108,7 @@ export async function POST(req: Request, { params }: Params) {
         targetType: "OneTimeShare",
         targetId: share.id,
         metadata: {
-          attempts: newAttempts,
+          attempts,
           revoked: shouldRevoke,
         },
         req,
@@ -99,7 +118,7 @@ export async function POST(req: Request, { params }: Params) {
           requiresPassword: true,
           attemptsRemaining: shouldRevoke
             ? 0
-            : MAX_PASSWORD_ATTEMPTS - newAttempts,
+            : MAX_PASSWORD_ATTEMPTS - attempts,
           revoked: shouldRevoke,
         },
         { status: 401 },

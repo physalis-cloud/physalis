@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Fixture de perf (seedée à la volée)
+perf/.fixture.json

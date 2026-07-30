@@ -1,6 +1,7 @@
 import { withTenantSchema } from "@/lib/tenant";
 import { applyRotationSuccess } from "@/lib/rotation-agent";
 import { generatePassword } from "@/lib/generate-password";
+import { safeFetchHook, HookUrlError } from "@/lib/safe-fetch";
 
 // Stratégie WEBHOOK — mode DIRECT (hook joignable depuis le centralisé).
 //
@@ -30,13 +31,19 @@ export async function rotateWebhook(secretId: string, clientSlug: string): Promi
 
   let res: Response;
   try {
-    res = await fetch(secret.rotationWebhookUrl, {
+    // safeFetchHook : garde SSRF (cible interne refusée, redirects re-validés).
+    // Ce rotator est le chemin DIRECT (le serveur central fetch) ; le mode AGENT
+    // ne l'appelle pas.
+    res = await safeFetchHook(secret.rotationWebhookUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({ secretKey: secret.key, newValue }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (e) {
+    if (e instanceof HookUrlError) {
+      throw new Error(`[rotateWebhook] URL de hook refusée : ${e.message}`);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`[rotateWebhook] hook injoignable (${msg})`);
   }

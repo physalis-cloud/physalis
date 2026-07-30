@@ -4,12 +4,14 @@
 //          via /reveal en encryptedSecret base64)
 // DELETE : révoque (efface encryptedSecret/iv/ephemeralPublicKey)
 
+import { ORG_DEV_PLUS_ROLES } from "@/lib/roles";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { deleteTokenIndex } from "@/lib/token-index";
 import { deriveStatus } from "@/lib/secret-request";
+import { effectiveProjectRole } from "@/lib/project-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,13 +33,20 @@ async function loadAndAssertAccess(id: string, userId: string) {
           name: true,
           slug: true,
           members: {
-            where: { userId, role: { in: ["OWNER", "ADMIN", "DEV"] } },
+            where: { userId, role: { in: ORG_DEV_PLUS_ROLES } },
             select: { role: true },
           },
         },
       },
       projectId: true,
-      project: { select: { name: true, slug: true } },
+      project: {
+        select: {
+          name: true,
+          slug: true,
+          // §2.16 — la ligne ProjectMember du user, pour appliquer `hidden`.
+          members: { where: { userId }, select: { role: true, hidden: true } },
+        },
+      },
       environmentName: true,
       secretKey: true,
       publicKeyJwk: true,
@@ -54,8 +63,25 @@ async function loadAndAssertAccess(id: string, userId: string) {
     },
   });
   if (!sr) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  // Le PROPRIÉTAIRE de la demande y accède toujours (il l'a créée, la clé lui
+  // est destinée) — indépendamment de son rôle org/projet actuel. La feature est
+  // ouverte aux membres, qui doivent voir/révoquer LEURS demandes.
+  if (sr.requestedById === userId) return { sr };
   if (sr.organization.members.length === 0) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+  // §2.16 — pour une demande scopée à un projet, le rôle d'org DEV+ ne suffit
+  // pas : un DEV masqué du projet n'y a aucun accès (GET fuite les métadonnées,
+  // DELETE détruit le ciphertext). OrgADMIN/OWNER ignorent `hidden` (règle 1).
+  if (sr.projectId && sr.project) {
+    const row = sr.project.members[0] ?? null;
+    const effective = effectiveProjectRole({
+      orgRole: sr.organization.members[0].role,
+      membership: row ? { role: row.role, hidden: row.hidden } : null,
+    });
+    if (effective === null) {
+      return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    }
   }
   return { sr };
 }

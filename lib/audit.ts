@@ -23,6 +23,34 @@ export type AuditEntry = {
   tenantSlug?: string | null;
 };
 
+/** Borne défensive de la metadata d'audit (P5 — docs/failles.md §40).
+ *  Miroir du `userAgent.slice(0, 500)` : une metadata anormalement grande — ou
+ *  non sérialisable (ex. BigInt) — ne doit jamais pouvoir faire échouer/gonfler
+ *  l'écriture d'audit (le seul vecteur théorique d'échec silencieux du log,
+ *  puisque toutes les colonnes AccessLog sont `text`/`jsonb` sans limite). Les
+ *  metadata légitimes font < 1 KB ; au-delà du cap on écrit un marqueur, ce qui
+ *  PRÉSERVE l'entrée d'audit (l'action reste tracée) au lieu de risquer sa
+ *  perte. On ne conserve PAS le contenu tronqué (évite de persister par accident
+ *  un fragment volumineux non prévu). */
+const AUDIT_METADATA_MAX_CHARS = 16_384;
+
+export function capAuditMetadata(
+  metadata: AuditEntry["metadata"],
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (metadata === undefined || metadata === null) return Prisma.JsonNull;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(metadata);
+  } catch {
+    // Non sérialisable (BigInt, cycle…) → marqueur, jamais un throw.
+    return { _audit: "metadata_unserializable" };
+  }
+  if (serialized.length > AUDIT_METADATA_MAX_CHARS) {
+    return { _audit: "metadata_truncated", _bytes: serialized.length };
+  }
+  return metadata;
+}
+
 /**
  * Records an audit log entry. Non-blocking: if the write fails, the error is
  * logged but the caller's request is not affected — auditing must never break
@@ -54,7 +82,7 @@ export async function logAction(entry: AuditEntry): Promise<void> {
     secretKey: entry.secretKey ?? null,
     ipAddress: ipAddress === "unknown" ? null : ipAddress,
     userAgent: userAgent ? userAgent.slice(0, 500) : null,
-    metadata: entry.metadata ?? Prisma.JsonNull,
+    metadata: capAuditMetadata(entry.metadata),
   };
 
   try {

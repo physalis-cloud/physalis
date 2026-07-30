@@ -10,6 +10,7 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { readJson } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
+import { effectiveProjectRole } from "@/lib/project-access";
 import {
   validateEntryCreate,
   validateEntryPatch,
@@ -401,24 +402,13 @@ export async function patchEntry(
         targetRole = implicit ?? memberRole;
       }
     } else if (sourceIsProject) {
-      const membership = target.project?.members[0];
-      const orgRole = target.project?.organization?.members[0]?.role;
-      if (
-        isPlatformAdmin(access.user.role) ||
-        orgRole === "OWNER" ||
-        orgRole === "ADMIN"
-      ) {
-        // Regle 1 : OrgADMIN/OWNER ignorent hidden.
-        targetRole = "OWNER";
-      } else if (membership) {
-        // Regle 2 : une ligne masquee bloque le deplacement vers ce projet,
-        // sans retomber sur l'EDITOR implicite du DEV.
-        if (!membership.hidden) targetRole = PROJECT_TO_VAULT_LOCAL[membership.role];
-      } else if (hasDevPrivileges(orgRole)) {
-        // Aligne avec requireProjectCollectionAccess : OrgDEV sans
-        // ProjectMember explicite obtient EDITOR implicite (regle 4).
-        targetRole = "EDITOR";
-      }
+      // Les 6 règles vivent dans lib/project-access.ts (§4). Ne PAS re-dériver.
+      const projectRole = effectiveProjectRole({
+        orgRole: target.project?.organization?.members[0]?.role,
+        membership: target.project?.members[0] ?? null,
+        platformRole: access.user.role,
+      });
+      targetRole = projectRole ? PROJECT_TO_VAULT_LOCAL[projectRole] : null;
     }
 
     if (!targetRole || !hasVaultRole(targetRole, "EDITOR")) {

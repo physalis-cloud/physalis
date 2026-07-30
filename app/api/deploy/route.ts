@@ -22,6 +22,7 @@ import { logAction } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
 import { extractBearer, verifyGithubOidcToken } from "@/lib/oidc";
 import { defaultDeployPath, readJson } from "@/lib/api";
+import { isValidDeployPath } from "@/lib/validation";
 
 // Force Node runtime : jose, node:crypto, prisma — pas Edge.
 export const runtime = "nodejs";
@@ -207,6 +208,37 @@ export async function POST(req: Request) {
   const deployPath =
     environment.deployPath ?? defaultDeployPath(environment.name, project.slug);
   const usedDefaultDeployPath = environment.deployPath === null;
+
+  // Defense en profondeur : la validation a l'ecriture (POST/PATCH env) ne
+  // desamorce pas une valeur stockee AVANT sa mise en place. Ce chemin part
+  // verbatim dans une commande shell sur le VPS du client — on refuse plutot
+  // que de retomber silencieusement sur la convention (deployer ailleurs que
+  // prevu serait pire qu'un echec bruyant).
+  if (!isValidDeployPath(deployPath)) {
+    logAction({
+      action: "DEPLOY_DENIED",
+      actor: { kind: "anonymous" },
+      organizationId: project.organizationId,
+      projectId: project.id,
+      environmentId: environment.id,
+      metadata: {
+        reason: "invalid_deploy_path",
+        repository,
+        workflow: workflowFile,
+        branch,
+        project: projectSlug,
+        environment: envName,
+      },
+      req,
+    });
+    return NextResponse.json(
+      {
+        error:
+          "Invalid deployPath stored for this environment — fix it in the project settings (absolute path, [A-Za-z0-9._/-] only, no '..' or '//')",
+      },
+      { status: 422 },
+    );
+  }
 
   // Tout est valide : on déchiffre.
   const sshKey = decrypt({

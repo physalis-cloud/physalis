@@ -25,6 +25,7 @@ export default function SecretRequestCreateDialog({
   const [environmentName, setEnvironmentName] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [recipientEmail, setRecipientEmail] = useState("");
+  const [expiresInHours, setExpiresInHours] = useState(48);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [created, setCreated] = useState<{
@@ -76,6 +77,7 @@ export default function SecretRequestCreateDialog({
           environmentName: environmentName || undefined,
           secretKey: secretKey || undefined,
           recipientEmail: recipientEmail || undefined,
+          expiresInHours,
         }),
       });
       if (!res.ok) {
@@ -311,6 +313,22 @@ export default function SecretRequestCreateDialog({
                         {p.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="field" style={{ flex: 1 }}>
+                  <label>{t("createRequestDialog.expirationLabel")}</label>
+                  <select
+                    value={expiresInHours}
+                    onChange={(e) => setExpiresInHours(Number(e.target.value))}
+                    className="select"
+                  >
+                    <option value={1}>{t("createRequestDialog.expiration1h")}</option>
+                    <option value={24}>{t("createRequestDialog.expiration24h")}</option>
+                    <option value={48}>{t("createRequestDialog.expiration48h")}</option>
+                    <option value={168}>{t("createRequestDialog.expiration7d")}</option>
                   </select>
                 </div>
               </div>

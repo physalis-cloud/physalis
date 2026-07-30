@@ -99,6 +99,27 @@ function buildDownload(
   });
 }
 
+/**
+ * Horodate le dernier export réussi (`User.dataExportedAt`). Alimente le
+ * compteur « X membres sur Y ont récupéré leurs données » et la règle du
+ * plancher qui ouvre la purge immédiate à l'owner (cf.
+ * docs/steps-docs/todo/suppression-compte.md).
+ *
+ * Best-effort DÉLIBÉRÉ : si l'écriture échoue, on sert quand même le fichier.
+ * Perdre la trace comptable d'un export est bénin ; refuser à quelqu'un la
+ * récupération de ses données parce qu'un UPDATE a échoué ne l'est pas.
+ */
+async function markDataExported(userId: string): Promise<void> {
+  await prisma.user
+    .update({ where: { id: userId }, data: { dataExportedAt: new Date() } })
+    .catch((err) => {
+      console.warn(
+        `[me/export] marquage dataExportedAt échoué pour ${userId}:`,
+        err,
+      );
+    });
+}
+
 export async function GET(req: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -145,6 +166,7 @@ export async function GET(req: Request) {
       user,
       vaultEntries: vaultEntriesExported,
     };
+    await markDataExported(userId);
     return buildDownload(personalPayload, tenantSlug, user.email);
   }
 
@@ -364,5 +386,6 @@ export async function GET(req: Request) {
     invitations,
   };
 
+  await markDataExported(userId);
   return buildDownload(exportPayload, tenantSlug, user.email);
 }

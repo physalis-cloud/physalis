@@ -9,8 +9,15 @@ import { useLocale, useTranslations } from "next-intl";
 // rendu est déjà gardé côté serveur). Confirmation par saisie du nom exact.
 export default function DeleteAccountPanel({
   clientName,
+  memberCount,
 }: {
   clientName: string;
+  /**
+   * Nombre d'utilisateurs du tenant. Affiché AVANT validation : la décision de
+   * l'owner détruit aussi les données de tous les autres, il doit le lire
+   * explicitement plutôt que de le déduire.
+   */
+  memberCount: number;
 }) {
   const t = useTranslations("account.deleteAccount");
   const locale = useLocale();
@@ -66,6 +73,20 @@ export default function DeleteAccountPanel({
           </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
+            {/* Conséquences énoncées AVANT la saisie, pas après. */}
+            <ul
+              className="help"
+              style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4 }}
+            >
+              <li>{t("consequenceBilling")}</li>
+              <li>{t("consequenceWindow")}</li>
+              <li>{t("consequenceExport")}</li>
+              {memberCount > 1 && (
+                <li style={{ color: "var(--danger)", fontWeight: 600 }}>
+                  {t("consequenceMembers", { count: memberCount - 1 })}
+                </li>
+              )}
+            </ul>
             <label className="field" style={{ maxWidth: 360 }}>
               <span>{t("confirmLabel", { name: clientName })}</span>
               <input

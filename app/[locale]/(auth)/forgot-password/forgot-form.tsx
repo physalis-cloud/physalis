@@ -40,8 +40,9 @@ export default function ForgotForm() {
         {t("formHelp")}
       </p>
       <div className="field">
-        <label>{tCommon("emailLabel")}</label>
+        <label htmlFor="forgot-email">{tCommon("emailLabel")}</label>
         <input
+          id="forgot-email"
           type="email"
           name="email"
           required
@@ -49,6 +50,7 @@ export default function ForgotForm() {
           autoFocus
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          className="input"
         />
       </div>
       {state?.ok === false && (

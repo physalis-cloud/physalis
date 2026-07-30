@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition, type ReactNode, type CSSProperties } from "react";
+import TagsInput from "@/components/TagsInput";
 import { useTranslations } from "next-intl";
 import {
   RiFolderOpenLine,
@@ -602,6 +603,7 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
           <EntryDialog
             initial={editing}
             collections={collections}
+            suggestions={allTagsList}
             defaultCollectionId={
               !editing && filter !== "all" && filter !== "favorites" && filter !== "none"
                 ? filter
@@ -1353,12 +1355,15 @@ function OnboardingCard({
 function EntryDialog({
   initial,
   collections,
+  suggestions,
   defaultCollectionId,
   onClose,
   onSaved,
 }: {
   initial: VaultEntryListItem | null;
   collections: VaultCollection[];
+  /** Tags déjà utilisés → autocomplete. */
+  suggestions: string[];
   defaultCollectionId: string | null;
   onClose: () => void;
   onSaved: () => void;
@@ -1374,7 +1379,6 @@ function EntryDialog({
   const [showTotpSecret, setShowTotpSecret] = useState(false);
   const [totpLoaded, setTotpLoaded] = useState(false);
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
-  const [tagInput, setTagInput] = useState("");
   const [favorite, setFavorite] = useState(initial?.favorite ?? false);
   const [collectionId, setCollectionId] = useState<string | "">(
     initial?.collectionId ?? defaultCollectionId ?? "",
@@ -1400,21 +1404,6 @@ function EntryDialog({
   function generate() {
     setPassword(generatePassword(24));
     setShowPassword(true);
-  }
-
-  function addTag() {
-    const tag = tagInput.trim();
-    if (!tag) return;
-    if (tags.includes(tag)) {
-      setTagInput("");
-      return;
-    }
-    setTags([...tags, tag]);
-    setTagInput("");
-  }
-
-  function removeTag(tag: string) {
-    setTags(tags.filter((x) => x !== tag));
   }
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -1629,46 +1618,7 @@ function EntryDialog({
 
             <div className="field">
               <label>Tags</label>
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="chip"
-                    style={{ display: "inline-flex", gap: 4 }}
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="text-muted"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: 0,
-                        fontSize: 12,
-                      }}
-                      aria-label={`Retirer le tag ${tag}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") {
-                      e.preventDefault();
-                      addTag();
-                    }
-                  }}
-                  onBlur={() => addTag()}
-                  placeholder="+ tag"
-                  className="input"
-                  style={{ width: 120, padding: "6px 10px", fontSize: 12 }}
-                />
-              </div>
+              <TagsInput value={tags} onChange={setTags} suggestions={suggestions} lowercase={false} />
             </div>
 
             <label

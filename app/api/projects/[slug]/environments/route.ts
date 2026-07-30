@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  isValidDeployPath,
   isValidEnvName,
   readJson,
   requireProjectMember,
@@ -60,10 +61,21 @@ export async function POST(req: Request, { params }: Params) {
     serverId = server.id;
   }
 
+  // deployPath atterrit dans une commande shell distante au deploy :
+  // valide (jeu de caracteres ferme) avant stockage. Cf. isValidDeployPath.
   const deployPath =
     typeof body?.deployPath === "string" && body.deployPath.trim() !== ""
       ? body.deployPath.trim()
       : null;
+  if (deployPath !== null && !isValidDeployPath(deployPath)) {
+    return NextResponse.json(
+      {
+        error:
+          "Chemin de déploiement invalide : chemin absolu, caractères [A-Za-z0-9._/-] uniquement, sans « .. » ni « // » (ex. /srv/projets/production/mon-app)",
+      },
+      { status: 400 },
+    );
+  }
 
   const env = await prisma.environment.create({
     data: {

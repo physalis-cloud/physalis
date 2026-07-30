@@ -17,7 +17,7 @@
 // droits mouvants de son créateur — le blocage est à l'émission). Le repérage
 // des tokens hérités est confié à un script d'audit, pas à un 403 au runtime.
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll , afterAll} from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import {
   Session,
@@ -31,6 +31,7 @@ import {
   TENANT_HOST,
 } from "./helpers/api";
 import { execSql } from "./helpers/db";
+import { cleanupFixtures } from "./helpers/cleanup";
 
 const SUFFIX = `${Date.now()}`;
 const DENIS_EMAIL = `denis-hidden-${SUFFIX}@test.local`;
@@ -161,6 +162,24 @@ async function seedSecretRequest(
   return id;
 }
 
+/** Secret en rotation dans (projectId, envName) — pour la vue rotation org (§2.16a). */
+async function seedRotationSecret(
+  projectId: string,
+  envName: string,
+  key: string,
+): Promise<void> {
+  const envId = (
+    await execSql(
+      `SELECT id FROM "${TENANT_SCHEMA}"."Environment" WHERE "projectId" = '${projectId}' AND name = '${envName}'`,
+    )
+  ).trim();
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."Secret"
+       (id, key, "encryptedValue", iv, tag, "environmentId", "rotationEnabled", "createdAt", "updatedAt")
+     VALUES ('${cuid()}', '${key}', 'x', 'x', 'x', '${envId}', true, NOW(), NOW())`,
+  );
+}
+
 beforeAll(async () => {
   await adminSession();
   adminUserId = (
@@ -192,7 +211,18 @@ beforeAll(async () => {
   // Une collection d'équipe dans chaque projet (cible de déplacement).
   await seedTeamCollection(hiddenProjectId, "coffre-equipe");
   await seedTeamCollection(visibleProjectId, "coffre-equipe");
+  // §2.16a — un secret en rotation dans chaque projet (vue rotation org-level).
+  await seedRotationSecret(hiddenProjectId, "production", "HIDDEN_ROT");
+  await seedRotationSecret(visibleProjectId, "production", "VISIBLE_ROT");
 });
+
+// Le tenant de test est PARTAGÉ et plafonné à 5 sièges : un fichier qui
+// sème un utilisateur sans le reprendre occupe un siège définitivement, et
+// finit par faire échouer les invitations des autres en 403.
+afterAll(async () => {
+  await cleanupFixtures(SUFFIX);
+});
+
 
 describe("hidden — la barrière tient dans l'UI", () => {
   it("refuse à Denis le projet masqué (sanity : la règle 2 s'applique)", async () => {
@@ -419,5 +449,93 @@ describe("hidden — non contournable par déplacement d'entrée (vault move)", 
       projectSlug: VISIBLE_PROJECT_SLUG,
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// §2.16 — fuites `hidden` résiduelles non couvertes par v1.8.0 : trois surfaces
+// qui scopaient sur `organizationId` brut sous une garde DEV+, sans lire `hidden`.
+describe("§2.16 — fuites hidden résiduelles (rotation, secret-requests)", () => {
+  // (a) La vue rotation org-level agrégeait 5 requêtes sur project.organizationId.
+  it("⑦ (a) la vue rotation n'inclut pas le projet masqué, inclut le visible", async () => {
+    const res = await denis.fetch(`/api/orgs/${ORG_SLUG}/rotation?all=1`);
+    expect(res.status).toBe(200);
+    const { groups } = (await res.json()) as {
+      groups: Array<{ project: { slug: string } }>;
+    };
+    const slugs = groups.map((g) => g.project.slug);
+    expect(slugs).toContain(VISIBLE_PROJECT_SLUG);
+    expect(slugs).not.toContain(HIDDEN_PROJECT_SLUG);
+  });
+
+  // (b) Le listing des demandes de secret oubliait le filtre que son POST applique.
+  it("⑧ (b) le listing exclut les demandes du projet masqué, garde celles du visible", async () => {
+    const hiddenSr = await seedSecretRequest(hiddenProjectId, "production");
+    const visibleSr = await seedSecretRequest(visibleProjectId, "production");
+    const res = await denis.fetch(`/api/secret-requests?org=${ORG_SLUG}`);
+    expect(res.status).toBe(200);
+    const { requests } = (await res.json()) as { requests: Array<{ id: string }> };
+    const ids = requests.map((r) => r.id);
+    expect(ids).toContain(visibleSr);
+    expect(ids).not.toContain(hiddenSr);
+  });
+
+  it("⑧ bis (b) le filtre ?project=<masqué> ne fuit aucune demande", async () => {
+    await seedSecretRequest(hiddenProjectId, "production");
+    const res = await denis.fetch(
+      `/api/secret-requests?org=${ORG_SLUG}&project=${HIDDEN_PROJECT_SLUG}`,
+    );
+    expect(res.status).toBe(200);
+    const { requests } = (await res.json()) as { requests: Array<{ id: string }> };
+    expect(requests.length).toBe(0);
+  });
+
+  // (c) GET/DELETE/reveal par id : le check org-role sans garde projet. Le DELETE
+  // est le cœur exploitable (destruction irréversible du ciphertext).
+  it("⑨ (c) GET d'une demande du projet masqué → 403", async () => {
+    const sr = await seedSecretRequest(hiddenProjectId, "production");
+    const res = await denis.fetch(`/api/secret-requests/${sr}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("⑨ bis (c) DELETE d'une demande du projet masqué → 403 ET rien n'est révoqué", async () => {
+    const sr = await seedSecretRequest(hiddenProjectId, "production");
+    const res = await denis.fetch(`/api/secret-requests/${sr}`, { method: "DELETE" });
+    expect(res.status).toBe(403);
+    const revoked = await execSql(
+      `SELECT ("revokedAt" IS NOT NULL) FROM "${TENANT_SCHEMA}"."SecretRequest" WHERE id = '${sr}'`,
+    );
+    expect(revoked.trim()).toBe("f");
+  });
+
+  it("⑨ ter (c) reveal d'une demande du projet masqué → 403", async () => {
+    const sr = await seedSecretRequest(hiddenProjectId, "production");
+    const res = await postJson(denis, `/api/secret-requests/${sr}/reveal`, {});
+    expect(res.status).toBe(403);
+  });
+
+  it("⑨ quater (c) GET d'une demande du projet VISIBLE → 200 (anti sur-restriction)", async () => {
+    const sr = await seedSecretRequest(visibleProjectId, "production");
+    const res = await denis.fetch(`/api/secret-requests/${sr}`);
+    expect(res.status).toBe(200);
+  });
+});
+
+// §4 — `vault/destinations` passe désormais par `effectiveProjectRole` (source
+// unique) au lieu de re-dériver explicite/implicite/hidden à la main. Garde de
+// non-régression du comportement `hidden` après migration.
+describe("§4 — vault/destinations : hidden appliqué via la source unique", () => {
+  it("la liste des destinations exclut le projet masqué, inclut le visible", async () => {
+    const res = await denis.fetch(`/api/vault/destinations`);
+    expect(res.status).toBe(200);
+    const { projects } = (await res.json()) as {
+      projects: Array<{ slug: string; collections: Array<{ slug: string }> }>;
+    };
+    const slugs = projects.map((p) => p.slug);
+    expect(slugs).toContain(VISIBLE_PROJECT_SLUG);
+    expect(slugs).not.toContain(HIDDEN_PROJECT_SLUG);
+    // Le projet visible propose sa collection d'équipe (Denis DEV → EDITOR
+    // implicite ≥ EDITOR requis) ; le masqué n'apparaît nulle part.
+    const visible = projects.find((p) => p.slug === VISIBLE_PROJECT_SLUG);
+    expect(visible?.collections.map((c) => c.slug)).toContain("coffre-equipe");
   });
 });

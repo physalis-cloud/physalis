@@ -1,5 +1,32 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
+// ────────────────────────────────────────────────────────────────────────
+// INVARIANT DE SÉCURITÉ — PAS D'AAD, CLÉ GLOBALE (piste d'audit P4)
+//
+// Ce module chiffre en AES-256-GCM SANS Additional Authenticated Data, sous
+// une `ENCRYPTION_KEY` UNIQUE partagée par tous les tenants. Conséquence :
+// un triplet {encryptedValue, iv, tag} déchiffre correctement DANS N'IMPORTE
+// QUELLE ligne, quel que soit le secret / l'env / le projet / le tenant. Rien
+// dans le ciphertext ne le lie à sa ligne d'origine.
+//
+// Aujourd'hui aucun chemin applicatif n'est exploitable : audit exhaustif
+// (docs/failles.md §5/P4 + §36) — toute traversée de frontière re-chiffre, et
+// les seules copies verbatim (versioning / rollback) restent intra-secret.
+// Cet invariant N'EST PAS enforcé par le type-système : c'est une règle de
+// revue. RÈGLE À TENIR pour ne pas rouvrir la faille :
+//
+//   Ne JAMAIS persister un triplet {encryptedValue, iv, tag} que vous n'avez
+//   pas produit via `encrypt()` dans la MÊME requête — SAUF snapshot d'un
+//   secret vers SA PROPRE version/historique (même secretId/orgSecretId).
+//   Toute copie vers une autre ligne à frontière d'accès différente (autre
+//   projet / env / collection / tenant / modèle) DOIT faire decrypt→encrypt
+//   (nouvel IV), jamais un transplant de bytes chiffrés.
+//
+// Le garde-fou de régression vit dans tests/lib/crypto-aad-invariant.test.ts.
+// Le durcissement cryptographique (lier le ciphertext à sa ligne via AAD) est
+// un chantier différé — cf. docs/failles.md §5/P4.
+// ────────────────────────────────────────────────────────────────────────
+
 const ALGORITHM = "aes-256-gcm";
 
 function parseKey(raw: string | undefined, label: string): Buffer {

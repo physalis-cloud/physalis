@@ -83,6 +83,7 @@ export type RestorePlan = {
 export async function resolveRestorePlan(
   tenantSlug: string,
   configId: string,
+  cidr?: string,
 ): Promise<RestorePlan | null> {
   const pending = await withTenantSchema(tenantSlug, (tx) =>
     tx.projectBackupRestore.findFirst({
@@ -99,7 +100,7 @@ export async function resolveRestorePlan(
 
   let kms: { token: string; kmsKeyName: string };
   try {
-    kms = await getRestoreToken(tenantSlug);
+    kms = await getRestoreToken(tenantSlug, cidr);
   } catch (e) {
     console.error(`[restore] mint token KO (${tenantSlug}): ${(e as Error).message}`);
     return null;

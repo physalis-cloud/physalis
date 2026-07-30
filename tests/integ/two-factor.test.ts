@@ -44,6 +44,31 @@ async function provisionAlice() {
   return id;
 }
 
+/**
+ * Réinitialise le pas de temps TOTP consommé par Alice.
+ *
+ * §2.17 — l'app refuse tout code dont le `timeStep` est <= `lastTotpTimeStep`
+ * (anti-rejeu RFC 6238 §5.2). Or plusieurs tests de ce fichier ont besoin d'un
+ * code TOTP valide et s'exécutent en bien moins de 30 s : le second tombait
+ * alors dans la MÊME fenêtre que le premier et se faisait rejeter — d'où des
+ * échecs qui se déplaçaient d'une exécution à l'autre.
+ *
+ * Réinitialiser isole chaque cas de la consommation du précédent, sans rien
+ * affaiblir : l'anti-rejeu lui-même est couvert par son propre test ci-dessous.
+ * L'alternative (attendre la fenêtre suivante) ajouterait jusqu'à 30 s par cas.
+ */
+async function resetTotpStep(): Promise<void> {
+  await execSql(
+    `UPDATE "${TENANT_SCHEMA}"."User" SET "lastTotpTimeStep" = NULL WHERE id = '${aliceUserId}'`,
+  );
+}
+
+/** Code TOTP frais, garanti acceptable (pas de collision de fenêtre). */
+async function freshTotp(secret: string): Promise<string> {
+  await resetTotpStep();
+  return generate({ secret });
+}
+
 beforeAll(async () => {
   aliceUserId = await provisionAlice();
 });
@@ -176,7 +201,7 @@ describe("2FA — flow d'activation", () => {
   });
 
   it("login avec bon totpCode → session créée", async () => {
-    const code = await generate({ secret: setupSecret });
+    const code = await freshTotp(setupSecret);
     const session = new Session();
     const csrfRes = await session.fetch("/api/auth/csrf");
     const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
@@ -195,6 +220,67 @@ describe("2FA — flow d'activation", () => {
     expect(res.status).toBe(302);
     // La session doit être créée.
     expect(session.hasCookie("authjs.session-token")).toBe(true);
+  });
+
+  // §2.17 — anti-rejeu RFC 6238 §5.2, sur le LOGIN WEB.
+  //
+  // Le mécanisme est déjà couvert de bout en bout par `totp-replay.test.ts`,
+  // mais sur l'autre surface : `POST /api/plugin/auth` (celle de l'exploit du
+  // finding — code capturé rejoué en curl → bearer 8 h). Ce cas-ci vérifie que
+  // le second point d'appel, `callback/credentials`, câble bien la même garde :
+  // `verifyTotp(afterTimeStep)` + consommation atomique du pas.
+  //
+  // C'est cet invariant qui rendait les autres cas de ce fichier instables
+  // (plusieurs codes générés dans la même fenêtre de 30 s) — autant l'asserter
+  // ici plutôt que de seulement le contourner.
+  it("RÉUTILISATION du même code TOTP → refusée (anti-rejeu)", async () => {
+    const code = await freshTotp(setupSecret);
+
+    // 1er usage : accepté, et le pas de temps est consommé.
+    const first = new Session();
+    const csrf1 = (await (await first.fetch("/api/auth/csrf")).json()) as {
+      csrfToken: string;
+    };
+    const res1 = await first.fetch("/api/auth/callback/credentials", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        csrfToken: csrf1.csrfToken,
+        email: ALICE_EMAIL,
+        password: ALICE_PASSWORD,
+        tenantSlug: TENANT_SLUG,
+        totpCode: code,
+      }).toString(),
+    });
+    expect(res1.status).toBe(302);
+    expect(first.hasCookie("authjs.session-token")).toBe(true);
+
+    // 2e usage du MÊME code, immédiatement : refusé.
+    const second = new Session();
+    const csrf2 = (await (await second.fetch("/api/auth/csrf")).json()) as {
+      csrfToken: string;
+    };
+    const res2 = await second.fetch("/api/auth/callback/credentials", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        csrfToken: csrf2.csrfToken,
+        email: ALICE_EMAIL,
+        password: ALICE_PASSWORD,
+        tenantSlug: TENANT_SLUG,
+        totpCode: code,
+      }).toString(),
+    });
+    expect(second.hasCookie("authjs.session-token")).toBe(false);
+
+    // Et le pas de temps consommé est bien mémorisé en base.
+    const stored = (
+      await execSql(
+        `SELECT "lastTotpTimeStep" FROM "${TENANT_SCHEMA}"."User" WHERE id = '${aliceUserId}'`,
+      )
+    ).trim();
+    expect(stored).not.toBe("");
+    void res2;
   });
 
   it("login avec backup code valide → session créée + code retiré", async () => {
@@ -268,7 +354,7 @@ describe("2FA — flow d'activation", () => {
   });
 
   it("désactivation avec bon code TOTP → 200 + secret/codes effacés", async () => {
-    const code = await generate({ secret: setupSecret });
+    const code = await freshTotp(setupSecret);
     const res = await aliceSession.fetch("/api/me/2fa", {
       method: "DELETE",
       headers: { "content-type": "application/json" },

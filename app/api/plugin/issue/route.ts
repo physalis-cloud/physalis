@@ -29,6 +29,19 @@ export async function POST(req: Request) {
   if ("error" in userRes) return userRes.error;
   const { user, tenantSlug } = userRes;
 
+  // §2.18 — une session DÉRIVÉE d'un PluginToken ne peut pas re-frapper un
+  // PluginToken : sinon un token volé, échangé contre une session web (branche
+  // pluginToken du provider Credentials), re-frappait un token neuf à l'infini,
+  // survivant à l'expiration ET à la révocation manuelle. Un vrai login web
+  // (mot de passe / SSO / social) ou /api/plugin/auth (email+password+TOTP)
+  // restent les seules sources d'un nouveau token.
+  if (user.origin === "plugin_token") {
+    return NextResponse.json(
+      { error: "Session dérivée d'un token ; ré-authentification requise." },
+      { status: 403 },
+    );
+  }
+
   if (!tenantSlug) {
     // SUPERADMIN platform-level : pas de schéma tenant → l'extension ne le sert
     // pas (elle autofill des credentials de projet, qui vivent dans un tenant).

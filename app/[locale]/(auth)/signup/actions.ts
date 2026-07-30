@@ -1,6 +1,6 @@
 "use server";
 
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/password-hash";
 import { prisma } from "@/lib/prisma";
 import { isValidClientSlug, isValidEmail } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
@@ -46,7 +46,7 @@ export async function signupTenant(
   const emailExists = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (emailExists) return { ok: false, error: "Un compte existe déjà avec cet email." };
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await hashPassword(password);
 
   await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({

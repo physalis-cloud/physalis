@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/password-hash";
 import { prisma } from "@/lib/prisma";
 import { hashInvitationToken } from "@/lib/invitations";
+import { applyInvitationProjectAccess } from "@/lib/invitation-project-access";
 import { rateLimit } from "@/lib/rate-limit";
 import { logAction } from "@/lib/audit";
 import { readJson } from "@/lib/api";
@@ -64,7 +65,7 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  const hash = await bcrypt.hash(password, 12);
+  const hash = await hashPassword(password);
 
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
@@ -78,6 +79,13 @@ export async function POST(req: Request, { params }: Params) {
         role: invitation.role,
       },
     });
+    // #2 — applique les accès projet pré-attribués à l'invitation.
+    await applyInvitationProjectAccess(
+      tx,
+      invitation.organizationId,
+      invitation.projectAccess,
+      created.id,
+    );
     await tx.invitation.update({
       where: { id: invitation.id },
       data: { acceptedAt: new Date() },

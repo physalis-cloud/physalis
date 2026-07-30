@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { physalisBaseUrl } from "./app-url";
+import { tenantBaseUrl } from "./app-url";
 
 export const INVITATION_TTL_MS = 48 * 60 * 60_000; // 48h
 
@@ -12,21 +12,20 @@ export function hashInvitationToken(token: string): string {
 }
 
 /**
- * Builds the acceptance URL for an invitation. If a request is provided,
- * the origin is derived from it (so links match whichever host the inviter
- * connected from — useful in dev where the IP changes, and behind reverse
- * proxies where the configured URL may be wrong). Falls back to PHYSALIS_URL
- * (cf. lib/app-url, chaîne PHYSALIS_URL → NEXTAUTH_URL → AUTH_URL).
+ * Construit l'URL d'acceptation d'une invitation, depuis le slug du tenant
+ * (issu de la session authentifiée) et NON depuis un en-tête de requête.
+ *
+ * L'implémentation précédente interpolait `X-Forwarded-Host` brut : un ADMIN
+ * d'org pouvait poser `X-Forwarded-Host: evil.tld` sur `POST /members` et faire
+ * partir, depuis l'expéditeur légitime et avec DKIM valide, un mail dont le
+ * bouton pointait sur `https://evil.tld/invite/<token>` — livrant un token
+ * vivant (TTL 48 h) suffisant à créer le compte de la victime. Cf. §2.11.
+ *
+ * Le repli `physalisBaseUrl()` (tenantSlug null) ne sert qu'au mono-tenant
+ * self-host. En multi-tenant, viser l'URL canonique produirait un lien MORT :
+ * `vault` est un sous-domaine réservé, donc `/invite/[token]` rejette la page
+ * faute de pouvoir résoudre un tenant.
  */
-export function buildAcceptUrl(token: string, req?: Request): string {
-  if (req) {
-    const xfProto = req.headers.get("x-forwarded-proto");
-    const xfHost = req.headers.get("x-forwarded-host");
-    const host = xfHost ?? req.headers.get("host");
-    if (host) {
-      const proto = xfProto ?? new URL(req.url).protocol.replace(":", "");
-      return `${proto}://${host}/invite/${token}`;
-    }
-  }
-  return `${physalisBaseUrl()}/invite/${token}`;
+export function buildAcceptUrl(token: string, tenantSlug: string | null): string {
+  return `${tenantBaseUrl(tenantSlug)}/invite/${token}`;
 }

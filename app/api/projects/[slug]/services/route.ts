@@ -4,6 +4,7 @@ import { encrypt } from "@/lib/crypto";
 import { readJson, requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
+import { validateHookUrlSyntax } from "@/lib/safe-fetch";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -60,6 +61,12 @@ export async function POST(req: Request, { params }: Params) {
   const hookUrl = typeof body?.rotationWebhookUrl === "string" ? body.rotationWebhookUrl.trim() || null : null;
   const hookToken = typeof body?.rotationHookToken === "string" ? body.rotationHookToken.trim() || null : null;
   const execMode = body?.rotationExecMode === "DIRECT" ? "DIRECT" : body?.rotationExecMode === "AGENT" ? "AGENT" : null;
+  // Hook DIRECT = le serveur central fetch cette URL → refus des cibles internes
+  // (garde SSRF, cf. docs/failles.md §6). AGENT = hook local, non concerné.
+  if (hookUrl && execMode === "DIRECT") {
+    const urlError = validateHookUrlSyntax(hookUrl);
+    if (urlError) return NextResponse.json({ error: urlError }, { status: 400 });
+  }
   const dbType = body?.dbType === "POSTGRESQL" ? "POSTGRESQL" : body?.dbType === "MYSQL" ? "MYSQL" : null;
   const dbHost = typeof body?.dbHost === "string" ? body.dbHost.trim() || null : null;
   const dbName = typeof body?.dbName === "string" ? body.dbName.trim() || null : null;

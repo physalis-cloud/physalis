@@ -1,13 +1,14 @@
 import { requireEnvironment } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
+import { logAction } from "@/lib/audit";
 
 type Params = { params: Promise<{ slug: string; env: string }> };
 
 // GET /api/projects/[slug]/[env]/secrets/export
 // Retourne tous les secrets déchiffrés au format .env (text/plain).
 // Accessible dès VIEWER — même niveau que la lecture individuelle.
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { slug, env } = await params;
   const access = await requireEnvironment(slug, env);
   if ("error" in access) return access.error;
@@ -58,6 +59,21 @@ export async function GET(_req: Request, { params }: Params) {
     }
     body = sections.join("\n\n") + "\n";
   }
+
+  // §2.25a — un GET vaut N SECRET_REVEAL évités : sans cette entrée, toute alerte
+  // fondée sur un pic de reveals est aveugle à l'export, et l'enquête post-incident
+  // ne peut établir ni périmètre ni auteur. Logué sur le modèle de SECRET_FETCH_BULK.
+  logAction({
+    action: "SECRET_EXPORT",
+    actor: { kind: "user", userId: access.user.id, email: access.user.email },
+    organizationId: access.project.organizationId,
+    projectId: access.project.id,
+    environmentId: access.environment.id,
+    targetType: "Environment",
+    targetId: access.environment.id,
+    metadata: { count: secrets.length },
+    req,
+  });
 
   return new Response(body, {
     headers: {

@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { auth, signOut } from "@/lib/auth";
 import { isSuperadmin } from "@/lib/roles";
+import { prisma } from "@/lib/prisma";
+import { isSessionInvalidated } from "@/lib/session-validity";
 
 export default async function AdminLayout({
   children,
@@ -14,8 +16,22 @@ export default async function AdminLayout({
 }) {
   const { locale } = await params;
   const session = await auth();
-  if (!session?.user || !isSuperadmin(session.user.role)) {
+  if (!session?.user?.id || !isSuperadmin(session.user.role)) {
     redirect(`/${locale}/dashboard`);
+  }
+  // §2.9-corollaire — ce layout ne passe PAS par requireUser (où la borne
+  // sessionsValidFrom est appliquée en self-host) : sans ce contrôle, une
+  // session révoquée (reset mdp / 2FA off) garderait l'accès admin. Le SaaS le
+  // couvre via le callback jwt ; le self-host mono-tenant le vérifie ici.
+  const loginAt = session.user.loginAt ?? null;
+  if (loginAt != null) {
+    const dbUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { sessionsValidFrom: true },
+    });
+    if (isSessionInvalidated(loginAt, dbUser?.sessionsValidFrom)) {
+      redirect(`/${locale}/login`);
+    }
   }
   const t = await getTranslations("admin.layout");
 

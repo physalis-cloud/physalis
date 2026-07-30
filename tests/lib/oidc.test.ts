@@ -59,6 +59,8 @@ type Claims = {
   job_workflow_ref?: string;
   ref?: string;
   ref_name?: string;
+  /** "branch" | "tag" — claim GitHub qui désambiguïse le type de ref (§2.5). */
+  ref_type?: string;
   iss?: string;
   aud?: string;
   exp?: number;
@@ -116,7 +118,11 @@ describe("verifyGithubOidcToken", () => {
     if (r.ok) expect(r.claims.branch).toBe("release/2026");
   });
 
-  it("supporte les tags", async () => {
+  // §2.5 — Les policies ne s'expriment qu'en branches. Un TAG ne doit JAMAIS
+  // produire de claim `branch` : sinon un dev sans droit de push sur `main`
+  // pousse un tag NOMMÉ `main` et matche la policy (les tags ne sont pas
+  // couverts par les rulesets de branche côté forge) → secrets prod + clé SSH.
+  it("REFUSE un tag (ne le confond pas avec une branche)", async () => {
     const token = await signToken({
       repository: "argo-web/voyages",
       job_workflow_ref:
@@ -124,10 +130,38 @@ describe("verifyGithubOidcToken", () => {
       ref: "refs/tags/v1.2.3",
     });
     const r = await verifyGithubOidcToken(token);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("ref_not_branch");
+  });
+
+  it("REFUSE un tag homonyme d'une branche protégée (le scénario d'attaque)", async () => {
+    const token = await signToken({
+      repository: "argo-web/voyages",
+      job_workflow_ref:
+        "argo-web/voyages/.github/workflows/deploy.yml@refs/tags/main",
+      ref: "refs/tags/main",
+      ref_type: "tag",
+      ref_name: "main", // GitHub pose ref_name pour un tag aussi → piège
+    });
+    const r = await verifyGithubOidcToken(token);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("ref_not_branch");
+  });
+
+  it("accepte une branche avec ref_type explicite", async () => {
+    const token = await signToken({
+      repository: "argo-web/voyages",
+      job_workflow_ref:
+        "argo-web/voyages/.github/workflows/deploy.yml@refs/heads/main",
+      ref: "refs/heads/main",
+      ref_type: "branch",
+      ref_name: "main",
+    });
+    const r = await verifyGithubOidcToken(token);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.claims.branch).toBe("v1.2.3");
-      expect(r.claims.workflowFile).toBe("release.yml");
+      expect(r.claims.branch).toBe("main");
+      expect(r.claims.workflowFile).toBe("deploy.yml");
     }
   });
 

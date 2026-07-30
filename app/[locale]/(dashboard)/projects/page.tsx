@@ -1,4 +1,8 @@
 import { RiFolderOpenLine } from "@remixicon/react";
+import {
+  accessibleProjectsWhereByOrgSlug,
+  resolveOrgRole,
+} from "@/lib/project-access";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrgSlug } from "@/lib/api";
@@ -55,23 +59,13 @@ export default async function ProjectsPage() {
   const orgRole = orgMembership?.role ?? null;
   const isOrgAdmin = orgRole === "OWNER" || orgRole === "ADMIN";
 
+  // Règles centralisées dans lib/project-access.ts (§4). Ne PAS re-dériver.
   const projects = await prisma.project.findMany({
-    where:
-      isGlobalAdmin || isOrgAdmin
-        ? { organization: { slug: orgSlug } }
-        : hasDevPrivileges(orgRole)
-          ? {
-              organization: { slug: orgSlug },
-              members: {
-                none: { userId: session.user.id, hidden: true },
-              },
-            }
-          : {
-              organization: { slug: orgSlug },
-              members: {
-                some: { userId: session.user.id, hidden: false },
-              },
-            },
+    where: accessibleProjectsWhereByOrgSlug(
+      orgSlug,
+      session.user.id,
+      resolveOrgRole(orgRole, session.user.role),
+    ),
     select: {
       id: true,
       name: true,

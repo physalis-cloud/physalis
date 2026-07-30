@@ -22,10 +22,16 @@ afterEach(() => {
   else process.env.CRON_PRIVATE_ONLY = ORIGINAL;
 });
 
-/** Forge une requête avec (ou sans) l'en-tête CF-Connecting-IP. */
-function req(cfIp?: string): Request {
+/**
+ * Forge une requête avec les en-têtes que pose notre reverse proxy. `xff` = la
+ * chaîne X-Forwarded-For telle qu'elle arrive à l'app (dernier maillon =
+ * `$remote_addr` vu par nginx) ; `realIp` = X-Real-IP. Passer `undefined` pour
+ * omettre l'en-tête.
+ */
+function req(opts: { xff?: string; realIp?: string } = {}): Request {
   const headers = new Headers();
-  if (cfIp !== undefined) headers.set("cf-connecting-ip", cfIp);
+  if (opts.xff !== undefined) headers.set("x-forwarded-for", opts.xff);
+  if (opts.realIp !== undefined) headers.set("x-real-ip", opts.realIp);
   return new Request("https://vault.physalis.cloud/api/cron/purge-accounts", {
     method: "POST",
     headers,
@@ -45,26 +51,46 @@ describe("isTailscaleIp — CGNAT 100.64.0.0/10", () => {
   });
 });
 
-describe("requirePrivateOrigin", () => {
+describe("requirePrivateOrigin — preuve positive fail-closed", () => {
   it("garde-fou DÉSACTIVÉ (défaut) → toujours autorisé", () => {
     delete process.env.CRON_PRIVATE_ONLY;
-    expect(requirePrivateOrigin(req("203.0.113.7"))).toBe(true); // même via edge public
-    expect(requirePrivateOrigin(req())).toBe(true);
+    expect(requirePrivateOrigin(req({ xff: "203.0.113.7" }))).toBe(true); // même IP publique
+    expect(requirePrivateOrigin(req())).toBe(true); // même sans en-tête
   });
 
-  it("activé : requête edge public (CF-Connecting-IP publique) → refusée", () => {
+  it("activé : dernier maillon XFF dans le tailnet → autorisé", () => {
     process.env.CRON_PRIVATE_ONLY = "1";
-    expect(requirePrivateOrigin(req("203.0.113.7"))).toBe(false);
+    expect(requirePrivateOrigin(req({ xff: "100.77.120.17" }))).toBe(true);
   });
 
-  it("activé : requête tailnet (pas d'en-tête CF) → autorisée", () => {
+  it("activé : dernier maillon XFF public → refusé (curl direct sur l'origine)", () => {
     process.env.CRON_PRIVATE_ONLY = "1";
-    expect(requirePrivateOrigin(req())).toBe(true);
+    expect(requirePrivateOrigin(req({ xff: "203.0.113.7" }))).toBe(false);
   });
 
-  it("activé : CF-Connecting-IP dans le tailnet → autorisée (cas limite)", () => {
-    process.env.CRON_PRIVATE_ONLY = "true";
-    expect(requirePrivateOrigin(req("100.77.120.17"))).toBe(true);
+  it("activé : chaîne edge public [visiteur, edge_CF] → refusé (dernier = edge public)", () => {
+    process.env.CRON_PRIVATE_ONLY = "1";
+    expect(requirePrivateOrigin(req({ xff: "198.51.100.9, 172.71.10.2" }))).toBe(false);
+  });
+
+  it("activé : tailnet forgé EN TÊTE mais dernier maillon public → refusé (non spoofable)", () => {
+    process.env.CRON_PRIVATE_ONLY = "1";
+    expect(requirePrivateOrigin(req({ xff: "100.64.0.1, 203.0.113.7" }))).toBe(false);
+  });
+
+  it("activé : AUCUN en-tête d'origine → refusé (fail-closed, ancien fail-open)", () => {
+    process.env.CRON_PRIVATE_ONLY = "1";
+    expect(requirePrivateOrigin(req())).toBe(false);
+  });
+
+  it("activé : repli X-Real-IP tailnet quand XFF absent → autorisé", () => {
+    process.env.CRON_PRIVATE_ONLY = "1";
+    expect(requirePrivateOrigin(req({ realIp: "100.100.50.1" }))).toBe(true);
+  });
+
+  it("activé : dernier maillon IPv6 → refusé (fail-closed sûr)", () => {
+    process.env.CRON_PRIVATE_ONLY = "1";
+    expect(requirePrivateOrigin(req({ xff: "fd7a:115c:a1e0::1" }))).toBe(false);
   });
 });
 

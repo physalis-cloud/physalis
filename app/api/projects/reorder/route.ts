@@ -6,6 +6,7 @@ import {
   requireOrgMember,
   requireUser,
 } from "@/lib/api";
+import { accessibleProjectsWhere } from "@/lib/project-access";
 
 // POST /api/projects/reorder — persiste le résultat d'un drag-and-drop.
 // Body : {
@@ -65,7 +66,13 @@ export async function POST(req: Request) {
   const [ownedProjects, ownedGroups] = await Promise.all([
     projectIds.length
       ? prisma.project.findMany({
-          where: { id: { in: projectIds }, organizationId: orgId },
+          // §2.16 — un MEMBER/DEV masqué ne doit pas pouvoir réordonner (donc
+          // sortir de son groupe / épingler) un projet qu'il ne voit pas. On
+          // passe par la visibilité §4 au lieu du scope `organizationId` seul.
+          where: {
+            id: { in: projectIds },
+            ...accessibleProjectsWhere(orgId, user.id, access.role),
+          },
           select: { id: true },
         })
       : Promise.resolve([]),

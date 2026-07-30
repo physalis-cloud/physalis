@@ -3,6 +3,8 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { generatePassword } from "@/lib/generate-password";
 import { computeReminderNextAt, pushRotationHistory } from "@/lib/rotation-reminder";
 import { logAction } from "@/lib/audit";
+import { safeFetchHook, HookUrlError } from "@/lib/safe-fetch";
+import { RotationDisabledError, rotationGateOpen } from "@/lib/rotation-gate";
 
 // Rotation WEBHOOK d'un AppAccount (compte applicatif). Le credential vit en
 // `encryptedData = { user, password }`. Comme pour les secrets, seule l'app sait
@@ -88,10 +90,18 @@ export async function rotateAppAccountWebhook(accountId: string, clientSlug: str
         tag: true,
         // Le hook vit sur le SERVICE backend lié (config partagée par tous ses comptes).
         service: { select: { rotationWebhookUrl: true, rotationHookToken: true } },
+        // §2.24c — gate d'org (bloque un « Forcer » sur une org rotation-off).
+        project: {
+          select: {
+            rotationPaused: true,
+            organization: { select: { rotationFeatureEnabled: true } },
+          },
+        },
       },
     }),
   );
   if (!acc) throw new Error(`[rotateAppAccountWebhook] compte ${accountId} introuvable`);
+  if (!rotationGateOpen(acc.project)) throw new RotationDisabledError();
   const hookUrl = acc.service?.rotationWebhookUrl ?? null;
   if (!hookUrl) {
     throw new Error(`compte non lié à un service backend avec un hook (rotationWebhookUrl)`);
@@ -108,7 +118,8 @@ export async function rotateAppAccountWebhook(accountId: string, clientSlug: str
 
   let res: Response;
   try {
-    res = await fetch(hookUrl, {
+    // safeFetchHook : garde SSRF (cf. lib/safe-fetch.ts). Chemin DIRECT uniquement.
+    res = await safeFetchHook(hookUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({ user: parsed.user ?? "", newValue }),
@@ -117,6 +128,9 @@ export async function rotateAppAccountWebhook(accountId: string, clientSlug: str
       signal: AbortSignal.timeout(15_000),
     });
   } catch (e) {
+    if (e instanceof HookUrlError) {
+      throw new Error(`URL de hook refusée : ${e.message}`);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`hook injoignable (${msg})`);
   }

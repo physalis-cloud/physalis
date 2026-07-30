@@ -16,12 +16,16 @@ declare module "next-auth" {
       /** #5 — instant d'émission du JWT (ms epoch), comparé à
        *  User.sessionsValidFrom pour invalider les sessions. */
       loginAt: number | null;
+      /** §2.18 — origine de la session ("plugin_token" | "web" | null). */
+      origin: string | null;
     } & DefaultSession["user"];
   }
 
   interface User {
     role: Role;
     tenantSlug?: string | null;
+    /** §2.18 — origine de la session. */
+    origin?: string | null;
   }
 }
 
@@ -31,5 +35,7 @@ declare module "next-auth/jwt" {
     role?: Role;
     tenantSlug?: string | null;
     loginAt?: number | null;
+    /** §2.18 — origine de la session. */
+    origin?: string | null;
   }
 }

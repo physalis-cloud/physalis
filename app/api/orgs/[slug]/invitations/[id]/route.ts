@@ -35,6 +35,15 @@ export async function DELETE(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // §2.25f — seul un OWNER gère les invitations OWNER (miroir création/resend) :
+  // un ADMIN ne peut pas annuler une invitation OWNER émise par un OWNER.
+  if (invitation.role === "OWNER" && access.role !== "OWNER") {
+    return NextResponse.json(
+      { error: "Only OWNERs can revoke OWNER invitations" },
+      { status: 403 },
+    );
+  }
+
   await prisma.invitation.delete({ where: { id: invitation.id } });
 
   logAction({

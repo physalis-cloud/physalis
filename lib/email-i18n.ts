@@ -56,10 +56,20 @@ export function emailTranslator(locale?: string | null) {
 }
 
 /**
- * Extracts the locale from a Next.js Request URL or x-next-intl-locale header.
- * Use this in API routes to get the acting user's locale.
+ * Résout la locale de l'utilisateur qui déclenche l'envoi d'un email.
  *
  *   const locale = localeFromRequest(req);
+ *
+ * ⚠️ Les deux premières sources ne sont JAMAIS disponibles sur une route API :
+ * le `matcher` du middleware exclut `/api` (donc pas de `x-next-intl-locale`)
+ * et les chemins d'API ne portent pas de préfixe de locale. Sans les deux replis
+ * ci-dessous, tout email émis depuis une route API partait en anglais quelle
+ * que soit la langue de l'utilisateur — invitation, renvoi d'invitation,
+ * demande de secret, secret reçu, partage consommé.
+ *
+ * La précédence reflète volontairement `detectLocale` (middleware.ts) : cookie
+ * `NEXT_LOCALE` (posé par LocaleSwitcher, `path=/` donc envoyé aux routes API)
+ * puis `Accept-Language`. Un email doit arriver dans la langue de l'UI.
  */
 export function localeFromRequest(req: Request): EmailLocale {
   const header = req.headers.get("x-next-intl-locale");
@@ -67,6 +77,17 @@ export function localeFromRequest(req: Request): EmailLocale {
 
   const match = new URL(req.url).pathname.match(/^\/([a-z]{2})(\/|$)/);
   if (match && match[1] in MESSAGES) return match[1] as EmailLocale;
+
+  const cookie = req.headers
+    .get("cookie")
+    ?.match(/(?:^|;\s*)NEXT_LOCALE=([a-z]{2})/i)?.[1]
+    ?.toLowerCase();
+  if (cookie && cookie in MESSAGES) return cookie as EmailLocale;
+
+  for (const part of (req.headers.get("accept-language") ?? "").split(",")) {
+    const lang = part.trim().split(";")[0]?.slice(0, 2).toLowerCase();
+    if (lang && lang in MESSAGES) return lang as EmailLocale;
+  }
 
   return "en";
 }

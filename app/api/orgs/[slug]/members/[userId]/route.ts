@@ -102,7 +102,13 @@ export async function DELETE(req: Request, { params }: Params) {
   });
   const projectIds = orgProjects.map((p) => p.id);
 
-  const [, revokedTokens] = await prisma.$transaction([
+  const [
+    ,
+    revokedTokens,
+    revokedOrgTokens,
+    revokedVaultShares,
+    revokedInvitations,
+  ] = await prisma.$transaction([
     prisma.projectMember.deleteMany({
       where: { userId, projectId: { in: projectIds } },
     }),
@@ -113,6 +119,56 @@ export async function DELETE(req: Request, { params }: Params) {
         revokedAt: null,
       },
       data: { revokedAt: new Date() },
+    }),
+    // §2.19 — OrgToken émis par le partant : la garde DEV (portée ⊆ projets
+    // membres non masqués) n'est validée QU'À l'émission ; sans ceci, un DEV
+    // offboardé gardait jusqu'à 90 j un `sv_org_*` lisant les secrets de prod.
+    // On révoque les tokens de FORME DEV — `allProjects=false` ET expiration —
+    // ce qui couvre TOUS les tokens DEV (cette forme leur est imposée) et
+    // préserve les tokens de forme INSTITUTIONNELLE (allProjects OU sans
+    // expiration), dont la survie au départ du créateur est le différenciateur
+    // voulu (tenant-schema.prisma). ⚠️ La forme ne distingue PAS un token
+    // scopé+expirant créé par un ADMIN d'un token DEV : un tel token ADMIN est
+    // AUSSI révoqué. Over-révocation ASSUMÉE — direction fail-safe (rompt une
+    // intégration, n'ouvre jamais d'accès) ; l'alternative serait une colonne
+    // `emitterLevel` (migration), non justifiée pour ce gain.
+    prisma.orgToken.updateMany({
+      where: {
+        createdById: userId,
+        organizationId: access.organization.id,
+        allProjects: false,
+        expiresAt: { not: null },
+        revokedAt: null,
+      },
+      data: { revokedAt: new Date() },
+    }),
+    // Coffres d'équipe : sans ça, l'offboardé gardait l'accès aux collections
+    // partagées après son retrait de l'org (TeamVaultMember survit à OrgMember,
+    // et l'accès coffre ne re-dérive pas l'appartenance à l'org). Cf. §2.7.
+    // Une collection est soit ORG-level, soit PROJET-level → on couvre les deux,
+    // en restant scopé à CETTE org (les coffres d'autres orgs sont intouchés).
+    prisma.teamVaultMember.deleteMany({
+      where: {
+        userId,
+        collection: {
+          OR: [
+            { organizationId: access.organization.id },
+            { projectId: { in: projectIds } },
+          ],
+        },
+      },
+    }),
+    // §2.25f — invitations PENDANTES émises par le partant dans CETTE org : sans
+    // ça, un ADMIN en cours d'offboarding s'auto-invitait puis acceptait dans la
+    // fenêtre TTL (48 h) APRÈS son retrait (findActiveInvitation ne teste que
+    // existence/acceptedAt/expiresAt). Scopé à l'org (les invitations qu'il a
+    // émises dans d'autres orgs, où il reste membre, sont intactes).
+    prisma.invitation.deleteMany({
+      where: {
+        invitedById: userId,
+        organizationId: access.organization.id,
+        acceptedAt: null,
+      },
     }),
     prisma.orgMember.delete({ where: { id: target.id } }),
   ]);
@@ -146,6 +202,9 @@ export async function DELETE(req: Request, { params }: Params) {
     metadata: {
       previousRole: target.role,
       cascadedRevokedTokens: revokedTokens.count,
+      cascadedRevokedOrgTokens: revokedOrgTokens.count,
+      cascadedRevokedVaultShares: revokedVaultShares.count,
+      cascadedRevokedInvitations: revokedInvitations.count,
       orphanUserPurged: purgedUser,
       orphanUserKept: remainingMemberships === 0 && !purgedUser,
     },

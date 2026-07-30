@@ -10,6 +10,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isPlatformAdmin } from "@/lib/roles";
 import ExportButton from "./export-button";
+import DeleteMyAccountPanel from "./delete-my-account-panel";
 
 export default async function AccountPage({
   params,
@@ -105,6 +106,11 @@ export default async function AccountPage({
             <ExportButton personal={!isPrivilegedAnyOrg} />
           </div>
         </section>
+
+        {/* ─── Zone dangereuse : suppression de SON PROPRE compte ─── */}
+        {/* Jumeau de la route app/api/me/delete (portée §A.7). Le panneau lui-même
+            coule verbatim de la source : il n'a aucune dépendance SaaS. */}
+        <DeleteMyAccountPanel />
 
         <div style={{ marginTop: 24 }}>
           <Link href="/dashboard" className="btn btn-ghost">

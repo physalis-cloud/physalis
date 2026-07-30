@@ -23,6 +23,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { readJson, requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { hasVaultRole } from "@/lib/vault-access";
+import { effectiveProjectRole } from "@/lib/project-access";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
 
 type Params = { params: Promise<{ id: string }> };
@@ -156,20 +157,15 @@ async function resolveTarget(
       select: { id: true, name: true, organizationId: true, projectId: true },
     });
     if (!collection) return null;
-    const membership = project.members[0];
-    const orgRole = project.organization.members[0]?.role;
-    // Mapping aligne avec lib/vault-access.ts#requireProjectCollectionAccess,
-    // hidden compris : OrgADMIN/OWNER ignorent hidden (regle 1) ; une ligne
-    // masquee bloque (regle 2) SANS retomber sur l'EDITOR implicite du DEV ;
-    // OrgDEV sans ligne obtient EDITOR implicite (regle 4).
-    let role: VaultRole | null = null;
-    if (isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN") {
-      role = "OWNER";
-    } else if (membership) {
-      if (!membership.hidden) role = PROJECT_TO_VAULT[membership.role];
-    } else if (hasDevPrivileges(orgRole)) {
-      role = "EDITOR";
-    }
+    // Les 6 règles vivent dans lib/project-access.ts (§4). Ne PAS re-dériver.
+    const projectRole = effectiveProjectRole({
+      orgRole: project.organization.members[0]?.role,
+      membership: project.members[0] ?? null,
+      platformRole: userRole,
+    });
+    const role: VaultRole | null = projectRole
+      ? PROJECT_TO_VAULT[projectRole]
+      : null;
     if (!role) return null;
     return {
       collectionId: collection.id,
@@ -232,18 +228,15 @@ export async function POST(req: Request, { params }: Params) {
     });
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Rôle effectif aligné sur requireProjectCollectionAccess (cf. team_project),
-    // hidden compris : une ligne masquee bloque (regle 2) sans fallback DEV.
-    const membership = project.members[0];
-    const orgRole = project.organization.members[0]?.role;
-    let role: VaultRole | null = null;
-    if (isPlatformAdmin(user.role) || orgRole === "OWNER" || orgRole === "ADMIN") {
-      role = "OWNER";
-    } else if (membership) {
-      if (!membership.hidden) role = PROJECT_TO_VAULT[membership.role];
-    } else if (hasDevPrivileges(orgRole)) {
-      role = "EDITOR";
-    }
+    // Les 6 règles vivent dans lib/project-access.ts (§4). Ne PAS re-dériver.
+    const projectRole = effectiveProjectRole({
+      orgRole: project.organization.members[0]?.role,
+      membership: project.members[0] ?? null,
+      platformRole: user.role,
+    });
+    const role: VaultRole | null = projectRole
+      ? PROJECT_TO_VAULT[projectRole]
+      : null;
     if (!role || !hasVaultRole(role, "EDITOR")) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -115,6 +115,21 @@ jobs:
           SSH_USER=$(jq -r '.serverUser'  "$RUNNER_TEMP/bundle.json")
           DPATH=$(jq -r '.deployPath'  "$RUNNER_TEMP/bundle.json")
 
+          # Garde-fou : DPATH part dans une commande shell distante (ci-dessous)
+          # et dans un chemin scp interprete par le shell de la cible. Le vault
+          # le valide deja a l'ecriture, on re-verifie ici pour que ce workflow
+          # reste sur meme face a un bundle inattendu.
+          case "$DPATH" in
+            /*) ;;
+            *) echo "deployPath invalide (chemin absolu attendu)" >&2; exit 1 ;;
+          esac
+          case "$DPATH" in
+            *[!A-Za-z0-9._/-]*) echo "deployPath : caractere interdit" >&2; exit 1 ;;
+          esac
+          case "$DPATH" in
+            *..*|*//*) echo "deployPath : '..' ou '//' interdit" >&2; exit 1 ;;
+          esac
+
           REGISTRY_URL=$(jq -r '.registry.url // empty'  "$RUNNER_TEMP/bundle.json")
           REGISTRY_USER=$(jq -r '.registry.user // empty' "$RUNNER_TEMP/bundle.json")
           REGISTRY_PAT=$(jq -r '.registry.pat // empty'  "$RUNNER_TEMP/bundle.json")
@@ -134,10 +149,19 @@ jobs:
             HAS_COMPOSE=1
           fi
 
+          # `printf %q` plutot que des quotes simples litterales : la commande est
+          # reassemblee et reinterpretee par le shell DISTANT, donc une apostrophe
+          # dans l'une de ces valeurs refermerait la chaine et ferait executer la
+          # suite. %q produit un quoting shell correct quelle que soit la valeur.
+          printf -v Q_DPATH '%q' "$DPATH"
+          printf -v Q_HAS_COMPOSE '%q' "$HAS_COMPOSE"
+          printf -v Q_REGISTRY_URL '%q' "$REGISTRY_URL"
+          printf -v Q_REGISTRY_USER '%q' "$REGISTRY_USER"
+          printf -v Q_REGISTRY_PAT '%q' "$REGISTRY_PAT"
           # Atomic swap + (optionnel) login registry + restart sans rebuild.
           # shellcheck disable=SC2086
           ssh $SSH_OPTS "$SSH_USER@$IP" \
-            "DEPLOY_DIR='$DPATH' HAS_COMPOSE='$HAS_COMPOSE' REGISTRY_URL='$REGISTRY_URL' REGISTRY_USER='$REGISTRY_USER' REGISTRY_PAT='$REGISTRY_PAT' bash -s" <<'ENDSSH'
+            "DEPLOY_DIR=$Q_DPATH HAS_COMPOSE=$Q_HAS_COMPOSE REGISTRY_URL=$Q_REGISTRY_URL REGISTRY_USER=$Q_REGISTRY_USER REGISTRY_PAT=$Q_REGISTRY_PAT bash -s" <<'ENDSSH'
           set -euo pipefail
           cd "$DEPLOY_DIR"
           mv .env.new .env

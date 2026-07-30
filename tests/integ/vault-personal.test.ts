@@ -104,10 +104,22 @@ describe("/api/vault/entries — coffre personnel", () => {
       entries: Array<{ id: string; name: string }>;
     };
     expect(data.entries.find((e) => e.id === aliceEntryId)).toBeDefined();
-    // Sanity : aucun champ password / encrypted dans la reponse liste
+    // Sanity : la liste ne doit ni servir le mot de passe en clair, ni son
+    // blob chiffré. On teste les VALEURS et les noms de champs EXACTS, pas la
+    // sous-chaîne « password » — `passwordStrength` (un score numérique, aucun
+    // secret) est un champ légitime de cette réponse, et l'assertion naïve
+    // échouait dessus.
     const text = JSON.stringify(data);
-    expect(text).not.toContain("password");
-    expect(text).not.toContain("encryptedPassword");
+    expect(text).not.toContain(PLAINTEXT_MARKER);
+    for (const leaky of [
+      '"password"',
+      '"encryptedPassword"',
+      '"passwordIv"',
+      '"passwordTag"',
+      '"encryptedTotpSecret"',
+    ]) {
+      expect(text).not.toContain(leaky);
+    }
   });
 
   it("GET reveal retourne le password déchiffré", async () => {

@@ -81,11 +81,16 @@ ph_live_sk_<64 caracteres hexadecimales>
 Tu middleware envía la clave al endpoint público de Physalis para validar
 cada petición entrante:
 
+El campo **`apiId` es obligatorio**: es el identificador de TU API (visible en el
+panel Gateway). Garantiza que una clave solo se acepte para la API a la que pertenece
+— sin él, una clave válida destinada a otra API sería aceptada.
+
 ```http
 POST https://<tu-slug>.physalis.cloud/api/gateway/verify
 Content-Type: application/json
 
 {
+  "apiId": "clx...",
   "key": "ph_live_sk_...",
   "path": "/api/orders",
   "method": "GET"
@@ -97,6 +102,7 @@ Respuesta en caso de éxito:
 ```json
 {
   "valid": true,
+  "apiId": "clx...",
   "keyId": "clx...",
   "keyPrefix": "ph_live_sk_ab",
   "scopes": ["read:orders"],
@@ -115,7 +121,7 @@ Respuesta en caso de fallo:
 ```
 
 Los valores posibles para `reason` son: `invalid`, `revoked`, `expired`,
-`rate_limited`.
+`rate_limited`, `api_id_required` (falta el campo `apiId` en la petición).
 
 ### Ejemplo — middleware de Next.js
 
@@ -130,7 +136,7 @@ export async function middleware(req: NextRequest) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, path: req.nextUrl.pathname, method: req.method }),
+      body: JSON.stringify({ apiId: process.env.PHYSALIS_API_ID, key, path: req.nextUrl.pathname, method: req.method }),
     }
   );
 

@@ -462,6 +462,11 @@
       "envLabel": "Entorno (para importación automática)",
       "keyLabel": "Clave .env",
       "noneProject": "— Ninguno —",
+      "expirationLabel": "Expiración del enlace",
+      "expiration1h": "1 hora",
+      "expiration24h": "24 horas",
+      "expiration48h": "48 horas",
+      "expiration7d": "7 días",
       "cancelBtn": "Cancelar",
       "creatingBtn": "Creando…",
       "error": "No se puede crear.",
@@ -507,7 +512,7 @@
       "selectServer": "— elegir un VPS —",
       "destSave": "Guardar destino",
       "destSaved": "Destino guardado.",
-      "destHint": "La ruta efectiva de un proyecto será: <ruta base>/<slug-del-proyecto>.",
+      "destHint": "La ruta efectiva de un proyecto será: [ruta base]/[slug-del-proyecto].",
       "saving": "Guardando…"
     },
     "security": {
@@ -760,7 +765,7 @@
       "dbNameLabel": "Base",
       "dbUserLabel": "Usuario DB (admin)",
       "dbPasswordLabel": "Contraseña DB",
-      "dbCredsHint": "Conexión admin a la base, distinta del login del dashboard de arriba. P. ej. pooler de Supabase: «postgres.<ref>» + la contraseña de la base.",
+      "dbCredsHint": "Conexión admin a la base, distinta del login del dashboard de arriba. P. ej. pooler de Supabase: «postgres.[ref]» + la contraseña de la base.",
       "dbServiceOk": "✓ El servicio vinculado tiene un destino base de datos: la rotación hará ALTER ROLE vía el admin del servicio.",
       "dbNeedsServiceDb": "⚠ Vincule esta cuenta a un servicio backend que tenga un destino base de datos (host/tipo en el servicio, pestaña Acceso).",
       "webhookServiceOk": "✓ El servicio vinculado tiene un hook configurado: la rotación pasará por él.",
@@ -991,6 +996,11 @@
       "visible": "👁 Visible",
       "hidden": "🚫 Oculto",
       "orgRoleTitle": "Rol en la organización",
+      "withAccessTitle": "Con acceso",
+      "noAccessTitle": "Sin acceso",
+      "allowAccess": "Autorizar acceso",
+      "denyAccess": "Revocar acceso",
+      "noAccessEmpty": "Todos los miembros tienen acceso.",
       "orgAdmin": "OWNER implícito (admin de org) · no editable",
       "explicit": "Rol explícito — anula el predeterminado",
       "default": "Rol predeterminado (VIEWER, acceso de lectura)"
@@ -1177,6 +1187,15 @@
       "scheduleValue": "cada {days} d a las {hour}h UTC",
       "agentOk": "registrado",
       "agentPending": "a la espera del despliegue del agente",
+      "agent": {
+        "regenBtn": "Regenerar el token del agente",
+        "regenConfirm": "¿Regenerar el token del agente? El anterior se revoca de inmediato — el agente en ejecución no podrá conectarse hasta el próximo despliegue del proyecto.",
+        "tokenTitle": "Nuevo token del agente",
+        "tokenWarning": "Cópialo ahora: no volverá a mostrarse nunca. El token anterior queda revocado. Vuelve a desplegar el proyecto para que el agente use el nuevo.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "close": "Cerrar"
+      },
       "scheme": {
         "label": "Cifrado",
         "gpg": "GPG (legacy)",
@@ -1264,7 +1283,7 @@
       "identitySection": "Identidad del proyecto",
       "nameLabel": "Nombre",
       "slugLabel": "Slug (URL y endpoint Bearer machine)",
-      "slugWarning": "⚠ Cambiar el slug rompe los scripts que usan la URL /api/secrets/{slug}/<env>. El machine token sigue siendo válido, solo cambia la URL.",
+      "slugWarning": "⚠ Cambiar el slug rompe los scripts que usan la URL /api/secrets/[slug]/[env]. El machine token sigue siendo válido, solo cambia la URL.",
       "githubSection": "GitHub Actions",
       "githubRepoLabel": "Repo GitHub (formato owner/repo)",
       "githubRepoPlaceholder": "argo-web/viajes",
@@ -1299,7 +1318,7 @@
       "saveBtn": "Guardar",
       "cancelBtn": "Cancelar",
       "saveError": "No se puede guardar.",
-      "slugChangeConfirm": "⚠ Está cambiando el slug del proyecto de \"{old}\" a \"{new}\".\n\nConsecuencias:\n• Los scripts que usen la URL Bearer machine /api/secrets/{old}/<env> devolverán 403 hasta actualizarse con el nuevo slug.\n• Los marcadores /projects/{old} dejarán de funcionar.\n\nNo es necesario regenerar machine tokens (siguen siendo válidos) ni tocar el PAT de GitHub. ¿Continuar?"
+      "slugChangeConfirm": "⚠ Está cambiando el slug del proyecto de \"{old}\" a \"{new}\".\n\nConsecuencias:\n• Los scripts que usen la URL Bearer machine /api/secrets/{old}/[env] devolverán 403 hasta actualizarse con el nuevo slug.\n• Los marcadores /projects/{old} dejarán de funcionar.\n\nNo es necesario regenerar machine tokens (siguen siendo válidos) ni tocar el PAT de GitHub. ¿Continuar?"
     },
     "gateway": {
       "revokeKeyConfirm": "¿Revocar esta clave? Se invalidará inmediatamente.",
@@ -1369,7 +1388,11 @@
       "expires90days": "90 días",
       "expires1year": "1 año",
       "createKeySubmitBtn": "Crear clave",
-      "jwtOption": "JWT — validación local (cero latencia)"
+      "jwtOption": "JWT — validación local (cero latencia)",
+      "jwtSoon": "(pronto)",
+      "apiIdLabel": "ID de la API",
+      "copiedLabel": "Copiado",
+      "verifyRequestTitle": "Petición de ejemplo (middleware)"
     },
     "audit": {
       "adminDesc": "Historial de todas las acciones sensibles en la organización.",
@@ -1472,6 +1495,9 @@
       "removeConfirm": "¿Eliminar a {email} de la organización?\n\nLos machine tokens creados por este miembro serán revocados.",
       "removeError": "No se puede eliminar.",
       "pendingTitle": "Invitaciones pendientes",
+      "membersTab": "Miembros",
+      "invitationsTab": "Invitaciones pendientes",
+      "pendingEmpty": "No hay invitaciones pendientes.",
       "badgeInApp": "en la app",
       "badgeExpired": "expirada",
       "expiredNote": "El enlace de invitación ha expirado — use «Reenviar» para generar uno nuevo",
@@ -1482,7 +1508,24 @@
       "resendSent": "✓ Enviado",
       "deleteBtn": "Eliminar",
       "deleteConfirm": "¿Eliminar la invitación enviada a {email}?",
-      "deleteError": "No se puede eliminar."
+      "deleteError": "No se puede eliminar.",
+      "access": {
+        "title": "Derechos de acceso a proyectos",
+        "openBtn": "Derechos de acceso",
+        "closeLabel": "Cerrar",
+        "loading": "Cargando…",
+        "loadError": "No se pudo cargar.",
+        "noProjects": "No hay ningún proyecto en esta organización.",
+        "noteMember": "Solo los proyectos marcados serán accesibles para este miembro.",
+        "noteDev": "Este rol ya tiene acceso EDITOR implícito a todos los proyectos. Marca un proyecto para asignarle un rol explícito; al desmarcarlo vuelve al acceso implícito.",
+        "implicitOwner": "Un OWNER/ADMIN de la organización tiene acceso OWNER implícito a todos los proyectos — no se necesita ajuste por proyecto.",
+        "implicitEditor": "Acceso EDITOR implícito",
+        "hiddenNote": "Acceso bloqueado actualmente (oculto)",
+        "save": "Guardar",
+        "saving": "Guardando…",
+        "cancel": "Cancelar"
+      },
+      "lastOwnerLock": "Una organización debe conservar al menos un OWNER."
     },
     "tokens": {
       "title": "Tokens de integración",
@@ -1563,7 +1606,7 @@
       "title": "Secretos globales de la organización",
       "desc": "Leídos por las funciones de la bóveda. Claves reservadas:",
       "reserved1": "GITHUB_DISPATCH_TOKEN — Botón Redesplegar (scope actions:write)",
-      "reserved2": "REGISTRY_PAT + REGISTRY_USER — expuestos en el bundle /api/deploy bajo registry.{user,pat} (scope read:packages)",
+      "reserved2": "REGISTRY_PAT + REGISTRY_USER — expuestos en el bundle /api/deploy bajo registry.'{user,pat}' (scope read:packages)",
       "reserved3": "REGISTRY_URL — opcional, por defecto ghcr.io",
       "addBtn": "+ Añadir",
       "empty": "Sin secretos globales",
@@ -1824,7 +1867,11 @@
       "confirmBtn": "Eliminar definitivamente",
       "deletingBtn": "Eliminando…",
       "cancelBtn": "Cancelar",
-      "error": "La eliminación falló. Inténtalo de nuevo."
+      "error": "La eliminación falló. Inténtalo de nuevo.",
+      "consequenceBilling": "Su suscripción deja de renovarse (no habrá nuevos cargos).",
+      "consequenceWindow": "La cuenta y todos sus datos se eliminarán tras un plazo de recuperación de 30 días.",
+      "consequenceExport": "Durante ese plazo aún puede descargar sus datos o cancelar la eliminación.",
+      "consequenceMembers": "{count} otro(s) miembro(s) perderán el acceso y sus datos."
     },
     "tabMyAccount": "Mi cuenta",
     "tabSubscription": "Suscripción",
@@ -1895,6 +1942,21 @@
         "RESOLVED": "Resuelto",
         "CLOSED": "Cerrado"
       }
+    },
+    "deleteMyAccount": {
+      "title": "Eliminar mi cuenta",
+      "desc": "Elimina su cuenta de usuario y su caja fuerte personal. La cuenta de cliente y los datos compartidos de su organización no se ven afectados.",
+      "openBtn": "Eliminar mi cuenta",
+      "loading": "Comprobando…",
+      "loadError": "No se ha podido comprobar su situación. Inténtelo de nuevo.",
+      "consequences": "Su cuenta se eliminará en {days} días. Durante ese plazo podrá descargar sus datos, cancelar la eliminación o hacerla inmediata.",
+      "lastOwner": "Usted es el único propietario de: {orgs}. Transfiera la propiedad a otra persona antes de eliminar su cuenta.",
+      "tenantPending": "La cuenta de cliente ya está en proceso de eliminación: sus datos se eliminarán con ella.",
+      "confirmLabel": "Para confirmar, escriba {phrase}",
+      "confirmBtn": "Solicitar la eliminación",
+      "submittingBtn": "Enviando…",
+      "cancelBtn": "Cancelar",
+      "error": "La solicitud ha fallado. Inténtelo de nuevo."
     }
   },
   "vault": {
@@ -2115,7 +2177,54 @@
     "descMemberNoDate": "Esta cuenta se está eliminando. Contacta con el propietario para cancelar.",
     "reactivateBtn": "Reactivar la cuenta",
     "reactivatingBtn": "Reactivando…",
-    "error": "La reactivación falló. Inténtalo de nuevo."
+    "error": "La reactivación falló. Inténtalo de nuevo.",
+    "downloadBtn": "Descargar mis datos",
+    "purgeNow": {
+      "openBtn": "Eliminar ahora",
+      "title": "Eliminación inmediata de la cuenta",
+      "loading": "Comprobando…",
+      "loadError": "No se ha podido comprobar la elegibilidad. Inténtelo de nuevo.",
+      "warning": "Esta acción destruye de forma inmediata y definitiva la cuenta, todas las organizaciones, todos los proyectos y todos los secretos. Los demás miembros perderán el acceso y sus datos.",
+      "exportedCount": "{exported} de {total} miembro(s) han recuperado sus datos.",
+      "blocked": "La eliminación inmediata será posible cuando todos los miembros hayan recuperado sus datos, o en {days} día(s).",
+      "floorNotReached": "Todavía no todos los miembros han recuperado sus datos y el plazo mínimo no ha transcurrido.",
+      "confirmLabel": "Para confirmar, escriba {name}",
+      "passwordLabel": "Su contraseña",
+      "codeLabel": "Código de 6 dígitos (o código de respaldo)",
+      "reauthFreshness": "Su sesión reciente sirve de confirmación. Si es demasiado antigua, vuelva a iniciar sesión e inténtelo de nuevo.",
+      "reauthStale": "Su sesión es demasiado antigua. Vuelva a iniciar sesión e inténtelo de nuevo.",
+      "confirmBtn": "Eliminar definitivamente",
+      "purgingBtn": "Eliminando…",
+      "cancelBtn": "Cancelar",
+      "error": "La eliminación ha fallado. Inténtelo de nuevo."
+    }
+  },
+  "accountLock": {
+    "title": "Su cuenta va a ser eliminada",
+    "desc": "Ha solicitado la eliminación de su cuenta. Se eliminará definitivamente el {date}, junto con su caja fuerte personal y sus accesos.",
+    "descNoDate": "Ha solicitado la eliminación de su cuenta. Se eliminará definitivamente al finalizar el plazo de recuperación, junto con su caja fuerte personal y sus accesos.",
+    "remaining": "Le quedan {days} día(s) para recuperar sus datos.",
+    "remainingToday": "Es el último día para recuperar sus datos.",
+    "recoverHint": "Descargue sus datos antes de esa fecha: la eliminación es definitiva y no se conservará ninguna copia.",
+    "downloadBtn": "Descargar mis datos",
+    "downloadingBtn": "Preparando…",
+    "downloadDone": "Descarga iniciada. Consulte su carpeta de descargas.",
+    "downloadError": "La descarga ha fallado. Inténtelo de nuevo.",
+    "rateLimited": "Ya se solicitó una exportación recientemente. Espere unos minutos antes de volver a intentarlo.",
+    "reactivateBtn": "Reactivar mi cuenta",
+    "reactivateError": "La reactivación ha fallado. Inténtelo de nuevo.",
+    "purgeOpenBtn": "Eliminar definitivamente",
+    "purgeTitle": "Eliminación definitiva e inmediata",
+    "purgeWarning": "Esta acción es irreversible. Su caja fuerte personal y sus accesos se destruirán de inmediato, sin posibilidad de recuperación.",
+    "purgeNotExported": "Aún no ha descargado sus datos. Una vez realizada la eliminación, será demasiado tarde.",
+    "confirmLabel": "Para confirmar, escriba {phrase}",
+    "passwordLabel": "Su contraseña",
+    "codeLabel": "Código de 6 dígitos (o código de respaldo)",
+    "reauthFreshness": "Su sesión reciente sirve de confirmación. Si es demasiado antigua, vuelva a iniciar sesión e inténtelo de nuevo.",
+    "reauthStale": "Su sesión es demasiado antigua. Vuelva a iniciar sesión e inténtelo de nuevo.",
+    "purgeConfirmBtn": "Eliminar definitivamente",
+    "purgingBtn": "Eliminando…",
+    "purgeError": "La eliminación ha fallado. Inténtelo de nuevo."
   },
   "emails": {
     "common": {
@@ -2212,6 +2321,21 @@
       "item1": "No puede crear nuevos recursos.",
       "item2": "Los despliegues automáticos están desactivados en las organizaciones en exceso.",
       "btn": "Volver a suscribirse a un plan"
+    },
+    "accountDeletion": {
+      "requestedSubject": "Eliminación programada de la cuenta {client}",
+      "requestedTitle": "Eliminación de cuenta programada",
+      "requestedBodyOwner": "Ha solicitado la eliminación de la cuenta {client}. Se eliminará definitivamente el {date}, junto con todos sus datos. Puede cancelar esta eliminación hasta esa fecha.",
+      "requestedBodyMember": "La cuenta {client} se eliminará el {date}, junto con todos sus datos. Perderá el acceso y su caja fuerte personal. Solo el propietario de la cuenta puede cancelar esta eliminación.",
+      "exportHint": "Antes de esa fecha, inicie sesión para descargar sus datos: la eliminación es definitiva y no se conservará ninguna copia.",
+      "btn": "Ir a mi cuenta",
+      "reminderSubject": "Solo quedan {days} días antes de eliminar {client}",
+      "reminderTitle": "Solo quedan {days} días",
+      "reminderBody": "La cuenta {client} se eliminará definitivamente el {date}, dentro de {days} días. Es su última oportunidad para recuperar sus datos.",
+      "deletedSubject": "La cuenta {client} ha sido eliminada",
+      "deletedTitle": "Cuenta eliminada",
+      "deletedBody": "La cuenta {client} y todos sus datos han sido eliminados definitivamente.",
+      "deletedNote": "No se ha conservado ninguna copia. Si no ha sido usted quien ha iniciado esta eliminación, contáctenos de inmediato."
     }
   },
   "docs": {

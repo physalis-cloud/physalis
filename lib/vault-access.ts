@@ -28,6 +28,11 @@ import type { ProjectRole, Role, VaultRole } from "@prisma/client";
 import { prisma } from "./prisma";
 import { requireUser, type AuthedUser } from "./api";
 import { isPlatformAdmin } from "./roles";
+import {
+  effectiveProjectRole,
+  hasProjectRole,
+  accessibleProjectsWhere,
+} from "./project-access";
 
 const VAULT_ROLE_RANK: Record<VaultRole, number> = {
   VIEWER: 1,
@@ -116,18 +121,6 @@ export async function getAccessibleCollectionIds(
   // compte separement via la branche projectMemberIds.
   const orgScopeOrgIds = orgMemberships.map((o) => o.organizationId);
   const projectMemberIds = projectMemberships.map((p) => p.projectId);
-  // Héritage transitif org → projet : `hidden` ne se comporte PAS pareil
-  // selon le rôle (cf. accessibleProjectsWhere, lib/api.ts).
-  //   - OrgADMIN/OWNER (règle 1) : voient tout, `hidden` est ignoré.
-  //   - OrgDEV (règles 2+4) : EDITOR implicite partout SAUF si une ligne
-  //     les masque explicitement — sinon un DEV récupérait par héritage
-  //     le projet que la branche 3 vient justement de lui refuser.
-  const adminOrgIds = orgMemberships
-    .filter((o) => o.role === "ADMIN" || o.role === "OWNER")
-    .map((o) => o.organizationId);
-  const devOrgIds = orgMemberships
-    .filter((o) => o.role === "DEV")
-    .map((o) => o.organizationId);
 
   const collections = await prisma.teamVaultCollection.findMany({
     where: {
@@ -138,38 +131,23 @@ export async function getAccessibleCollectionIds(
         ...(orgScopeOrgIds.length > 0
           ? [{ organizationId: { in: orgScopeOrgIds } }]
           : []),
-        // 3. Collections projet dont l'user est ProjectMember (any role)
+        // 3. Collections projet dont l'user est ProjectMember explicite
+        //    non masqué (couvre aussi les orgs où il n'est que MEMBER).
         ...(projectMemberIds.length > 0
           ? [{ projectId: { in: projectMemberIds } }]
           : []),
-        // 4a. Collections projet dont le projet appartient a une org ou
-        //     l'user est OrgADMIN/OWNER (heritage transitif). Regle 1 :
-        //     `hidden` est ignore pour eux. Un ProjectMember=VIEWER
-        //     explicite obtient quand meme VIEWER via la branche 3 (qui
-        //     shadow l'EDITOR implicite, mais ici on s'en moque : on ne
-        //     calcule que la VISIBILITE, pas le role effectif).
-        ...(adminOrgIds.length > 0
-          ? [
-              {
-                projectId: { not: null },
-                project: { organizationId: { in: adminOrgIds } },
-              } as const,
-            ]
-          : []),
-        // 4b. Idem pour OrgDEV, MAIS un projet explicitement masque pour
-        //     lui est exclu (regles 2+4) — sans ce `none`, le DEV
-        //     recuperait par heritage le projet que la branche 3 filtre.
-        ...(devOrgIds.length > 0
-          ? [
-              {
-                projectId: { not: null },
-                project: {
-                  organizationId: { in: devOrgIds },
-                  members: { none: { userId, hidden: true } },
-                },
-              } as const,
-            ]
-          : []),
+        // 4. Héritage transitif org → projet, via la SOURCE UNIQUE §4 par org
+        //    (`accessibleProjectsWhere`) au lieu de re-dériver `hidden` à la
+        //    main : OrgADMIN/OWNER voient tout (règle 1), OrgDEV hérite EDITOR
+        //    sauf projet masqué (règles 2+4). `orgMemberships` est déjà filtré
+        //    aux rôles DEV+.
+        ...orgMemberships.map(
+          (o) =>
+            ({
+              projectId: { not: null },
+              project: accessibleProjectsWhere(o.organizationId, userId, o.role),
+            }) as const,
+        ),
       ],
     },
     select: { id: true },
@@ -351,24 +329,13 @@ export async function requireProjectCollectionAccess(
   const membership = project.members[0];
   const orgRole = project.organization.members[0]?.role;
 
-  let effective: VaultRole | null = null;
-  if (
-    isPlatformAdmin(user.role) ||
-    orgRole === "OWNER" ||
-    orgRole === "ADMIN"
-  ) {
-    effective = "OWNER";
-  } else if (membership) {
-    // Regle 2 : une ligne masquee bloque, sans retomber sur le fallback DEV.
-    if (membership.hidden) {
-      return {
-        error: NextResponse.json({ error: "Not found" }, { status: 404 }),
-      };
-    }
-    effective = PROJECT_TO_VAULT[membership.role];
-  } else if (orgRole === "DEV") {
-    effective = "EDITOR";
-  }
+  // Les 6 règles vivent dans lib/project-access.ts (§4). Ne PAS re-dériver.
+  const projectRole = effectiveProjectRole({
+    orgRole,
+    membership: membership ?? null,
+    platformRole: user.role,
+  });
+  const effective = projectRole ? PROJECT_TO_VAULT[projectRole] : null;
 
   if (!effective || !hasVaultRole(effective, requiredRole)) {
     return {
@@ -485,33 +452,17 @@ export async function requireProjectScope(
     };
   }
 
-  const PROJECT_RANK = { VIEWER: 1, EDITOR: 2, OWNER: 3 } as const;
   const membership = project.members[0];
   const orgRole = project.organization.members[0]?.role;
 
-  // Mapping aligne avec requireProjectMember (lib/api.ts) et page.tsx, hidden
-  // compris : OrgADMIN/OWNER ignorent hidden (regle 1) ; une ligne masquee
-  // bloque (regle 2) meme l'EDITOR implicite du DEV ; OrgDEV sans ligne obtient
-  // EDITOR implicite (regle 4).
-  let effective: ProjectRole | null = null;
-  if (
-    isPlatformAdmin(user.role) ||
-    orgRole === "OWNER" ||
-    orgRole === "ADMIN"
-  ) {
-    effective = "OWNER";
-  } else if (membership) {
-    if (membership.hidden) {
-      return {
-        error: NextResponse.json({ error: "Not found" }, { status: 404 }),
-      };
-    }
-    effective = membership.role;
-  } else if (orgRole === "DEV") {
-    effective = "EDITOR";
-  }
+  // Les 6 règles vivent dans lib/project-access.ts (§4). Ne PAS re-dériver.
+  const effective = effectiveProjectRole({
+    orgRole,
+    membership: membership ?? null,
+    platformRole: user.role,
+  });
 
-  if (!effective || PROJECT_RANK[effective] < PROJECT_RANK[requiredRole]) {
+  if (!hasProjectRole(effective, requiredRole)) {
     return {
       error: NextResponse.json({ error: "Not found" }, { status: 404 }),
     };

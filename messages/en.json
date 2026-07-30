@@ -462,6 +462,11 @@
       "envLabel": "Environment (for auto-import)",
       "keyLabel": ".env key",
       "noneProject": "— None —",
+      "expirationLabel": "Link expiration",
+      "expiration1h": "1 hour",
+      "expiration24h": "24 hours",
+      "expiration48h": "48 hours",
+      "expiration7d": "7 days",
       "cancelBtn": "Cancel",
       "creatingBtn": "Creating…",
       "error": "Creation failed.",
@@ -507,7 +512,7 @@
       "selectServer": "— choose a VPS —",
       "destSave": "Save destination",
       "destSaved": "Destination saved.",
-      "destHint": "Each project's effective path will be: <base path>/<project-slug>.",
+      "destHint": "Each project's effective path will be: [base path]/[project-slug].",
       "saving": "Saving…"
     },
     "security": {
@@ -760,7 +765,7 @@
       "dbNameLabel": "Database",
       "dbUserLabel": "DB username (admin)",
       "dbPasswordLabel": "DB password",
-      "dbCredsHint": "Admin connection to the database, distinct from the dashboard login above. E.g. Supabase pooler: “postgres.<ref>” + the database password.",
+      "dbCredsHint": "Admin connection to the database, distinct from the dashboard login above. E.g. Supabase pooler: “postgres.[ref]” + the database password.",
       "dbServiceOk": "✓ The linked service has a database target: rotation will run ALTER ROLE via the service admin.",
       "dbNeedsServiceDb": "⚠ Link this account to a backend service that has a database target (host/type on the service, Access tab).",
       "webhookServiceOk": "✓ The linked service has a hook configured: rotation will go through it.",
@@ -991,6 +996,11 @@
       "visible": "👁 Visible",
       "hidden": "🚫 Hidden",
       "orgRoleTitle": "Role in the organisation",
+      "withAccessTitle": "Have access",
+      "noAccessTitle": "No access",
+      "allowAccess": "Grant access",
+      "denyAccess": "Revoke access",
+      "noAccessEmpty": "All members have access.",
       "orgAdmin": "Implicit OWNER (org admin) · not editable",
       "explicit": "Explicit role — overrides default",
       "default": "Default role (VIEWER, read access)"
@@ -1177,6 +1187,15 @@
       "scheduleValue": "every {days}d at {hour}h UTC",
       "agentOk": "registered",
       "agentPending": "waiting for the agent deployment",
+      "agent": {
+        "regenBtn": "Regenerate agent token",
+        "regenConfirm": "Regenerate the agent token? The old one is revoked immediately — the running agent won't be able to connect until the project is next deployed.",
+        "tokenTitle": "New agent token",
+        "tokenWarning": "Copy it now: it will never be shown again. The old token is revoked. Redeploy the project so the agent picks up the new one.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "close": "Close"
+      },
       "scheme": {
         "label": "Encryption",
         "gpg": "GPG (legacy)",
@@ -1264,7 +1283,7 @@
       "identitySection": "Project identity",
       "nameLabel": "Name",
       "slugLabel": "Slug (URL and Bearer machine endpoint)",
-      "slugWarning": "⚠ Changing the slug breaks scripts that hardcode the URL /api/secrets/{slug}/<env>. The machine token remains valid, only the URL changes.",
+      "slugWarning": "⚠ Changing the slug breaks scripts that hardcode the URL /api/secrets/[slug]/[env]. The machine token remains valid, only the URL changes.",
       "githubSection": "GitHub Actions",
       "githubRepoLabel": "GitHub repo (owner/repo format)",
       "githubRepoPlaceholder": "argo-web/travel",
@@ -1299,7 +1318,7 @@
       "saveBtn": "Save",
       "cancelBtn": "Cancel",
       "saveError": "Cannot save.",
-      "slugChangeConfirm": "⚠ You are changing the project slug from \"{old}\" to \"{new}\".\n\nConsequences:\n• Scripts using the Bearer machine URL /api/secrets/{old}/<env> will return 403 until updated with the new slug.\n• Bookmarks /projects/{old} will no longer work.\n\nNo need to regenerate machine tokens (they remain valid) or touch the GitHub PAT. Continue?"
+      "slugChangeConfirm": "⚠ You are changing the project slug from \"{old}\" to \"{new}\".\n\nConsequences:\n• Scripts using the Bearer machine URL /api/secrets/{old}/[env] will return 403 until updated with the new slug.\n• Bookmarks /projects/{old} will no longer work.\n\nNo need to regenerate machine tokens (they remain valid) or touch the GitHub PAT. Continue?"
     },
     "gateway": {
       "revokeKeyConfirm": "Revoke this key? It will be immediately invalidated.",
@@ -1369,7 +1388,11 @@
       "expires90days": "90 days",
       "expires1year": "1 year",
       "createKeySubmitBtn": "Create key",
-      "jwtOption": "JWT — local validation (zero latency)"
+      "jwtOption": "JWT — local validation (zero latency)",
+      "jwtSoon": "(soon)",
+      "apiIdLabel": "API ID",
+      "copiedLabel": "Copied",
+      "verifyRequestTitle": "Sample request (middleware)"
     },
     "audit": {
       "adminDesc": "History of all sensitive actions in the organisation.",
@@ -1472,6 +1495,9 @@
       "removeConfirm": "Remove {email} from the organisation?\n\nMachine tokens created by this member will be revoked.",
       "removeError": "Cannot remove.",
       "pendingTitle": "Pending invitations",
+      "membersTab": "Members",
+      "invitationsTab": "Pending invitations",
+      "pendingEmpty": "No pending invitations.",
       "badgeInApp": "in-app",
       "badgeExpired": "expired",
       "expiredNote": "The invitation link has expired — use \"Resend\" to generate a new one",
@@ -1482,7 +1508,24 @@
       "resendSent": "✓ Sent",
       "deleteBtn": "Delete",
       "deleteConfirm": "Delete invitation sent to {email}?",
-      "deleteError": "Cannot delete."
+      "deleteError": "Cannot delete.",
+      "access": {
+        "title": "Project access rights",
+        "openBtn": "Access rights",
+        "closeLabel": "Close",
+        "loading": "Loading…",
+        "loadError": "Failed to load.",
+        "noProjects": "No project in this organization.",
+        "noteMember": "Only the checked projects will be accessible to this member.",
+        "noteDev": "This role already has implicit EDITOR access to every project. Check a project to grant an explicit role; unchecking falls back to the implicit access.",
+        "implicitOwner": "An org OWNER/ADMIN has implicit OWNER access to every project — no per-project setting needed.",
+        "implicitEditor": "Implicit EDITOR access",
+        "hiddenNote": "Access currently blocked (hidden)",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel"
+      },
+      "lastOwnerLock": "An organization must keep at least one OWNER."
     },
     "tokens": {
       "title": "Integration tokens",
@@ -1563,7 +1606,7 @@
       "title": "Global organisation secrets",
       "desc": "Read by vault features. Reserved keys:",
       "reserved1": "GITHUB_DISPATCH_TOKEN — Redeploy button (scope actions:write)",
-      "reserved2": "REGISTRY_PAT + REGISTRY_USER — exposed in /api/deploy bundle under registry.{user,pat} (scope read:packages)",
+      "reserved2": "REGISTRY_PAT + REGISTRY_USER — exposed in /api/deploy bundle under registry.'{user,pat}' (scope read:packages)",
       "reserved3": "REGISTRY_URL — optional, defaults to ghcr.io",
       "addBtn": "+ Add",
       "empty": "No global secrets",
@@ -1824,7 +1867,11 @@
       "confirmBtn": "Delete permanently",
       "deletingBtn": "Deleting…",
       "cancelBtn": "Cancel",
-      "error": "Deletion failed. Please try again."
+      "error": "Deletion failed. Please try again.",
+      "consequenceBilling": "Your subscription stops renewing (no further charges).",
+      "consequenceWindow": "The account and all its data will be deleted after a 30-day recovery period.",
+      "consequenceExport": "During that period you can still download your data or cancel the deletion.",
+      "consequenceMembers": "{count} other member(s) will lose access and their data."
     },
     "tabMyAccount": "My account",
     "tabSubscription": "Subscription",
@@ -1895,6 +1942,21 @@
         "RESOLVED": "Resolved",
         "CLOSED": "Closed"
       }
+    },
+    "deleteMyAccount": {
+      "title": "Delete my account",
+      "desc": "Deletes your user account and your personal vault. The client account and your organisation's shared data are not affected.",
+      "openBtn": "Delete my account",
+      "loading": "Checking…",
+      "loadError": "Could not check your situation. Please try again.",
+      "consequences": "Your account will be deleted in {days} days. During that time you can download your data, cancel the deletion, or make it immediate.",
+      "lastOwner": "You are the only owner of: {orgs}. Transfer ownership to someone else before deleting your account.",
+      "tenantPending": "The client account is already being deleted: your data will be removed along with it.",
+      "confirmLabel": "To confirm, type {phrase}",
+      "confirmBtn": "Request deletion",
+      "submittingBtn": "Sending…",
+      "cancelBtn": "Cancel",
+      "error": "The request failed. Please try again."
     }
   },
   "vault": {
@@ -2115,7 +2177,54 @@
     "descMemberNoDate": "This account is being deleted. Contact the owner to cancel.",
     "reactivateBtn": "Reactivate account",
     "reactivatingBtn": "Reactivating…",
-    "error": "Reactivation failed. Please try again."
+    "error": "Reactivation failed. Please try again.",
+    "downloadBtn": "Download my data",
+    "purgeNow": {
+      "openBtn": "Delete now",
+      "title": "Immediate account deletion",
+      "loading": "Checking…",
+      "loadError": "Could not check eligibility. Please try again.",
+      "warning": "This immediately and permanently destroys the account, every organisation, every project and every secret. Other members will lose access and their data.",
+      "exportedCount": "{exported} of {total} member(s) have retrieved their data.",
+      "blocked": "Immediate deletion will be possible once every member has retrieved their data, or in {days} day(s).",
+      "floorNotReached": "Not every member has retrieved their data yet, and the minimum delay has not elapsed.",
+      "confirmLabel": "To confirm, type {name}",
+      "passwordLabel": "Your password",
+      "codeLabel": "6-digit code (or backup code)",
+      "reauthFreshness": "Your recent sign-in acts as confirmation. If it is too old, sign in again and retry.",
+      "reauthStale": "Your session is too old. Please sign in again, then retry.",
+      "confirmBtn": "Delete permanently",
+      "purgingBtn": "Deleting…",
+      "cancelBtn": "Cancel",
+      "error": "The deletion failed. Please try again."
+    }
+  },
+  "accountLock": {
+    "title": "Your account is scheduled for deletion",
+    "desc": "You requested the deletion of your account. It will be permanently deleted on {date}, along with your personal vault and your access rights.",
+    "descNoDate": "You requested the deletion of your account. It will be permanently deleted once the recovery period ends, along with your personal vault and your access rights.",
+    "remaining": "You have {days} day(s) left to retrieve your data.",
+    "remainingToday": "This is the last day to retrieve your data.",
+    "recoverHint": "Download your data before that date: deletion is permanent and no copy will be kept.",
+    "downloadBtn": "Download my data",
+    "downloadingBtn": "Preparing…",
+    "downloadDone": "Download started. Check your downloads folder.",
+    "downloadError": "The download failed. Please try again.",
+    "rateLimited": "An export was requested recently. Please wait a few minutes before trying again.",
+    "reactivateBtn": "Reactivate my account",
+    "reactivateError": "Reactivation failed. Please try again.",
+    "purgeOpenBtn": "Delete permanently",
+    "purgeTitle": "Permanent, immediate deletion",
+    "purgeWarning": "This action is irreversible. Your personal vault and your access rights will be destroyed immediately, with no way to recover them.",
+    "purgeNotExported": "You have not downloaded your data yet. Once the deletion is done, it will be too late.",
+    "confirmLabel": "To confirm, type {phrase}",
+    "passwordLabel": "Your password",
+    "codeLabel": "6-digit code (or backup code)",
+    "reauthFreshness": "Your recent sign-in acts as confirmation. If it is too old, sign in again and retry.",
+    "reauthStale": "Your session is too old. Please sign in again, then retry.",
+    "purgeConfirmBtn": "Delete permanently",
+    "purgingBtn": "Deleting…",
+    "purgeError": "The deletion failed. Please try again."
   },
   "docs": {
     "title": "Documentation",
@@ -2218,6 +2327,21 @@
       "item1": "You cannot create new resources.",
       "item2": "Automatic deployments are disabled on excess organisations.",
       "btn": "Re-subscribe to a plan"
+    },
+    "accountDeletion": {
+      "requestedSubject": "Scheduled deletion of the {client} account",
+      "requestedTitle": "Account deletion scheduled",
+      "requestedBodyOwner": "You requested the deletion of the {client} account. It will be permanently deleted on {date}, along with all its data. You can still cancel this deletion until that date.",
+      "requestedBodyMember": "The {client} account will be deleted on {date}, along with all its data. You will lose access and your personal vault. Only the account owner can cancel this deletion.",
+      "exportHint": "Before that date, sign in to download your data: the deletion is permanent and no copy will be kept.",
+      "btn": "Go to my account",
+      "reminderSubject": "Only {days} days left before {client} is deleted",
+      "reminderTitle": "Only {days} days left",
+      "reminderBody": "The {client} account will be permanently deleted on {date}, in {days} days. This is your last chance to retrieve your data.",
+      "deletedSubject": "The {client} account has been deleted",
+      "deletedTitle": "Account deleted",
+      "deletedBody": "The {client} account and all of its data have been permanently deleted.",
+      "deletedNote": "No copy has been kept. If you did not initiate this deletion, contact us immediately."
     }
   },
   "invite": {

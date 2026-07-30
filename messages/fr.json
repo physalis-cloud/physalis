@@ -367,7 +367,7 @@
       "selectServer": "— choisir un VPS —",
       "destSave": "Enregistrer la destination",
       "destSaved": "Destination enregistrée.",
-      "destHint": "Le chemin effectif d'un projet sera : <chemin de base>/<slug-du-projet>.",
+      "destHint": "Le chemin effectif d'un projet sera : [chemin de base]/[slug-du-projet].",
       "saving": "Enregistrement…"
     },
     "security": {
@@ -636,6 +636,11 @@
       "envLabel": "Environnement (pour import auto)",
       "keyLabel": "Clé .env",
       "noneProject": "— Aucun —",
+      "expirationLabel": "Expiration du lien",
+      "expiration1h": "1 heure",
+      "expiration24h": "24 heures",
+      "expiration48h": "48 heures",
+      "expiration7d": "7 jours",
       "cancelBtn": "Annuler",
       "creatingBtn": "Création…",
       "error": "Création impossible.",
@@ -760,7 +765,7 @@
       "dbNameLabel": "Base",
       "dbUserLabel": "Identifiant DB (admin)",
       "dbPasswordLabel": "Mot de passe DB",
-      "dbCredsHint": "Connexion admin à la base, distincte du login dashboard ci-dessus. Ex. pooler Supabase : « postgres.<ref> » + le mot de passe de la base.",
+      "dbCredsHint": "Connexion admin à la base, distincte du login dashboard ci-dessus. Ex. pooler Supabase : « postgres.[ref] » + le mot de passe de la base.",
       "dbServiceOk": "✓ Le service lié a une cible base de données : la rotation fera un ALTER ROLE via l'admin du service.",
       "dbNeedsServiceDb": "⚠ Lie ce compte à un service backend ayant une cible base de données (host/type sur le service, onglet Accès).",
       "webhookServiceOk": "✓ Le service lié a un hook configuré : la rotation passera par lui.",
@@ -991,6 +996,11 @@
       "visible": "👁 Visible",
       "hidden": "🚫 Masqué",
       "orgRoleTitle": "Rôle dans l'organisation",
+      "withAccessTitle": "Ont accès",
+      "noAccessTitle": "N'ont pas accès",
+      "allowAccess": "Autoriser l'accès",
+      "denyAccess": "Interdire l'accès",
+      "noAccessEmpty": "Tous les membres ont accès.",
       "orgAdmin": "OWNER implicite (admin de l'org) · non modifiable",
       "explicit": "Rôle explicite — override du défaut",
       "default": "Rôle par défaut (VIEWER, accès en lecture)"
@@ -1177,6 +1187,15 @@
       "scheduleValue": "tous les {days} j à {hour}h UTC",
       "agentOk": "enregistré",
       "agentPending": "en attente du déploiement de l'agent",
+      "agent": {
+        "regenBtn": "Régénérer le token d'agent",
+        "regenConfirm": "Régénérer le token d'agent ? L'ancien est révoqué immédiatement — l'agent en cours ne pourra plus se connecter jusqu'au prochain déploiement du projet.",
+        "tokenTitle": "Nouveau token d'agent",
+        "tokenWarning": "Copie-le maintenant : il ne sera plus jamais affiché. L'ancien token est révoqué. Redéploie le projet pour que l'agent prenne le nouveau.",
+        "copy": "Copier",
+        "copied": "Copié",
+        "close": "Fermer"
+      },
       "scheme": {
         "label": "Chiffrement",
         "gpg": "GPG (legacy)",
@@ -1264,7 +1283,7 @@
       "identitySection": "Identité du projet",
       "nameLabel": "Nom",
       "slugLabel": "Slug (URL et endpoint Bearer machine)",
-      "slugWarning": "⚠ Changer le slug casse les scripts qui hardcodent l'URL /api/secrets/{slug}/<env>. Le token machine reste valide, seul l'URL change.",
+      "slugWarning": "⚠ Changer le slug casse les scripts qui hardcodent l'URL /api/secrets/[slug]/[env]. Le token machine reste valide, seul l'URL change.",
       "githubSection": "GitHub Actions",
       "githubRepoLabel": "Repo GitHub (format owner/repo)",
       "githubRepoPlaceholder": "argo-web/voyages",
@@ -1299,7 +1318,7 @@
       "saveBtn": "Enregistrer",
       "cancelBtn": "Annuler",
       "saveError": "Modification impossible.",
-      "slugChangeConfirm": "⚠ Vous changez le slug du projet de \"{old}\" à \"{new}\".\n\nConséquences :\n• Les scripts utilisant l'URL Bearer machine /api/secrets/{old}/<env> retourneront 403 jusqu'à ce qu'ils soient mis à jour avec le nouveau slug.\n• Les bookmarks /projects/{old} ne fonctionnent plus.\n\nPas besoin de regénérer les machine tokens (ils restent valides) ni de toucher au PAT GitHub. Continuer ?"
+      "slugChangeConfirm": "⚠ Vous changez le slug du projet de \"{old}\" à \"{new}\".\n\nConséquences :\n• Les scripts utilisant l'URL Bearer machine /api/secrets/{old}/[env] retourneront 403 jusqu'à ce qu'ils soient mis à jour avec le nouveau slug.\n• Les bookmarks /projects/{old} ne fonctionnent plus.\n\nPas besoin de regénérer les machine tokens (ils restent valides) ni de toucher au PAT GitHub. Continuer ?"
     },
     "gateway": {
       "revokeKeyConfirm": "Révoquer cette clé ? Elle sera immédiatement invalidée.",
@@ -1369,7 +1388,11 @@
       "expires90days": "90 jours",
       "expires1year": "1 an",
       "createKeySubmitBtn": "Créer la clé",
-      "jwtOption": "JWT — validation locale (zéro latence)"
+      "jwtOption": "JWT — validation locale (zéro latence)",
+      "jwtSoon": "(bientôt)",
+      "apiIdLabel": "ID de l'API",
+      "copiedLabel": "Copié",
+      "verifyRequestTitle": "Exemple de requête (middleware)"
     },
     "audit": {
       "adminDesc": "Historique des actions sur ce projet (secrets, tokens, déploiements).",
@@ -1664,6 +1687,9 @@
       "removeConfirm": "Retirer {email} de l'organisation ?\n\nLes machine tokens créés par ce membre seront révoqués.",
       "removeError": "Suppression impossible.",
       "pendingTitle": "Invitations en attente",
+      "membersTab": "Membres",
+      "invitationsTab": "Invitations en attente",
+      "pendingEmpty": "Aucune invitation en attente.",
       "badgeInApp": "in-app",
       "badgeExpired": "expirée",
       "expiredNote": "Le lien d'invitation a expiré — utilise « Renvoyer » pour en générer un nouveau",
@@ -1674,7 +1700,24 @@
       "resendSent": "✓ Envoyé",
       "deleteBtn": "Supprimer",
       "deleteConfirm": "Supprimer l'invitation envoyée à {email} ?",
-      "deleteError": "Suppression impossible."
+      "deleteError": "Suppression impossible.",
+      "access": {
+        "title": "Droits d'accès aux projets",
+        "openBtn": "Droits d'accès",
+        "closeLabel": "Fermer",
+        "loading": "Chargement…",
+        "loadError": "Chargement impossible.",
+        "noProjects": "Aucun projet dans cette organisation.",
+        "noteMember": "Seuls les projets cochés seront accessibles à ce membre.",
+        "noteDev": "Ce rôle a déjà un accès EDITOR implicite à tous les projets. Cochez un projet pour lui attribuer un rôle explicite ; décocher le fait retomber sur l'accès implicite.",
+        "implicitOwner": "Un OWNER/ADMIN d'org a l'accès OWNER implicite sur tous les projets — aucun réglage par projet nécessaire.",
+        "implicitEditor": "Accès EDITOR implicite",
+        "hiddenNote": "Accès actuellement bloqué (masqué)",
+        "save": "Enregistrer",
+        "saving": "Enregistrement…",
+        "cancel": "Annuler"
+      },
+      "lastOwnerLock": "Une organisation doit conserver au moins un OWNER."
     },
     "tokens": {
       "title": "Tokens d'intégration",
@@ -1755,7 +1798,7 @@
       "title": "Secrets globaux de l'organisation",
       "desc": "Lus par les fonctionnalités du vault. Clés réservées :",
       "reserved1": "GITHUB_DISPATCH_TOKEN — bouton Redeploy (scope actions:write)",
-      "reserved2": "REGISTRY_PAT + REGISTRY_USER — exposés au bundle /api/deploy sous registry.{user,pat} (scope read:packages)",
+      "reserved2": "REGISTRY_PAT + REGISTRY_USER — exposés au bundle /api/deploy sous registry.'{user,pat}' (scope read:packages)",
       "reserved3": "REGISTRY_URL — optionnel, défaut ghcr.io",
       "addBtn": "+ Ajouter",
       "empty": "Aucun secret global",
@@ -2016,7 +2059,11 @@
       "confirmBtn": "Supprimer définitivement",
       "deletingBtn": "Suppression…",
       "cancelBtn": "Annuler",
-      "error": "La suppression a échoué. Réessayez."
+      "error": "La suppression a échoué. Réessayez.",
+      "consequenceBilling": "Votre abonnement cesse de se renouveler (aucun nouveau prélèvement).",
+      "consequenceWindow": "Le compte et toutes ses données seront supprimés après un délai de récupération de 30 jours.",
+      "consequenceExport": "Pendant ce délai, vous pouvez encore télécharger vos données ou annuler la suppression.",
+      "consequenceMembers": "{count} autre(s) membre(s) perdront l'accès et leurs données."
     },
     "tabMyAccount": "Mon compte",
     "tabSubscription": "Abonnement",
@@ -2087,6 +2134,21 @@
         "RESOLVED": "Résolu",
         "CLOSED": "Fermé"
       }
+    },
+    "deleteMyAccount": {
+      "title": "Supprimer mon compte",
+      "desc": "Supprime votre compte utilisateur et votre coffre personnel. Le compte client et les données partagées de votre organisation ne sont pas affectés.",
+      "openBtn": "Supprimer mon compte",
+      "loading": "Vérification…",
+      "loadError": "Impossible de vérifier votre situation. Réessayez.",
+      "consequences": "Votre compte sera supprimé dans {days} jours. Pendant ce délai, vous pourrez télécharger vos données, annuler la suppression, ou la rendre immédiate.",
+      "lastOwner": "Vous êtes le seul propriétaire de : {orgs}. Transférez la propriété à quelqu'un d'autre avant de supprimer votre compte.",
+      "tenantPending": "Le compte client est déjà en cours de suppression : vos données seront supprimées avec lui.",
+      "confirmLabel": "Pour confirmer, saisissez {phrase}",
+      "confirmBtn": "Demander la suppression",
+      "submittingBtn": "Envoi…",
+      "cancelBtn": "Annuler",
+      "error": "La demande a échoué. Réessayez."
     }
   },
   "overageBanner": {
@@ -2115,7 +2177,54 @@
     "descMemberNoDate": "Ce compte est en cours de suppression. Contactez le propriétaire pour annuler.",
     "reactivateBtn": "Réactiver le compte",
     "reactivatingBtn": "Réactivation…",
-    "error": "La réactivation a échoué. Réessayez."
+    "error": "La réactivation a échoué. Réessayez.",
+    "downloadBtn": "Télécharger mes données",
+    "purgeNow": {
+      "openBtn": "Supprimer maintenant",
+      "title": "Suppression immédiate du compte",
+      "loading": "Vérification…",
+      "loadError": "Impossible de vérifier l'éligibilité. Réessayez.",
+      "warning": "Cette action détruit immédiatement et définitivement le compte, toutes les organisations, tous les projets et tous les secrets. Les autres membres perdront l'accès et leurs données.",
+      "exportedCount": "{exported} membre(s) sur {total} ont récupéré leurs données.",
+      "blocked": "La suppression immédiate sera possible quand tous les membres auront récupéré leurs données, ou dans {days} jour(s).",
+      "floorNotReached": "Tous les membres n'ont pas encore récupéré leurs données et le délai minimal n'est pas écoulé.",
+      "confirmLabel": "Pour confirmer, saisissez {name}",
+      "passwordLabel": "Votre mot de passe",
+      "codeLabel": "Code à 6 chiffres (ou code de secours)",
+      "reauthFreshness": "Votre session récente sert de confirmation. Si elle est trop ancienne, reconnectez-vous puis réessayez.",
+      "reauthStale": "Votre session est trop ancienne. Reconnectez-vous, puis réessayez.",
+      "confirmBtn": "Supprimer définitivement",
+      "purgingBtn": "Suppression…",
+      "cancelBtn": "Annuler",
+      "error": "La suppression a échoué. Réessayez."
+    }
+  },
+  "accountLock": {
+    "title": "Votre compte va être supprimé",
+    "desc": "Vous avez demandé la suppression de votre compte. Il sera définitivement supprimé le {date}, ainsi que votre coffre personnel et vos accès.",
+    "descNoDate": "Vous avez demandé la suppression de votre compte. Il sera définitivement supprimé à l'issue du délai de récupération, ainsi que votre coffre personnel et vos accès.",
+    "remaining": "Il vous reste {days} jour(s) pour récupérer vos données.",
+    "remainingToday": "C'est le dernier jour pour récupérer vos données.",
+    "recoverHint": "Téléchargez vos données avant cette date : la suppression est définitive et aucune copie ne sera conservée.",
+    "downloadBtn": "Télécharger mes données",
+    "downloadingBtn": "Préparation…",
+    "downloadDone": "Téléchargement lancé. Vérifiez votre dossier de téléchargements.",
+    "downloadError": "Le téléchargement a échoué. Réessayez.",
+    "rateLimited": "Un export a déjà été demandé récemment. Patientez quelques minutes avant de réessayer.",
+    "reactivateBtn": "Réactiver mon compte",
+    "reactivateError": "La réactivation a échoué. Réessayez.",
+    "purgeOpenBtn": "Supprimer définitivement",
+    "purgeTitle": "Suppression définitive et immédiate",
+    "purgeWarning": "Cette action est irréversible. Votre coffre personnel et vos accès seront détruits immédiatement, sans possibilité de récupération.",
+    "purgeNotExported": "Vous n'avez pas encore téléchargé vos données. Une fois la suppression effectuée, il sera trop tard.",
+    "confirmLabel": "Pour confirmer, saisissez {phrase}",
+    "passwordLabel": "Votre mot de passe",
+    "codeLabel": "Code à 6 chiffres (ou code de secours)",
+    "reauthFreshness": "Votre session récente sert de confirmation. Si elle est trop ancienne, reconnectez-vous puis réessayez.",
+    "reauthStale": "Votre session est trop ancienne. Reconnectez-vous, puis réessayez.",
+    "purgeConfirmBtn": "Supprimer définitivement",
+    "purgingBtn": "Suppression…",
+    "purgeError": "La suppression a échoué. Réessayez."
   },
   "emails": {
     "common": {
@@ -2212,6 +2321,21 @@
       "item1": "Vous ne pouvez pas créer de nouvelles ressources.",
       "item2": "Les déploiements automatiques sont désactivés sur les organisations excédentaires.",
       "btn": "Re-souscrire un plan"
+    },
+    "accountDeletion": {
+      "requestedSubject": "Suppression programmée du compte {client}",
+      "requestedTitle": "Suppression de compte programmée",
+      "requestedBodyOwner": "Vous avez demandé la suppression du compte {client}. Il sera définitivement supprimé le {date}, avec toutes ses données. Vous pouvez encore annuler cette suppression jusqu'à cette date.",
+      "requestedBodyMember": "Le compte {client} va être supprimé le {date}, avec toutes ses données. Vous perdrez alors l'accès et votre coffre personnel. Seul le propriétaire du compte peut annuler cette suppression.",
+      "exportHint": "Avant cette date, connectez-vous pour télécharger vos données : la suppression est définitive et aucune copie ne sera conservée.",
+      "btn": "Accéder à mon compte",
+      "reminderSubject": "Plus que {days} jours avant la suppression de {client}",
+      "reminderTitle": "Plus que {days} jours",
+      "reminderBody": "Le compte {client} sera définitivement supprimé le {date}, dans {days} jours. C'est votre dernière occasion de récupérer vos données.",
+      "deletedSubject": "Le compte {client} a été supprimé",
+      "deletedTitle": "Compte supprimé",
+      "deletedBody": "Le compte {client} et l'ensemble de ses données ont été définitivement supprimés.",
+      "deletedNote": "Aucune copie n'a été conservée. Si vous n'êtes pas à l'origine de cette suppression, contactez-nous immédiatement."
     }
   },
   "docs": {

@@ -4,7 +4,7 @@
 // point clé du chantier de découplage NEXTAUTH_URL ↔ agents (SSO multi-tenant).
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { physalisBaseUrl } from "../../lib/app-url";
+import { physalisBaseUrl, tenantBaseUrl } from "../../lib/app-url";
 
 const KEYS = ["PHYSALIS_URL", "NEXTAUTH_URL", "AUTH_URL"] as const;
 
@@ -38,5 +38,24 @@ describe("physalisBaseUrl", () => {
   it("retire le slash final", () => {
     process.env.PHYSALIS_URL = "https://x.example/";
     expect(physalisBaseUrl()).toBe("https://x.example");
+  });
+
+  // §2.11 — les liens embarqués dans un email partent vers une victime : leur
+  // domaine doit venir du slug tenant (session authentifiée), jamais d'un
+  // en-tête de requête que l'émetteur du mail contrôle.
+  describe("tenantBaseUrl", () => {
+    it("reconstruit l'origine du workspace depuis le slug", () => {
+      expect(tenantBaseUrl("acme")).toBe("https://acme.physalis.cloud");
+    });
+
+    it("est insensible aux variables d'URL canonique", () => {
+      process.env.PHYSALIS_URL = "https://evil.example";
+      expect(tenantBaseUrl("acme")).toBe("https://acme.physalis.cloud");
+    });
+
+    it("retombe sur l'URL canonique en mono-tenant (slug null)", () => {
+      process.env.PHYSALIS_URL = "https://vault.example";
+      expect(tenantBaseUrl(null)).toBe("https://vault.example");
+    });
   });
 });

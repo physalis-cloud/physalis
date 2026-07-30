@@ -14,6 +14,9 @@ import HeaderNav from "./header-nav";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import OfflineBanner from "@/components/OfflineBanner";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import AccountLockScreen from "./account-lock-screen";
+import { accountLockState, daysUntilPurge } from "@/lib/deletion-window";
+import { reauthMethodFor } from "@/lib/reauth";
 
 // Self-host : single-tenant. Pas de bandeau billing/quota Stripe (réservé
 // au SaaS). Le layout original est dans le repo SaaS.
@@ -33,6 +36,80 @@ export default async function DashboardLayout({
   const userId = session.user.id;
   const email = session.user.email ?? "";
   const t = await getTranslations("dashboard.layout");
+
+  // Suppression de compte MEMBRE — l'utilisateur a demandé son effacement :
+  // son espace est verrouillé jusqu'à l'échéance, seule la récupération de ses
+  // données reste possible.
+  //
+  // Une seule branche ici, contrairement au SaaS : `read_only` y couvre le cas
+  // « le compte CLIENT est en cours de suppression », qui n'existe pas en
+  // mono-tenant — il n'y a pas de tenant à résilier, donc `tenantStatus` est
+  // toujours null.
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      deletionRequestedAt: true,
+      purgeAt: true,
+      email: true,
+      password: true,
+      twoFactorEnabled: true,
+    },
+  });
+
+  if (
+    accountLockState({
+      userDeletionRequestedAt: me?.deletionRequestedAt ?? null,
+      tenantStatus: null,
+    }) === "locked"
+  ) {
+    return (
+      <div className="min-h-screen flex flex-col bg-bg">
+        <header className="app-header">
+          <div className="flex items-center gap-6">
+            <span className="brand">
+              <Image
+                src="/icon-32.png"
+                alt=""
+                width={26}
+                height={26}
+                priority
+                style={{ flexShrink: 0 }}
+              />
+              Physalis
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <LocaleSwitcher />
+            {/* Verrouiller quelqu'un sans porte de sortie serait un piège :
+                la déconnexion reste offerte. */}
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: `/${locale}/login` });
+              }}
+            >
+              <button type="submit" className="btn btn-ghost btn-sm">
+                {t("logout")}
+              </button>
+            </form>
+          </div>
+        </header>
+        <AccountLockScreen
+          purgeAtIso={me?.purgeAt?.toISOString() ?? null}
+          daysRemaining={daysUntilPurge(me?.purgeAt ?? null)}
+          email={me?.email ?? email}
+          reauthFields={{
+            password:
+              reauthMethodFor({
+                hasPassword: me?.password != null,
+                twoFactorEnabled: Boolean(me?.twoFactorEnabled),
+              }) === "password",
+            code: Boolean(me?.twoFactorEnabled),
+          }}
+        />
+      </div>
+    );
+  }
 
   const memberships = await prisma.orgMember.findMany({
     where: { userId },

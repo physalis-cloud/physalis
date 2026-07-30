@@ -43,6 +43,16 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // §2.25f — même règle que la création (`members/route.ts`) : seul un OWNER gère
+  // les invitations OWNER. Sans ça, un ADMIN ranimait une invitation OWNER (même
+  // expirée) vers une adresse qu'il contrôle → escalade ADMIN→OWNER à l'acceptation.
+  if (invitation.role === "OWNER" && access.role !== "OWNER") {
+    return NextResponse.json(
+      { error: "Only OWNERs can resend OWNER invitations" },
+      { status: 403 },
+    );
+  }
+
   // Une invitation in-app (inviteeUserId != null) n'envoie pas d'email :
   // l'invite la voit dans son dashboard. Pas grand chose a "resend" dans
   // ce cas. On rafraichit quand meme l'expiration + on regenere le token
@@ -83,7 +93,7 @@ export async function POST(req: Request, { params }: Params) {
         to: invitation.email,
         inviterEmail: inviter?.email ?? "(unknown)",
         organizationName: access.organization.name,
-        acceptUrl: buildAcceptUrl(newToken, req),
+        acceptUrl: buildAcceptUrl(newToken, null),
         expiresAt: newExpiresAt,
       });
     } catch (err) {

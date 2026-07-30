@@ -1,4 +1,8 @@
 import Link from "next/link";
+import {
+  accessibleProjectsWhereByOrgSlug,
+  resolveOrgRole,
+} from "@/lib/project-access";
 import { getTranslations } from "next-intl/server";
 import type { useTranslations } from "next-intl";
 import {
@@ -85,23 +89,12 @@ export default async function DashboardPage({
 
   const projectsScoped = org
     ? await prisma.project.findMany({
-        where:
-          isGlobalAdmin || isOrgAdmin
-            ? { organization: { slug: org.slug } }
-            : orgRole === "DEV"
-              ? {
-                  organization: { slug: org.slug },
-                  members: {
-                    none: { userId: session.user.id, hidden: true },
-                  },
-                }
-              : {
-                  // MEMBER : uniquement projets où il a un ProjectMember explicite.
-                  organization: { slug: org.slug },
-                  members: {
-                    some: { userId: session.user.id, hidden: false },
-                  },
-                },
+        // Règles centralisées dans lib/project-access.ts (§4). Ne PAS re-dériver.
+        where: accessibleProjectsWhereByOrgSlug(
+          org.slug,
+          session.user.id,
+          resolveOrgRole(orgRole, session.user.role),
+        ),
         select: { id: true },
       })
     : [];
@@ -112,10 +105,26 @@ export default async function DashboardPage({
   // Filtres pour le bloc activite recente. "all" = pas de filtre.
   const filterActions =
     activityFilter === "all" ? null : actionsForFilter(activityFilter);
+  // §2.8 — Portée de VISIBILITÉ des lectures d'audit (porté depuis la source).
+  // Le flux lisait l'AccessLog de toute l'org sans filtre projet → un membre
+  // voyait l'activité de projets qu'il n'a pas le droit d'ouvrir. OrgADMIN/OWNER
+  // (et admin plateforme) voient tout ; les autres sont bornés à leurs projets
+  // VISIBLES + leurs PROPRES actions non rattachées à un projet.
+  const auditVisibilityScope =
+    isGlobalAdmin || isOrgAdmin
+      ? {}
+      : {
+          OR: [
+            { projectId: { in: projectIds } },
+            { projectId: null, actorUserId: session.user.id },
+          ],
+        };
+
   const activityWhere = org
     ? {
         organizationId: org.id,
         ...(filterActions ? { action: { in: filterActions } } : {}),
+        ...auditVisibilityScope,
       }
     : null;
 

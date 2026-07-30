@@ -869,6 +869,16 @@ h1.page-hero-title {
 }
 .gold-section > .section-title { margin-top: 0; }
 
+/* Split 2/3 – 1/3 (admin client detail : Quotas | Accès). Passe en pile
+   sous 900px, comme le reste des grilles admin. */
+.admin-split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.admin-split > div > .section-title { margin-top: 0; }
+
 .pill {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   padding: 2px 8px; border-radius: 4px; font-weight: 700;
@@ -1868,6 +1878,9 @@ a.text-accent { text-decoration: underline; }
    * collapse separees du bloc 640 (smartphone) pour ne pas imposer tout le
    * layout mobile aux tablettes. */
   .app-header { flex-wrap: wrap; gap: 10px; }
+
+  /* Split admin (Quotas | Accès) : une colonne des la tablette. */
+  .admin-split { grid-template-columns: 1fr; }
 
   /* Burger toggle visible, nav cachee par defaut, ouverte en dropdown
    * absolute sous le header quand .is-open. */

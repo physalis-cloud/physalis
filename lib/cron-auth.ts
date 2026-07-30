@@ -57,10 +57,20 @@ export function requireCronAuth(req: Request, tier: CronTier): boolean {
 // que le routage Tailscale n'est pas en place : rollout sûr (build le garde-fou
 // d'abord, bascule les callers sur l'URL Tailscale, PUIS active le flag).
 //
-// Signal : une requête passée par Cloudflare porte TOUJOURS `CF-Connecting-IP`
-// (IP publique du client). Une requête arrivée par le tailnet (bypass CF) ne
-// l'a pas — ou a une IP source dans le CGNAT Tailscale 100.64.0.0/10. On
-// autorise donc : (pas d'en-tête CF) OU (IP ∈ tailnet) ; on refuse le reste.
+// Preuve POSITIVE d'origine privée, fail-CLOSED : on exige que l'IP source vue
+// par NOTRE reverse proxy (NGINX/NPM) — le dernier maillon de `X-Forwarded-For`,
+// posé par `$proxy_add_x_forwarded_for`, à défaut `X-Real-IP` = `$remote_addr` —
+// soit dans le CGNAT Tailscale 100.64.0.0/10.
+//
+// Ce maillon est écrit par le proxy, PAS par le client : ni les valeurs de
+// gauche de la chaîne XFF (forgeables), ni un `X-Real-IP` client (écrasé par
+// nginx) ne peuvent l'usurper. Modèle validé empiriquement en prod (§2.10).
+//
+// L'ancien signal `CF-Connecting-IP` était fail-OPEN : cet en-tête n'est posé
+// que par l'edge Cloudflare, donc son ABSENCE — traitée comme « privé » —
+// désignait exactement le chemin à bloquer (bypass de l'edge, curl direct sur
+// l'IP publique de l'origine par un porteur du bearer hors tailnet). Toute
+// requête dont on ne peut PROUVER l'origine tailnet est désormais refusée.
 
 function ipv4ToInt(ip: string): number | null {
   const m = ip.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -83,15 +93,37 @@ export function isTailscaleIp(ip: string): boolean {
 }
 
 /**
+ * IP source que notre reverse proxy a réellement vue et posée en dernier maillon
+ * de `X-Forwarded-For` (via `$proxy_add_x_forwarded_for`), à défaut `X-Real-IP`
+ * (`$remote_addr`). Ce maillon est écrit par le proxy, jamais par le client, donc
+ * non forgeable. Retourne null si aucune source fiable (⇒ origine non prouvée).
+ */
+function proxyPeerIp(req: Request): string | null {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const hops = forwarded
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last;
+  }
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  return null;
+}
+
+/**
  * Exige une origine PRIVÉE (tailnet) pour les endpoints critiques. No-op si
- * `CRON_PRIVATE_ONLY` n'est pas activé (rollout sûr).
+ * `CRON_PRIVATE_ONLY` n'est pas activé (rollout sûr). Fail-closed sinon : refuse
+ * toute requête dont l'IP source vue par le proxy n'est pas PROUVÉE dans le
+ * CGNAT Tailscale (IPv6 ou IP absente incluses).
  */
 export function requirePrivateOrigin(req: Request): boolean {
   const flag = process.env.CRON_PRIVATE_ONLY;
   if (flag !== "1" && flag !== "true") return true; // garde-fou désactivé
-  const cf = req.headers.get("cf-connecting-ip");
-  if (!cf) return true; // pas passé par l'edge Cloudflare → privé/tailnet
-  return isTailscaleIp(cf); // arrivé par l'edge public → refusé (sauf IP tailnet)
+  const peer = proxyPeerIp(req);
+  return peer !== null && isTailscaleIp(peer);
 }
 
 // ─── Phase 3 — OIDC GitHub Actions (cron-secret-hardening) ─────────────────

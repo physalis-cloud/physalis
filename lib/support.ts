@@ -124,6 +124,27 @@ const adminRequest = <T>(
 
 // ── Méthodes ────────────────────────────────────────────────────────────────
 
+/**
+ * Anonymise les tickets d'un tenant dont le compte vient d'être purgé.
+ *
+ * Anonymisation et non suppression : un ticket est aussi une trace
+ * d'exploitation (volume, délais de résolution). L'identité du demandeur, le
+ * sujet, le jeton d'accès public au fil et **la totalité des messages**
+ * disparaissent ; le squelette du ticket (numéro, statut, dates, `clientSlug`)
+ * survit, sans donnée personnelle.
+ *
+ * Idempotent : rejouer réécrit les mêmes marqueurs.
+ */
+export function anonymizeTenantTickets(
+  clientSlug: string,
+): Promise<{ ok: boolean; tickets: number; messagesDeleted: number }> {
+  return supportRequest(
+    "POST",
+    `/v1/service/tenants/${encodeURIComponent(clientSlug)}/anonymize`,
+    {},
+  );
+}
+
 /** Crée un ticket au nom d'un user connecté (identité issue de la session). */
 export function createTicket(input: {
   subject: string;

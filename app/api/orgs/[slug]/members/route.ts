@@ -10,6 +10,10 @@ import {
 } from "@/lib/invitations";
 import { sendInvitationEmail } from "@/lib/email";
 import { logAction } from "@/lib/audit";
+import {
+  parseInvitationProjectAccess,
+  type InvitationProjectAccess,
+} from "@/lib/invitation-project-access";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -61,7 +65,12 @@ export async function POST(req: Request, { params }: Params) {
   // pour un user deja sur la plateforme). Si les 2 sont fournis,
   // targetUserId prend le pas.
   const body = (await readJson(req)) as
-    | { email?: string; role?: string; targetUserId?: string }
+    | {
+        email?: string;
+        role?: string;
+        targetUserId?: string;
+        projectAccess?: unknown;
+      }
     | null;
   const role = String(body?.role ?? "MEMBER").toUpperCase() as OrgRole;
   if (!VALID_ROLES.includes(role)) {
@@ -73,6 +82,25 @@ export async function POST(req: Request, { params }: Params) {
       { error: "Only OWNERs can invite OWNERs" },
       { status: 403 },
     );
+  }
+
+  // #2 — accès projet pré-attribués, appliqués a l'acceptation. Sans objet pour
+  // un OWNER/ADMIN d'org (OWNER implicite partout). Borne aux projets de l'org.
+  let projectAccessToStore: InvitationProjectAccess[] | null = null;
+  if (role !== "OWNER" && role !== "ADMIN") {
+    const parsed = parseInvitationProjectAccess(body?.projectAccess);
+    if (parsed.length > 0) {
+      const orgProjects = await prisma.project.findMany({
+        where: {
+          organizationId: access.organization.id,
+          id: { in: parsed.map((e) => e.projectId) },
+        },
+        select: { id: true },
+      });
+      const valid = new Set(orgProjects.map((p) => p.id));
+      const filtered = parsed.filter((e) => valid.has(e.projectId));
+      if (filtered.length > 0) projectAccessToStore = filtered;
+    }
   }
 
   const targetUserId = body?.targetUserId?.trim() || null;
@@ -136,6 +164,7 @@ export async function POST(req: Request, { params }: Params) {
         expiresAt,
         invitedById: access.user.id,
         inviteeUserId: targetUser.id,
+        ...(projectAccessToStore ? { projectAccess: projectAccessToStore } : {}),
       },
       select: { id: true, email: true, role: true, expiresAt: true },
     });
@@ -210,6 +239,7 @@ export async function POST(req: Request, { params }: Params) {
       tokenHash,
       expiresAt,
       invitedById: access.user.id,
+      ...(projectAccessToStore ? { projectAccess: projectAccessToStore } : {}),
     },
     select: { id: true, email: true, role: true, expiresAt: true },
   });
@@ -234,7 +264,7 @@ export async function POST(req: Request, { params }: Params) {
       to: email,
       inviterEmail: inviter?.email ?? "(unknown)",
       organizationName: access.organization.name,
-      acceptUrl: buildAcceptUrl(token, req),
+      acceptUrl: buildAcceptUrl(token, null),
       expiresAt,
     });
   } catch (err) {

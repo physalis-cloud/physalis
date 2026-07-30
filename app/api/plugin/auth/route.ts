@@ -20,7 +20,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
-import { verifyTotp, findBackupCodeIndex } from "@/lib/totp";
+import { verifyTotp, findBackupCodeIndex, consumeTotpTimeStep } from "@/lib/totp";
 import {
   generatePluginToken,
   hashPluginToken,
@@ -197,17 +197,24 @@ export async function POST(req: Request) {
       });
 
       let acceptedVia: "totp" | "backup" | null = null;
-      if (await verifyTotp(totp, secretPlain)) {
+      // §2.17 — anti-rejeu TOTP (afterTimeStep + CAS atomique).
+      const totpRes = await verifyTotp(totp, secretPlain, user.lastTotpTimeStep);
+      if (
+        totpRes.valid &&
+        totpRes.timeStep != null &&
+        (await consumeTotpTimeStep(
+          (a) => tx.user.updateMany(a),
+          user.id,
+          totpRes.timeStep,
+        ))
+      ) {
         acceptedVia = "totp";
       } else {
         const idx = await findBackupCodeIndex(totp, user.backupCodes);
         if (idx >= 0) {
-          const remaining = [...user.backupCodes];
-          remaining.splice(idx, 1);
-          await tx.user.update({
-            where: { id: user.id },
-            data: { backupCodes: remaining },
-          });
+          // §2.20c — consommation ATOMIQUE (array_remove) au lieu du
+          // read-modify-write (course entre deux codes différents concurrents).
+          await tx.$executeRaw`UPDATE "User" SET "backupCodes" = array_remove("backupCodes", ${user.backupCodes[idx]}) WHERE "id" = ${user.id}`;
           acceptedVia = "backup";
         }
       }

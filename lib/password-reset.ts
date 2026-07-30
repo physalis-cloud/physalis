@@ -72,10 +72,26 @@ export async function resolveResetToken(token: string) {
   return record;
 }
 
-/** Marque un token comme utilisé (single-use). À appeler après reset réussi. */
+/**
+ * Marque un token comme utilisé (single-use) ET invalide les jetons frères
+ * non consommés du même user. À appeler après reset réussi.
+ *
+ * §2.20b — sans la purge des frères, un jeton capturé (accès transitoire à la
+ * boîte mail, jeton A jamais utilisé) reste valide dans sa fenêtre TTL même
+ * après que la victime a fait son propre reset (jeton B) : `markResetTokenUsed`
+ * ne ciblait que `tokenHash`. On supprime donc tous les jetons encore ouverts
+ * du même (tenant, user) une fois qu'un reset a abouti.
+ */
 export async function markResetTokenUsed(tokenHash: string): Promise<void> {
-  await adminPrisma.passwordResetToken.update({
+  const used = await adminPrisma.passwordResetToken.update({
     where: { tokenHash },
     data: { usedAt: new Date() },
+  });
+  await adminPrisma.passwordResetToken.deleteMany({
+    where: {
+      tenantSlug: used.tenantSlug,
+      userId: used.userId,
+      usedAt: null,
+    },
   });
 }

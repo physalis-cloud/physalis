@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import TagsInput from "@/components/TagsInput";
 import { useTranslations } from "next-intl";
 import {
   RiDownload2Line,
@@ -329,6 +330,14 @@ function CollectionDetail({
   const [rotationConfigTarget, setRotationConfigTarget] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Tags déjà utilisés dans la collection → suggestions d'autocomplete dans le
+  // dialog d'entrée (les entrées sont déjà chargées côté client).
+  const allTags = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const e of entries ?? []) for (const tag of e.tags) set.add(tag);
+    return Array.from(set).sort();
+  }, [entries]);
+
   const canEdit = ROLE_RANK[collection.role] >= ROLE_RANK.EDITOR;
   const canManage = collection.role === "OWNER";
 
@@ -510,6 +519,7 @@ function CollectionDetail({
           entryBase={entryBase}
           initial={editing}
           currentCollectionId={collection.id}
+          suggestions={allTags}
           movableCollections={allCollections.filter(
             (c) =>
               c.id !== collection.id &&
@@ -865,6 +875,7 @@ function EntryDialog({
   initial,
   currentCollectionId,
   movableCollections,
+  suggestions,
   onClose,
   onSaved,
 }: {
@@ -874,6 +885,8 @@ function EntryDialog({
   /** Collections du meme scope ou le user a EDITOR+, hors la courante.
    *  Si vide, le selecteur "deplacer" n'est pas affiche. */
   movableCollections: Collection[];
+  /** Tags déjà utilisés dans la collection → autocomplete. */
+  suggestions: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -887,7 +900,6 @@ function EntryDialog({
   const [showTotpSecret, setShowTotpSecret] = useState(false);
   const [totpLoaded, setTotpLoaded] = useState(false);
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
-  const [tagInput, setTagInput] = useState("");
   const [favorite, setFavorite] = useState(initial?.favorite ?? false);
   // Selection de collection (move). Default = courante. Visible uniquement
   // en mode edit + si au moins une autre collection est disponible.
@@ -910,16 +922,6 @@ function EntryDialog({
     setShowPassword(true);
     setTotpSecret(data.entry.totpSecret ?? "");
     setTotpLoaded(true);
-  }
-
-  function addTag() {
-    const tag = tagInput.trim();
-    if (!tag || tags.includes(tag)) {
-      setTagInput("");
-      return;
-    }
-    setTags([...tags, tag]);
-    setTagInput("");
   }
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -1109,41 +1111,7 @@ function EntryDialog({
             </div>
             <div className="field">
               <label>Tags</label>
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {tags.map((tag) => (
-                  <span key={tag} className="chip" style={{ gap: 4 }}>
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => setTags(tags.filter((x) => x !== tag))}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: 0,
-                        color: "var(--muted)",
-                        fontSize: 12,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") {
-                      e.preventDefault();
-                      addTag();
-                    }
-                  }}
-                  onBlur={addTag}
-                  placeholder="+ tag"
-                  className="input"
-                  style={{ width: 120, padding: "6px 10px", fontSize: 12 }}
-                />
-              </div>
+              <TagsInput value={tags} onChange={setTags} suggestions={suggestions} lowercase={false} />
             </div>
             <label
               className="flex items-center gap-2"

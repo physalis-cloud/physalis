@@ -26,10 +26,11 @@
 //     (pre-requis pour ecrire). Liste vide si rien dispo a ce role.
 
 import { NextResponse } from "next/server";
-import type { VaultRole } from "@prisma/client";
+import type { VaultRole, ProjectRole, OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
+import { effectiveProjectRole } from "@/lib/project-access";
 
 const VAULT_ROLE_RANK: Record<VaultRole, number> = {
   VIEWER: 1,
@@ -82,19 +83,19 @@ export async function GET() {
       }),
     ]);
 
-  const adminOrgIds = orgMemberships
-    .filter((m) => m.role === "OWNER" || m.role === "ADMIN")
-    .map((m) => m.organization.id);
-  const devOrgIds = orgMemberships
-    .filter((m) => hasDevPrivileges(m.role))
-    .map((m) => m.organization.id);
-  const adminOrgIdSet = new Set(adminOrgIds);
+  // Rôle d'org du user par org — alimente effectiveProjectRole (source unique §4).
+  const orgRoleByOrg = new Map<string, OrgRole>(
+    orgMemberships.map((m) => [m.organization.id, m.role]),
+  );
 
-  // 2. Projets accessibles via OrgADMIN+ (OWNER implicite) OU OrgDEV
-  // (EDITOR implicite), en plus des projets membres directs. Un
-  // ProjectMember explicite gagne sur l'implicite (la verif !has(p.id)
-  // ci-dessous preserve cet ordre).
-  const inheritOrgIds = [...adminOrgIds, ...devOrgIds];
+  // 2. Projets hérités : ceux des orgs où le rôle d'org confère un accès
+  // implicite (OrgADMIN/OWNER → OWNER, OrgDEV/ADMIN_DEV → EDITOR). Un OrgMEMBER
+  // n'hérite rien → ses seuls projets viennent de lignes ProjectMember explicites.
+  const inheritOrgIds = orgMemberships
+    .filter(
+      (m) => m.role === "OWNER" || m.role === "ADMIN" || hasDevPrivileges(m.role),
+    )
+    .map((m) => m.organization.id);
   const inheritedProjects = inheritOrgIds.length
     ? await prisma.project.findMany({
         where: { organizationId: { in: inheritOrgIds } },
@@ -114,43 +115,51 @@ export async function GET() {
     name: string;
     organizationId: string;
     orgSlug: string;
-    role: "OWNER" | "EDITOR" | "VIEWER";
+    role: ProjectRole;
   };
-  // `hidden: true` = projet masqué pour ce user → requireProjectMember répond
-  // 403 (règle 2). Miroir de accessibleProjectsWhere : une ligne masquée ne
-  // sème PAS de destination, ET le projet est exclu du chemin d'héritage DEV
-  // ci-dessous — sinon un DEV masqué le récupérerait en implicite (règles 2+4).
-  // OrgADMIN/OWNER, eux, ignorent hidden (règle 1) via la branche admin.
-  const hiddenProjectIds = new Set(
-    projectMemberships.filter((pm) => pm.hidden).map((pm) => pm.project.id),
-  );
 
-  const projectMap = new Map<string, ProjectInfo>();
+  // §4 — le rôle projet effectif vient de la SOURCE UNIQUE (`effectiveProjectRole`),
+  // plus d'une re-dérivation à la main de « explicite vs implicite vs hidden ». On
+  // rassemble les projets candidats (ligne explicite OU héritage d'une org DEV+),
+  // puis effectiveProjectRole tranche pour chacun : règle 1 (OrgADMIN/OWNER →
+  // OWNER, `hidden` ET la ligne ignorés), règles 2/3 (la ligne fait foi, masquée
+  // = aucun accès sans repli DEV), règles 4/5 (héritage d'org, ou rien).
+  type Candidate = {
+    project: {
+      id: string;
+      slug: string;
+      name: string;
+      organizationId: string;
+      organization: { slug: string; name: string };
+    };
+    membership: { role: ProjectRole; hidden: boolean } | null;
+  };
+  const candidates = new Map<string, Candidate>();
   for (const pm of projectMemberships) {
-    if (pm.hidden) continue;
-    projectMap.set(pm.project.id, {
-      id: pm.project.id,
-      slug: pm.project.slug,
-      name: pm.project.name,
-      organizationId: pm.project.organizationId,
-      orgSlug: pm.project.organization.slug,
-      role: pm.role,
+    candidates.set(pm.project.id, {
+      project: pm.project,
+      membership: { role: pm.role, hidden: pm.hidden },
     });
   }
   for (const p of inheritedProjects) {
-    if (projectMap.has(p.id)) continue;
-    const isAdminOrg = adminOrgIdSet.has(p.organizationId);
-    // Règle 2 : un projet masqué reste masqué pour l'héritage DEV. Les
-    // OrgADMIN/OWNER (règle 1) l'ignorent → seul le cas non-admin est filtré.
-    if (!isAdminOrg && hiddenProjectIds.has(p.id)) continue;
-    projectMap.set(p.id, {
-      id: p.id,
-      slug: p.slug,
-      name: p.name,
-      organizationId: p.organizationId,
-      orgSlug: p.organization.slug,
-      // ADMIN/OWNER orga → OWNER implicite ; DEV orga → EDITOR implicite.
-      role: isAdminOrg ? "OWNER" : "EDITOR",
+    if (!candidates.has(p.id)) candidates.set(p.id, { project: p, membership: null });
+  }
+
+  const projectMap = new Map<string, ProjectInfo>();
+  for (const c of candidates.values()) {
+    const role = effectiveProjectRole({
+      orgRole: orgRoleByOrg.get(c.project.organizationId) ?? null,
+      membership: c.membership,
+      platformRole: user.role,
+    });
+    if (!role) continue;
+    projectMap.set(c.project.id, {
+      id: c.project.id,
+      slug: c.project.slug,
+      name: c.project.name,
+      organizationId: c.project.organizationId,
+      orgSlug: c.project.organization.slug,
+      role,
     });
   }
 
@@ -189,10 +198,6 @@ export async function GET() {
   const vaultRoleByCollection = new Map<string, VaultRole>(
     vaultMemberships.map((m) => [m.collectionId, m.role]),
   );
-  const orgRoleByOrg = new Map<
-    string,
-    "OWNER" | "ADMIN" | "ADMIN_DEV" | "DEV" | "MEMBER"
-  >(orgMemberships.map((m) => [m.organization.id, m.role]));
 
   function effectiveRole(c: {
     id: string;

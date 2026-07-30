@@ -1,3 +1,9 @@
+// Jumeau SELF-HOST — divergence unique : le portail de feature payante
+// (`requireFeature("rotation")`, lib/feature-guard) est retiré. La rotation À LA
+// DEMANDE est une feature PRODUIT en self-host, pas une option d'offre : il n'y a
+// ni plan ni `admin.clients` pour porter le drapeau. Les gardes d'autorisation
+// (requireProjectMember EDITOR) et le reste du handler sont identiques.
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt } from "@/lib/crypto";

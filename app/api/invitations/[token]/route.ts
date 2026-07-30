@@ -1,3 +1,9 @@
+// Jumeau SELF-HOST — divergence unique : le contrôle de quota de sièges
+// (`checkSeatForOrgAdd`, lib/quotas) est retiré. Les sièges sont une notion de
+// l'offre hébergée ; en mono-tenant il n'y a ni plan ni add-on à faire respecter,
+// et `lib/quotas.ts` interroge le schéma `admin` qui n'existe pas ici.
+// Tout le reste — y compris les gardes d'acceptation d'invitation — est identique.
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
@@ -73,6 +79,18 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
+  // §2.24b — re-vérifie le quota de sièges à l'acceptation (cf. me/invitations
+  // /[id]/accept). Sauté si l'user est déjà membre (l'upsert ne fait qu'un
+  // update de rôle, aucun siège ajouté).
+  const alreadyMember = await prisma.orgMember.findUnique({
+    where: {
+      userId_organizationId: {
+        userId: me.id,
+        organizationId: invitation.organizationId,
+      },
+    },
+    select: { id: true },
+  });
   await prisma.$transaction([
     prisma.orgMember.upsert({
       where: {

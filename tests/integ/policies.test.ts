@@ -17,6 +17,7 @@ import {
   BASE_URL,
   TENANT_SCHEMA,
 } from "./helpers/api";
+import { randomBytes } from "node:crypto";
 import { execSql } from "./helpers/db";
 
 const SUFFIX = `${Date.now()}`;
@@ -26,6 +27,7 @@ let admin: Session;
 let projectSlug = "";
 let projectId = "";
 let policyId = "";
+let ciConnectionId = "";
 
 beforeAll(async () => {
   admin = await adminSession();
@@ -41,6 +43,26 @@ beforeAll(async () => {
     githubRepo: "argo-web/voyages",
   });
   if (patch.status !== 200) throw new Error(`setup repo: ${patch.status}`);
+
+  // Connexion CI/CD — REQUISE depuis la refonte multiprovider : la route de
+  // création de policy lit `loadProjectCiMeta` et refuse en 400 tant que le
+  // projet n'est relié à aucune connexion (le provider et l'issuer en
+  // proviennent, plus seulement le repo). Ce fichier précédait ce changement et
+  // échouait donc de façon déterministe. Le refus de l'app est correct ; c'est
+  // le fixture qui était incomplet.
+  const orgId = (
+    await execSql(
+      `SELECT "organizationId" FROM "${TENANT_SCHEMA}"."Project" WHERE id = '${projectId}'`,
+    )
+  ).trim();
+  ciConnectionId = "ck" + randomBytes(11).toString("hex");
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."CiConnection" (id, "organizationId", name, provider, "createdAt", "updatedAt")
+     VALUES ('${ciConnectionId}', '${orgId}', 'ci-${SUFFIX}', 'github', NOW(), NOW())`,
+  );
+  await execSql(
+    `UPDATE "${TENANT_SCHEMA}"."Project" SET "ciConnectionId" = '${ciConnectionId}' WHERE id = '${projectId}'`,
+  );
 });
 
 afterAll(async () => {

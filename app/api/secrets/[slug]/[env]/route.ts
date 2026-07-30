@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { decrypt } from "@/lib/crypto";
 import { validateToken } from "@/lib/auth-token";
 import { logAction } from "@/lib/audit";
+import { machineFetchRateLimited } from "@/lib/machine-rate-limit";
 import { withTenantSchema } from "@/lib/tenant";
 
 type Params = { params: Promise<{ slug: string; env: string }> };
@@ -60,6 +61,20 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Plafond par token (120/min) — bride un token compromis qui martèle + trace
+  // le 429 dans l'audit. Cf. lib/machine-rate-limit.ts.
+  const limited = machineFetchRateLimited(req, {
+    tokenId: machineToken.id,
+    tokenName: machineToken.name,
+    // Mono-tenant : toujours null côté jumeau, mais `machineFetchRateLimited`
+    // (fichier synchronisé) type le champ `string`. Le jumeau lib/audit.ts
+    // ignore la valeur — elle n'est là que pour la compilation.
+    tenantSlug: machineToken.tenantSlug ?? "",
+    organizationId: machineToken.project.organizationId,
+    projectId: machineToken.project.id,
+  });
+  if (limited) return limited;
 
   const records = await withTenantSchema(machineToken.tenantSlug, (tx) =>
     tx.secret.findMany({

@@ -7,14 +7,20 @@
 //          secretKey?, recipientEmail? }
 //        Retourne { id, requestUrl, privateKey } — privateKey UNE SEULE FOIS.
 
+import { ORG_DEV_PLUS_ROLES } from "@/lib/roles";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { readJson, requireUser } from "@/lib/api";
+import {
+  accessibleProjectsWhere,
+  effectiveProjectRole,
+} from "@/lib/project-access";
+import { rateLimit } from "@/lib/rate-limit";
 import { isValidEmail, isValidSecretKey } from "@/lib/validation";
 import { logAction } from "@/lib/audit";
 import { generateEcdhKeypair } from "@/lib/secret-request-crypto";
 import {
-  SECRET_REQUEST_TTL_MS,
+  resolveSecretRequestTtlMs,
   deriveStatus,
   generateSecretRequestToken,
   hashSecretRequestToken,
@@ -43,27 +49,30 @@ export async function GET(req: Request) {
   const projectSlugFilter = url.searchParams.get("project");
   const statusFilter = url.searchParams.get("status");
 
-  // Toutes les orgs où l'user est DEV+ (donc ADMIN ou OWNER aussi).
+  // Toutes les orgs dont l'user est membre (TOUT rôle) — cibles de création
+  // (proposées dans le dialog). La VISIBILITÉ dépend du rôle : DEV+ voit toutes
+  // les demandes de l'org (§2.16) ; un membre ne voit que LES SIENNES.
   const memberships = await prisma.orgMember.findMany({
-    where: {
-      userId: user.id,
-      role: { in: ["OWNER", "ADMIN", "DEV"] },
+    where: { userId: user.id },
+    select: {
+      role: true,
+      organization: { select: { id: true, slug: true, name: true } },
     },
-    select: { organization: { select: { id: true, slug: true, name: true } } },
   });
-  const orgIds = memberships.map((m) => m.organization.id);
-  if (orgIds.length === 0) {
+  const allOrgs = memberships.map((m) => m.organization);
+  if (memberships.length === 0) {
     return NextResponse.json({ requests: [], orgs: [] });
   }
+  const devPlus = memberships.filter((m) => ORG_DEV_PLUS_ROLES.includes(m.role));
 
-  // Filtre org optionnel
-  let scopedOrgIds = orgIds;
+  // Filtre org optionnel (doit être une org de l'user)
+  let orgFilterId: string | undefined;
   if (orgSlugFilter) {
     const match = memberships.find((m) => m.organization.slug === orgSlugFilter);
     if (!match) {
-      return NextResponse.json({ requests: [], orgs: memberships.map((m) => m.organization) });
+      return NextResponse.json({ requests: [], orgs: allOrgs });
     }
-    scopedOrgIds = [match.organization.id];
+    orgFilterId = match.organization.id;
   }
 
   // Filtre project optionnel (par slug, scopé sur les orgs du user)
@@ -72,20 +81,38 @@ export async function GET(req: Request) {
     const proj = await prisma.project.findFirst({
       where: {
         slug: projectSlugFilter,
-        organizationId: { in: scopedOrgIds },
+        organizationId: { in: memberships.map((m) => m.organization.id) },
       },
       select: { id: true },
     });
     if (!proj) {
-      return NextResponse.json({ requests: [], orgs: memberships.map((m) => m.organization) });
+      return NextResponse.json({ requests: [], orgs: allOrgs });
     }
     projectIdFilter = proj.id;
   }
 
+  // §2.16 — visibilité DEV+ par org (demandes org-level + projets accessibles,
+  // `hidden` respecté ; OrgADMIN/OWNER voient tout). Bornée à l'org demandée.
+  const scopedDevPlus = orgFilterId
+    ? devPlus.filter((m) => m.organization.id === orgFilterId)
+    : devPlus;
+  const orgVisibility = scopedDevPlus.map((m) => ({
+    organizationId: m.organization.id,
+    OR: [
+      { projectId: null },
+      { project: accessibleProjectsWhere(m.organization.id, user.id, m.role) },
+    ],
+  }));
+
+  // (DEV+ voit les demandes de son org) OU (chacun voit LES SIENNES), borné par
+  // les filtres org/projet éventuels.
   const rows = await prisma.secretRequest.findMany({
     where: {
-      organizationId: { in: scopedOrgIds },
-      ...(projectIdFilter ? { projectId: projectIdFilter } : {}),
+      AND: [
+        { OR: [...orgVisibility, { requestedById: user.id }] },
+        ...(orgFilterId ? [{ organizationId: orgFilterId }] : []),
+        ...(projectIdFilter ? [{ projectId: projectIdFilter }] : []),
+      ],
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -123,7 +150,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     requests: filtered,
-    orgs: memberships.map((m) => m.organization),
+    orgs: allOrgs,
   });
 }
 
@@ -135,12 +162,24 @@ type PostBody = {
   environmentName?: string;
   secretKey?: string;
   recipientEmail?: string;
+  /** #5 — durée de vie du lien en heures (1/24/48/168). Défaut 48h. */
+  expiresInHours?: number;
 };
 
 export async function POST(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
   const { user } = userRes;
+
+  // Anti-abus : la création envoie un email de marque à un destinataire
+  // arbitraire (§2.22-famille). Feature ouverte à tout membre → borne par user.
+  const limited = rateLimit(
+    req,
+    "secret-request-create",
+    { max: 20, windowMs: 60 * 60_000 },
+    user.id,
+  );
+  if (limited) return limited;
 
   const body = (await readJson(req)) as PostBody | null;
   if (
@@ -172,35 +211,61 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  // #5 — expiration configurable (bornée à l'allowlist ; défaut 48h).
+  const ttlMs = resolveSecretRequestTtlMs(body.expiresInHours);
+  if (ttlMs === null) {
+    return NextResponse.json(
+      { error: "expiresInHours invalide (autorisé : 1, 24, 48, 168)" },
+      { status: 400 },
+    );
+  }
 
-  // Org access : user doit être DEV+ sur l'org.
+  // Org access : user doit être MEMBRE de l'org (tout rôle). La feature est
+  // ouverte aux membres ; un MEMBER ne pourra faire que des demandes org-level
+  // (le scoping projet ci-dessous exige un accès projet réel).
   const orgMembership = await prisma.orgMember.findFirst({
     where: {
       userId: user.id,
       organizationId: body.organizationId,
-      role: { in: ["OWNER", "ADMIN", "DEV"] },
     },
-    select: { organization: { select: { id: true, slug: true, name: true } } },
+    select: {
+      role: true,
+      organization: { select: { id: true, slug: true, name: true } },
+    },
   });
   if (!orgMembership) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const org = orgMembership.organization;
 
-  // Project access optionnel : doit appartenir à l'org choisie + non hidden
-  // pour ce user (l'admin pourrait avoir caché ce projet à un dev).
+  // Project scoping optionnel : requiert un ACCÈS RÉEL au projet via les 6
+  // règles §4 (`effectiveProjectRole`). ⚠️ Ne PAS re-dériver à la main : le
+  // check historique `members: { none: { hidden } }` ne tenait QUE grâce à
+  // l'ancien gate DEV+ ; sans lui, un MEMBER aurait pu scoper n'importe quel
+  // projet non masqué (escalade).
   let projectId: string | null = null;
   if (body.projectId) {
     const proj = await prisma.project.findFirst({
-      where: {
-        id: body.projectId,
-        organizationId: org.id,
-        members: { none: { userId: user.id, hidden: true } },
+      where: { id: body.projectId, organizationId: org.id },
+      select: {
+        id: true,
+        members: {
+          where: { userId: user.id },
+          select: { role: true, hidden: true },
+        },
       },
-      select: { id: true },
     });
     if (!proj) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    const row = proj.members[0] ?? null;
+    const effective = effectiveProjectRole({
+      orgRole: orgMembership.role,
+      membership: row ? { role: row.role, hidden: row.hidden } : null,
+      platformRole: user.role,
+    });
+    if (!effective) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     projectId = proj.id;
   }
@@ -209,7 +274,7 @@ export async function POST(req: Request) {
   const keypair = await generateEcdhKeypair();
   const token = generateSecretRequestToken();
   const tokenHash = hashSecretRequestToken(token);
-  const expiresAt = new Date(Date.now() + SECRET_REQUEST_TTL_MS);
+  const expiresAt = new Date(Date.now() + ttlMs);
 
   const created = await prisma.secretRequest.create({
     data: {

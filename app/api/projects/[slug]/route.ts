@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { readJson, requireProjectMember, slugify } from "@/lib/api";
 import { logAction } from "@/lib/audit";
+import { hasDevPrivileges } from "@/lib/roles";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -132,6 +133,18 @@ export async function PATCH(req: Request, { params }: Params) {
 
   if (changed.length === 0) {
     return NextResponse.json({ ok: true, project: access.project });
+  }
+
+  // AUTORISATION CI/CD : les champs qui pilotent les policies OIDC (repo,
+  // workflow) sont réservés à OWNER projet OU OrgDEV — miroir de la garde des
+  // policies. Un EDITOR projet simple ne doit pas repointer la config CI.
+  // Cf. docs/failles.md §2.3 (porté depuis la source SaaS).
+  const CI_FIELDS = ["githubRepo", "githubWorkflow"];
+  const ciConfigChanged = changed.some((f) => CI_FIELDS.includes(f));
+  const canManageCiConfig =
+    access.role === "OWNER" || hasDevPrivileges(access.orgRole);
+  if (ciConfigChanged && !canManageCiConfig) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const updated = await prisma.project.update({

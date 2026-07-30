@@ -9,7 +9,26 @@ import { createHash, randomBytes } from "node:crypto";
 import { adminPrisma } from "./prisma";
 
 const TOKEN_PREFIX = "sv_extreq_";
-export const SECRET_REQUEST_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+export const SECRET_REQUEST_TTL_MS = 48 * 60 * 60 * 1000; // 48h (défaut)
+
+/** #5 — options d'expiration proposées à la création d'une demande externe
+ *  (« Autoriser un partage externe »). Bornées côté serveur : pas de TTL
+ *  arbitraire depuis le client. Heures : 1h · 24h · 48h · 7j. */
+export const SECRET_REQUEST_TTL_OPTIONS_HOURS = [1, 24, 48, 168] as const;
+
+/** Résout un nombre d'heures demandé (body POST) en millisecondes, validé
+ *  contre l'allowlist. `undefined`/`null` → défaut 48h ; valeur hors
+ *  allowlist → `null` (le caller renvoie 400). */
+export function resolveSecretRequestTtlMs(hours: unknown): number | null {
+  if (hours === undefined || hours === null) return SECRET_REQUEST_TTL_MS;
+  if (
+    typeof hours === "number" &&
+    (SECRET_REQUEST_TTL_OPTIONS_HOURS as readonly number[]).includes(hours)
+  ) {
+    return hours * 60 * 60 * 1000;
+  }
+  return null;
+}
 
 export function generateSecretRequestToken(): string {
   return TOKEN_PREFIX + randomBytes(32).toString("hex");

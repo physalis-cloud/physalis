@@ -64,6 +64,7 @@ const ADMIN_ONLY_MIGRATIONS = new Set([
   "20260625120000_sso_config_admin",
   "20260626120000_sso_v2_multi_provider",
   "20260626160000_client_social_login_enabled",
+  "20260722130000_client_trial_consumed",
 ]);
 
 const prisma = new PrismaClient();

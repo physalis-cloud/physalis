@@ -13,33 +13,48 @@
 
 import { useState } from "react";
 
-const TAG_RE = /^[a-z0-9][a-z0-9._-]{0,49}$/;
+// Deux politiques de casse selon le consommateur :
+//  - `lowercase` (défaut) : tags normalisés minuscule côté serveur (secrets/
+//    services/comptes, lib/tags.ts) → l'input force la minuscule.
+//  - sinon : casse préservée (coffres perso/équipe, dont l'API garde la casse)
+//    → on accepte A-Z et on ne minusculise pas.
+const LOWER_RE = /^[a-z0-9][a-z0-9._-]{0,49}$/;
+const MIXED_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,49}$/;
 
 export default function TagsInput({
   value,
   onChange,
   placeholder = "+ tag",
   suggestions = [],
+  lowercase = true,
 }: {
   value: string[];
   onChange: (tags: string[]) => void;
   placeholder?: string;
   suggestions?: string[];
+  /** Force la minuscule (défaut). `false` = casse préservée (coffres). */
+  lowercase?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function add(raw: string) {
-    const t = raw.trim().toLowerCase();
+    const trimmed = raw.trim();
+    const t = lowercase ? trimmed.toLowerCase() : trimmed;
     if (!t) {
       setInput("");
       return;
     }
-    if (!TAG_RE.test(t)) {
-      setError(`Format invalide (a-z, 0-9, . _ - uniquement, ≤ 50 chars)`);
+    if (!(lowercase ? LOWER_RE : MIXED_RE).test(t)) {
+      setError(
+        lowercase
+          ? `Format invalide (a-z, 0-9, . _ - uniquement, ≤ 50 chars)`
+          : `Format invalide (a-z, A-Z, 0-9, . _ - uniquement, ≤ 50 chars)`,
+      );
       return;
     }
-    if (value.includes(t)) {
+    // Dédup insensible à la casse (évite « App » + « app »).
+    if (value.some((v) => v.toLowerCase() === t.toLowerCase())) {
       setInput("");
       return;
     }
@@ -56,11 +71,20 @@ export default function TagsInput({
     onChange(value.filter((t) => t !== tag));
   }
 
-  // Suggestions = tags existants dans le projet, filtrés par préfixe input.
+  // Suggestions = tags existants, filtrés par préfixe input. Comparaison
+  // INSENSIBLE À LA CASSE des deux côtés : les tags historiques peuvent être en
+  // casse mixte (`Prod`) alors que l'input est minuscule → sinon ils ne
+  // matchaient jamais.
   const filteredSuggestions =
     input.length > 0
       ? suggestions
-          .filter((s) => s.startsWith(input.toLowerCase()) && !value.includes(s))
+          .filter((s) => {
+            const sl = s.toLowerCase();
+            return (
+              sl.startsWith(input.toLowerCase()) &&
+              !value.some((v) => v.toLowerCase() === sl)
+            );
+          })
           .slice(0, 5)
       : [];
 
@@ -135,6 +159,7 @@ export default function TagsInput({
                   key={s}
                   type="button"
                   role="option"
+                  aria-selected={false}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     add(s);

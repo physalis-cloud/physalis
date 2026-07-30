@@ -202,6 +202,79 @@ export async function provisionTenantKey(tenantSlug: string): Promise<{ kmsKeyNa
 }
 
 /**
+ * Ce que la révocation d'un tenant supprime, exactement — et rien d'autre.
+ *
+ * Extrait en fonction PURE pour être vérifiable : l'invariant à tenir est que
+ * **la KEK transit ne figure JAMAIS dans cette liste**. Une régression qui l'y
+ * ajouterait détruirait les sauvegardes des clients sur leur propre
+ * infrastructure, et ne se verrait qu'après coup. Le test la lit.
+ *
+ * Ordre : rôles d'abord, policies ensuite. Ainsi une interruption au milieu
+ * laisse au pire une policy orpheline (inoffensive) plutôt qu'un rôle vivant
+ * dont la policy a disparu.
+ */
+export function tenantKmsRevocationTargets(
+  slug: string,
+): { label: string; path: string }[] {
+  assertSlug(slug);
+  const agent = agentRole(slug);
+  const restore = restoreRole(slug);
+  return [
+    { label: `role/${agent}`, path: `/v1/auth/${APPROLE_MOUNT}/role/${agent}` },
+    { label: `role/${restore}`, path: `/v1/auth/${APPROLE_MOUNT}/role/${restore}` },
+    { label: `policy/${agent}`, path: `/v1/sys/policies/acl/${agent}` },
+    { label: `policy/${restore}`, path: `/v1/sys/policies/acl/${restore}` },
+  ];
+}
+
+/**
+ * Révoque les CHEMINS D'ACCÈS KMS d'un tenant supprimé : AppRole agent +
+ * restore, et leurs policies. **La KEK transit N'EST PAS détruite** — et c'est
+ * délibéré.
+ *
+ * Pourquoi garder la clé :
+ * l'agent stocke `{blob, wDEK, métadonnées}` **sur la destination DU CLIENT**
+ * (cf. `steps-docs/done/backup-kms-architecture.md` §3). Physalis ne détient ni
+ * l'archive ni la clé enveloppée, donc :
+ *   • la KEK seule ne déchiffre RIEN — la conserver ne retient aucune donnée,
+ *     il n'y a aucun gain RGPD à la détruire ;
+ *   • la détruire rendrait en revanche **définitivement illisibles les
+ *     sauvegardes du client, sur sa propre infrastructure** — un
+ *     crypto-shredding involontaire d'archives qu'on n'héberge même pas.
+ *
+ * On révoque donc l'USAGE (plus personne ne peut demander un unwrap via
+ * Physalis) sans détruire la MATIÈRE (le client garde la capacité de restaurer
+ * ses archives). Décision tranchée le 2026-07-26, cf.
+ * `steps-docs/todo/suppression-compte.md` §D.
+ *
+ * Best-effort et idempotent : un OpenBao injoignable ne doit pas faire échouer
+ * une purge déjà décidée, et re-révoquer un tenant déjà révoqué est un no-op.
+ */
+export async function revokeTenantKmsAccess(
+  tenantSlug: string,
+): Promise<{ revoked: string[]; failed: string[] }> {
+  assertSlug(tenantSlug);
+  const revoked: string[] = [];
+  const failed: string[] = [];
+
+  if (!isKmsConfigured()) return { revoked, failed };
+
+  const token = await adminLogin();
+
+  for (const { label, path } of tenantKmsRevocationTargets(tenantSlug)) {
+    try {
+      await baoRequest("DELETE", path, { token });
+      revoked.push(label);
+    } catch (err) {
+      failed.push(label);
+      console.error(`[kms] révocation ${label} (${tenantSlug}):`, err);
+    }
+  }
+
+  return { revoked, failed };
+}
+
+/**
  * Émet (ou fait tourner) un `secret_id` pour l'AppRole **agent** d'un tenant,
  * livré **response-wrapped** (à déballer côté agent). Si `cidr` est fourni (IP du
  * VPS client), le secret_id et le token qui en découle sont **CIDR-bound** → un
@@ -294,8 +367,17 @@ export async function getAgentInjectionCreds(
  * de la capacité `decrypt` sur `tenant-<slug>`, via l'identité restore dédiée.
  * Le token est destiné à l'**hôte de restauration** (le plaintext ne transite pas
  * par le control plane) ; Phase 4 finalisera le transport + l'audit.
+ *
+ * §2.25b — si `cidr` est fourni (IP de l'hôte qui poll le restore-plan, seul à
+ * recevoir le token), le `secret_id` ET le token qui en découle sont **CIDR-bound**,
+ * à l'identique de l'identité agent (`issueAgentSecretId`) : un token decrypt qui
+ * fuit devient inutile depuis une autre IP. Sans `cidr` : comportement historique
+ * (non borné) — dégradation propre plutôt que mint d'un token cassé.
  */
-export async function getRestoreToken(tenantSlug: string): Promise<{ token: string; kmsKeyName: string }> {
+export async function getRestoreToken(
+  tenantSlug: string,
+  cidr?: string,
+): Promise<{ token: string; kmsKeyName: string }> {
   assertSlug(tenantSlug);
   const role = restoreRole(tenantSlug);
   const admin = await adminLogin();
@@ -305,10 +387,15 @@ export async function getRestoreToken(tenantSlug: string): Promise<{ token: stri
     `/v1/auth/${APPROLE_MOUNT}/role/${role}/role-id`,
     { token: admin },
   );
+  const secretIdBody: Record<string, unknown> = {};
+  if (cidr) {
+    secretIdBody.cidr_list = [cidr];
+    secretIdBody.token_bound_cidrs = [cidr];
+  }
   const sid = await baoRequest<{ data?: { secret_id?: string } }>(
     "POST",
     `/v1/auth/${APPROLE_MOUNT}/role/${role}/secret-id`,
-    { token: admin },
+    { token: admin, body: secretIdBody },
   );
   const roleId = rid?.data?.role_id;
   const secretId = sid?.data?.secret_id;

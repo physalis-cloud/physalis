@@ -11,7 +11,7 @@
 //
 // Rate-limit : 5/h/IP (anti-brute si un attaquant tentait des tokens random).
 
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/password-hash";
 import { headers } from "next/headers";
 import { rateLimit } from "@/lib/rate-limit";
 import {
@@ -62,7 +62,7 @@ export async function resetPassword(
     };
   }
 
-  const hash = await bcrypt.hash(password, 12);
+  const hash = await hashPassword(password);
   try {
     // Double-check l'email pour éviter un edge case où l'user aurait été
     // recréé avec un id différent (improbable mais paranoia OK).

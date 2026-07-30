@@ -149,9 +149,14 @@ Cascades : `onDelete: Cascade` sur Organization → OrgMember/Project/Invitation
 
 **Règle clé** : un Org OWNER/ADMIN obtient automatiquement un `ProjectRole.OWNER` effectif sur tous les projets de l'org. Un Org DEV obtient `ProjectRole.EDITOR` implicite sur tous les projets (sans row ProjectMember). Un Org MEMBER doit être inscrit explicitement comme ProjectMember pour accéder à un projet.
 
+**Barrière `ProjectMember.hidden`** : `hidden = true` masque un projet à un membre donné — c'est une **barrière d'accès** (`requireProjectMember` règle 2 → **403**), pas un confort d'affichage, tout en préservant la ligne (donc le rôle). Sémantique par rôle : OrgADMIN/OWNER (et platform-admin) **ignorent** `hidden` ; une ligne masquée **bloque** un DEV/MEMBER **sans** retomber sur l'EDITOR implicite du DEV. **Invariant** : tout calcul d'accès projet dérive du prédicat central `accessibleProjectsWhere(orgId, userId, orgRole)` ([lib/api.ts](../lib/api.ts)), miroir strict des règles ci-dessus — **jamais** re-dériver l'autorisation à la main depuis `ProjectMember` sans lire `hidden`. Cf. `security.md §2.6`/`§3.14.6` (une dizaine de surfaces violaient cet invariant, corrigées 2026-07-18).
+
+> Les rôles `OrgRole` (dont `ADMIN_DEV`, rang 3) sont assignables via `POST /api/orgs/[slug]/members` (invite) et `PATCH .../members/[userId]` (changement) — les deux valident contre la même liste `VALID_ROLES`.
+
 Helpers de comparaison dans [lib/api.ts](../lib/api.ts) :
-- `ORG_ROLE_RANK = { MEMBER: 1, DEV: 2, ADMIN: 3, OWNER: 4 }` — le rang DEV (2) est entre MEMBER et ADMIN
+- `ORG_ROLE_RANK = { MEMBER: 1, DEV: 2, ADMIN_DEV: 3, ADMIN: 4, OWNER: 5 }`
 - `PROJECT_ROLE_RANK = { VIEWER: 1, EDITOR: 2, OWNER: 3 }`
+- `hasDevPrivileges(role)` = rang ≥ DEV et rôle « dev-ish » (DEV ou ADMIN_DEV) — cf. `lib/roles.ts`
 
 ### 3.4 Cycle de vie d'un tenant
 
@@ -782,7 +787,9 @@ Chaque mise à jour d'un `Secret` ou `OrgSecret` crée une ligne dans `SecretVer
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
 | POST | `/api/auth/forgot-password` | — (public) | Body : `{ email, tenant }`. Si l'user existe, crée un `PasswordResetToken` (TTL 1h) dans `admin`, envoie email avec lien `/reset-password/<token>`. Toujours 200 (anti-enumération). Rate-limit 3/h/IP. |
-| POST | `/api/auth/reset-password` | — (public) | Body : `{ token, password }`. Valide le hash dans `admin.PasswordResetToken`, applique `bcrypt.hash` + update dans le schéma tenant via `withTenantSchema`, pose `usedAt`. |
+| POST | `/api/auth/reset-password` | — (public) | Body : `{ token, password }`. Valide le hash dans `admin.PasswordResetToken`, applique `bcrypt.hash` + update dans le schéma tenant via `withTenantSchema`, pose `usedAt`. **Pose `User.sessionsValidFrom = now`** → invalide toutes les sessions antérieures. |
+
+**Invalidation de session** : le reset de mot de passe **et** le disable 2FA posent `User.sessionsValidFrom = now`. Un JWT web est rejeté si `loginAt < sessionsValidFrom` (`isSessionInvalidated`, `lib/session-validity.ts`) ; un **PluginToken** est rejeté si `createdAt < sessionsValidFrom` (`validatePluginToken` — corrigé 2026-07-18, il survivait auparavant au reset et pouvait même être échangé contre une session web fraîche). Cf. `security.md §3.14.3`.
 
 ---
 
@@ -1208,7 +1215,7 @@ Compromis explicite : `style-src 'unsafe-inline'` reste car React inline les att
 
 ### 8.4 RBAC
 
-Vérifié à chaque route via `requireUser` → `requireOrgMember(slug, role)` ou `requireProjectMember(slug, role)` → `requireEnvironment(slug, env, role)`. Role rank comparé numériquement. Cf. §3.1 pour les niveaux global/org/project.
+Vérifié à chaque route via `requireUser` → `requireOrgMember(slug, role)` ou `requireProjectMember(slug, role)` → `requireEnvironment(slug, env, role)`. Role rank comparé numériquement. Cf. §3.3 pour les niveaux global/org/project. **Invariant `hidden`** : tout accès projet dérivé à la main (query `ProjectMember`) doit lire la barrière `ProjectMember.hidden` — préférer les helpers ci-dessus ou le prédicat `accessibleProjectsWhere` (§3.3). Cf. `security.md §2.6`.
 
 ### 8.5 Rate limiting
 

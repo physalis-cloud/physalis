@@ -1,3 +1,9 @@
+// Jumeau SELF-HOST — divergence unique : le contrôle de quota de sièges
+// (`checkSeatForOrgAdd`, lib/quotas) est retiré. Les sièges sont une notion de
+// l'offre hébergée ; en mono-tenant il n'y a ni plan ni add-on à faire respecter,
+// et `lib/quotas.ts` interroge le schéma `admin` qui n'existe pas ici.
+// Tout le reste — y compris les gardes d'acceptation d'invitation — est identique.
+
 // POST /api/me/invitations/[id]/accept
 //
 // L'invite valide une invitation in-app : cree le OrgMember, marque
@@ -7,6 +13,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
+import { applyInvitationProjectAccess } from "@/lib/invitation-project-access";
 
 export const runtime = "nodejs";
 
@@ -15,7 +22,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function POST(req: Request, { params }: Params) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
   const { id } = await params;
 
   const invitation = await prisma.invitation.findFirst({
@@ -30,6 +37,21 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // §2.24b — le quota de sièges n'était vérifié qu'à l'ÉMISSION de l'invitation
+  // (les pendantes ne consomment rien) : émettre en SHARED puis downgrade FREE
+  // laissait accepter au-delà du quota. On re-vérifie À L'ACCEPTATION — borne
+  // dure quel que soit le nombre d'invitations émises. Sauté si l'user est DÉJÀ
+  // membre (le siège est déjà consommé, l'accept n'en ajoute pas). `null` = aucun
+  // siège consommé (user déjà global rejoignant une org ajoutée).
+  const alreadyMember = await prisma.orgMember.findUnique({
+    where: {
+      userId_organizationId: {
+        userId: user.id,
+        organizationId: invitation.organizationId,
+      },
+    },
+    select: { id: true },
+  });
   // Race-safe : transaction qui cree OrgMember + marque acceptedAt.
   // Si l'user est deja membre (race / double click), on ne crash pas.
   await prisma.$transaction(async (tx) => {
@@ -49,6 +71,14 @@ export async function POST(req: Request, { params }: Params) {
           role: invitation.role,
         },
       });
+      // #2 — applique les accès projet pré-attribués (seulement à la 1re
+      // acceptation, pas sur une race où l'user est déjà membre).
+      await applyInvitationProjectAccess(
+        tx,
+        invitation.organizationId,
+        invitation.projectAccess,
+        user.id,
+      );
     }
     await tx.invitation.update({
       where: { id: invitation.id },

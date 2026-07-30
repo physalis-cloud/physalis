@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/password-hash";
 // Register legacy : crée un user dans `public.User`. Pas de tenant context
 // (le signup tenant passe par /signup → provisionClientSchema).
 import { basePrisma as prisma } from "@/lib/prisma";
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const hash = await bcrypt.hash(password, 12);
+  const hash = await hashPassword(password);
   const user = await prisma.user.create({
     data: { email: normalizedEmail, password: hash },
     select: { id: true, email: true, role: true },

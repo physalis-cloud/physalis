@@ -201,24 +201,61 @@ describe("POST /api/gateway/apis/[id]/keys — Create Key", () => {
 // ─── Verify Key ───────────────────────────────────────────────────────────
 
 describe("POST /api/gateway/verify — Verify Key", () => {
-  it("valid key returns valid:true", async () => {
+  it("valid key + apiId correct returns valid:true", async () => {
+    const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: rawKey, apiId, path: "/test", method: "GET" }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { valid: boolean; keyId: string; apiId: string; scopes: string[] };
+    expect(data.valid).toBe(true);
+    expect(data.keyId).toBe(keyId);
+    expect(data.apiId).toBe(apiId);
+    expect(data.scopes).toContain("read");
+  });
+
+  // Cœur du correctif §2.1/§7 : une clé valide mais destinée à une AUTRE API ne
+  // doit PAS valider. Sans la liaison, n'importe quelle clé de la plateforme passait.
+  it("clé valide mais apiId d'une autre API → valid:false (liaison)", async () => {
+    const created = await postJson(admin, "/api/gateway/apis", {
+      projectSlug: PROJECT_SLUG,
+      name: `Other API ${SUFFIX}`,
+      mode: "REMOTE",
+    });
+    expect(created.status).toBe(201);
+    const otherApiId = ((await created.json()) as { api: { id: string } }).api.id;
+
+    const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: rawKey, apiId: otherApiId, path: "/test", method: "GET" }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { valid: boolean; reason: string };
+    expect(data.valid).toBe(false);
+    expect(data.reason).toBe("invalid"); // pas d'oracle : ne révèle pas qu'elle existe ailleurs
+
+    await deleteReq(admin, `/api/gateway/apis/${otherApiId}`);
+  });
+
+  it("apiId manquant → 400 api_id_required (fail-closed)", async () => {
     const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ key: rawKey, path: "/test", method: "GET" }),
     });
-    expect(res.status).toBe(200);
-    const data = (await res.json()) as { valid: boolean; keyId: string; scopes: string[] };
-    expect(data.valid).toBe(true);
-    expect(data.keyId).toBe(keyId);
-    expect(data.scopes).toContain("read");
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as { valid: boolean; reason: string };
+    expect(data.valid).toBe(false);
+    expect(data.reason).toBe("api_id_required");
   });
 
-  it("invalid key returns valid:false", async () => {
+  it("invalid key + apiId returns valid:false", async () => {
     const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: "ph_live_sk_invalidkey123456789" }),
+      body: JSON.stringify({ key: "ph_live_sk_invalidkey123456789", apiId }),
     });
     expect(res.status).toBe(200);
     const data = (await res.json()) as { valid: boolean; reason: string };
@@ -229,7 +266,7 @@ describe("POST /api/gateway/verify — Verify Key", () => {
     const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ apiId }),
     });
     expect(res.status).toBe(400);
   });
@@ -276,7 +313,7 @@ describe("Rate limit per key", () => {
       fetch(`${BASE_URL}/api/gateway/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: rateLimitedKey, path: "/api/data", method: "GET" }),
+        body: JSON.stringify({ key: rateLimitedKey, apiId, path: "/api/data", method: "GET" }),
       });
 
     const r1 = await call();
@@ -360,7 +397,7 @@ describe("DELETE /api/gateway/keys/[id] — Revoke Key", () => {
     const res = await fetch(`${BASE_URL}/api/gateway/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: rawKey }),
+      body: JSON.stringify({ key: rawKey, apiId }),
     });
     expect(res.status).toBe(200);
     const data = (await res.json()) as { valid: boolean; reason: string };

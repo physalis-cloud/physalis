@@ -65,6 +65,21 @@ async function provisionProject(orgId: string, slugAndName: string) {
   return id;
 }
 
+/**
+ * Bob est invité en **DEV**, pas en MEMBER.
+ *
+ * Ce test portait sur l'isolation CROSS-ORG, mais invitait Bob en MEMBER sans
+ * lui donner de ligne `ProjectMember`, puis attendait qu'il voie le projet de
+ * son org. C'était le comportement d'AVANT le durcissement v1.8.0, où
+ * `/api/projects` ne filtrait que par org — « tout MEMBER voyait les noms et
+ * slugs de TOUS les projets, y compris ceux masqués pour lui ». Depuis, la
+ * règle 5 s'applique : un MEMBER sans ligne explicite ne voit rien, et le test
+ * échouait sans que personne le remarque.
+ *
+ * DEV est le rôle qui correspond à l'intention d'origine : membre légitime de
+ * l'org A, donc il en voit les projets non masqués (règle 4), tout en restant
+ * étranger à l'org B — ce que ces tests vérifient réellement.
+ */
 async function inviteBobToOrg(orgId: string, invitedById: string) {
   const token = "iv_" + randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -74,7 +89,7 @@ async function inviteBobToOrg(orgId: string, invitedById: string) {
     .replace("Z", "+00");
   await execSql(
     `INSERT INTO "${TENANT_SCHEMA}"."Invitation" (id, email, "organizationId", role, "tokenHash", "expiresAt", "invitedById", "createdAt")
-     VALUES ('${id}', '${BOB_EMAIL}', '${orgId}', 'MEMBER', '${tokenHash}', '${expiresAt}', '${invitedById}', NOW())`,
+     VALUES ('${id}', '${BOB_EMAIL}', '${orgId}', 'DEV', '${tokenHash}', '${expiresAt}', '${invitedById}', NOW())`,
   );
   const res = await fetch(
     `${BASE_URL}/api/invitations/${token}/register-and-accept`,

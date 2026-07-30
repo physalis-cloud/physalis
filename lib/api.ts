@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { auth } from "./auth";
 import { prisma } from "./prisma";
-import type { OrgRole, Prisma, ProjectRole, Role } from "@prisma/client";
-import { isPlatformAdmin, hasDevPrivileges } from "./roles";
-import { isSessionInvalidated } from "./session-validity";
+import type { OrgRole, ProjectRole, Role } from "@prisma/client";
+import { isPlatformAdmin } from "./roles";
+
+// `accessibleProjectsWhere` vit désormais dans lib/project-access.ts, aux côtés
+// des deux autres formes des mêmes règles (rôle effectif, filtre mémoire) et de
+// la matrice qui les force à s'accorder (§4). Ré-export pour ne pas casser les
+// imports existants — il n'y a plus qu'UNE implémentation.
+export { accessibleProjectsWhere } from "./project-access";
+import { effectiveProjectRole, hasProjectRole } from "./project-access";
 
 export type AuthedUser = {
   id: string;
@@ -12,6 +18,8 @@ export type AuthedUser = {
   role: Role;
   /** #5 — instant d'émission du JWT (ms epoch), null si token legacy. */
   loginAt: number | null;
+  /** §2.18 — origine de la session ("plugin_token" | "web" | null legacy). */
+  origin: string | null;
 };
 
 const ORG_ROLE_RANK: Record<OrgRole, number> = {
@@ -20,12 +28,6 @@ const ORG_ROLE_RANK: Record<OrgRole, number> = {
   ADMIN_DEV: 3,
   ADMIN: 4,
   OWNER: 5,
-};
-
-const PROJECT_ROLE_RANK: Record<ProjectRole, number> = {
-  VIEWER: 1,
-  EDITOR: 2,
-  OWNER: 3,
 };
 
 export const CURRENT_ORG_COOKIE = "sv-current-org";
@@ -40,22 +42,13 @@ export async function requireUser(): Promise<
     };
   }
 
-  // #5 — invalidation de session : rejette un JWT émis AVANT que l'user ait
-  // reset son mdp ou désactivé sa 2FA (User.sessionsValidFrom). `loginAt`
-  // null = token legacy (émis avant l'introduction du champ) → on le laisse
-  // vivre jusqu'à expiration naturelle.
   const loginAt = session.user.loginAt ?? null;
-  if (loginAt != null) {
-    const dbUser = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { sessionsValidFrom: true },
-    });
-    if (isSessionInvalidated(loginAt, dbUser?.sessionsValidFrom)) {
-      return {
-        error: NextResponse.json({ error: "Session expired" }, { status: 401 }),
-      };
-    }
-  }
+  // #5 / §2.9 — invalidation de session (`User.sessionsValidFrom`, posé au reset
+  // de mot de passe / désactivation 2FA) : la borne est désormais appliquée EN
+  // AMONT, dans le callback `jwt` de lib/auth.ts — donc pour TOUT consommateur
+  // de `auth()`, pages comprises, et plus seulement pour `requireUser`. Un token
+  // révoqué arrive ici SANS `id` et tombe sur le 401 ci-dessus. NE PAS
+  // réintroduire le check ici sans retirer celui du callback (double requête).
 
   return {
     user: {
@@ -63,6 +56,7 @@ export async function requireUser(): Promise<
       email: session.user.email ?? "",
       role: session.user.role,
       loginAt,
+      origin: session.user.origin ?? null,
     },
     // Mono-tenant : pas de tenant. Champ porté à null pour que le code
     // SaaS coulé verbatim (qui lit `.tenantSlug`) compile sans overlay.
@@ -170,78 +164,21 @@ export async function requireProjectMember(
       ? "OWNER"
       : null;
 
-  // RBAC effectif (cf. ProjectMember dans schema.prisma) :
-  //   1. Global ADMIN ou OrgADMIN/OWNER → OWNER (le hidden flag est ignore)
-  //   2. ProjectMember.hidden=true → 403 (le projet est masque pour ce user)
-  //   3. ProjectMember.hidden=false → role explicite
-  //   4. Pas de row + OrgRole=DEV → EDITOR implicite
-  //   5. Pas de row + OrgRole=MEMBER → 403 (le MEMBER doit être ajouté
-  //      explicitement comme ProjectMember pour voir un projet)
-  //   6. Pas OrgMember → 403
-  let effectiveRole: ProjectRole | null = null;
-  if (orgRole === "OWNER" || orgRole === "ADMIN") {
-    effectiveRole = "OWNER";
-  } else if (projectMembership) {
-    if (projectMembership.hidden) {
-      return {
-        error: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-      };
-    }
-    effectiveRole = projectMembership.role;
-  } else if (hasDevPrivileges(orgRole)) {
-    effectiveRole = "EDITOR";
-  }
-  // MEMBER sans ProjectMember explicite → effectiveRole reste null → 403.
+  // RBAC effectif — les 6 règles vivent dans lib/project-access.ts, avec les
+  // deux autres formes des mêmes règles et la matrice qui les force à
+  // s'accorder (§4). Ne PAS re-dériver ici.
+  const effectiveRole = effectiveProjectRole({
+    orgRole,
+    membership: projectMembership ?? null,
+  });
 
-  if (!effectiveRole || PROJECT_ROLE_RANK[effectiveRole] < PROJECT_ROLE_RANK[requiredRole]) {
+  if (!hasProjectRole(effectiveRole, requiredRole)) {
     return {
       error: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
   }
 
   return { user, project, role: effectiveRole, orgRole, tenantSlug: null as string | null };
-}
-
-/**
- * Clause Prisma « projets de `orgId` visibles par `userId` » — source unique
- * pour TOUT listing de projets (sélecteurs, audit, API).
- *
- * ⚠️ MIROIR des règles de `requireProjectMember` ci-dessus : les deux doivent
- * être modifiés ensemble. Une divergence se paie dans les deux sens — trop
- * large, on liste des projets que l'utilisateur ne peut pas ouvrir et le flag
- * `hidden` perd son sens ; trop étroite, des écrans se vident sans erreur.
- * C'est exactement ce qui était arrivé : 4 listings, 4 filtres différents,
- * aucun conforme (cf. `api/projects` qui ne filtrait que par org).
- *
- * `orgRole` est celui renvoyé par `requireOrgMember`/`requireProjectMember` —
- * donc déjà « OWNER » pour un admin plateforme.
- *
- * Ne dit RIEN du rôle effectif sur chaque projet : pour agir sur un projet
- * précis, passer par `requireProjectMember`.
- */
-export function accessibleProjectsWhere(
-  orgId: string,
-  userId: string,
-  orgRole: OrgRole | null,
-): Prisma.ProjectWhereInput {
-  // Règle 1 — OrgOWNER/ADMIN (et admin plateforme) : tout, `hidden` ignoré.
-  if (orgRole === "OWNER" || orgRole === "ADMIN") {
-    return { organizationId: orgId };
-  }
-  // Règles 2 + 4 — DEV/ADMIN_DEV : EDITOR implicite partout, SAUF si une ligne
-  // les masque explicitement.
-  if (hasDevPrivileges(orgRole)) {
-    return {
-      organizationId: orgId,
-      members: { none: { userId, hidden: true } },
-    };
-  }
-  // Règles 3 + 5 + 6 — MEMBER (ou non-membre) : uniquement les projets où il a
-  // une ligne explicite non masquée.
-  return {
-    organizationId: orgId,
-    members: { some: { userId, hidden: false } },
-  };
 }
 
 export async function requireEnvironment(
@@ -279,6 +216,7 @@ export {
   isValidWorkflowFile,
   isValidGitBranch,
   defaultDeployPath,
+  isValidDeployPath,
 } from "./validation";
 
 export async function readJson(req: Request): Promise<unknown> {

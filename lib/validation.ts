@@ -54,6 +54,25 @@ export function defaultDeployPath(envName: string, projectSlug: string): string 
   return `/srv/projets/${envName}/${projectSlug}`;
 }
 
+// Chemin de deploy custom. Ce champ est le SEUL input utilisateur qui
+// atterrit dans une commande shell distante : /api/deploy le renvoie
+// verbatim dans le bundle, et le modele de workflow (docs/deploy.modele.yml)
+// l'interpole dans `ssh … "DEPLOY_DIR='$DPATH' … bash -s"`. Une quote ferme
+// la chaine et le reste s'execute sur le VPS du client. D'ou un jeu de
+// caracteres FERME (pas de quote, `$`, backtick, `;`, espace, \n) plutot
+// qu'une liste noire.
+//
+// Refus supplementaires : `..` (traversee) et `//` (chemin ambigu). Le
+// chemin doit etre absolu et ne pas finir par `/` (concatenations en aval).
+const DEPLOY_PATH_RE = /^\/[A-Za-z0-9._/-]{1,255}$/;
+export function isValidDeployPath(path: string): boolean {
+  if (!DEPLOY_PATH_RE.test(path)) return false;
+  if (path.includes("..")) return false;
+  if (path.includes("//")) return false;
+  if (path.endsWith("/")) return false;
+  return true;
+}
+
 // IP v4/v6 ou hostname FQDN. Pas de validation parfaite, mais filtre les
 // inputs absurdes (espaces, scheme, multi-lignes).
 const SERVER_HOST_RE = /^[A-Za-z0-9.:_-]{1,253}$/;

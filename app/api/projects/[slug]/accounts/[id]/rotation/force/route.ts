@@ -1,9 +1,21 @@
+// Jumeau SELF-HOST — divergence unique : le portail de feature payante
+// (`requireFeature("rotation")`, lib/feature-guard) est retiré. La rotation À LA
+// DEMANDE est une feature PRODUIT en self-host, pas une option d'offre : il n'y a
+// ni plan ni `admin.clients` pour porter le drapeau. Les gardes d'autorisation
+// (requireProjectMember EDITOR) et le reste du handler sont identiques.
+//
+// La garde `if (!access.tenantSlug) → 400` de la version SaaS est retirée elle
+// aussi : en mono-tenant le slug est TOUJOURS null, elle ferait échouer chaque
+// « Forcer ». Les rotators ne font que le repasser à `withTenantSchema` (stub
+// self-host qui l'ignore) et à l'audit → `?? ""` suffit.
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { rotateAppAccountWebhook } from "@/lib/rotators/app-account-webhook";
 import { rotateAppAccountDatabaseDirect } from "@/lib/rotators/app-account-database";
+import { RotationDisabledError } from "@/lib/rotation-gate";
 
 type Params = { params: Promise<{ slug: string; id: string }> };
 
@@ -16,10 +28,6 @@ export async function POST(req: Request, { params }: Params) {
   const { slug, id } = await params;
   const access = await requireProjectMember(slug, "EDITOR");
   if ("error" in access) return access.error;
-  if (!access.tenantSlug) {
-    return NextResponse.json({ error: "Contexte tenant manquant" }, { status: 400 });
-  }
-
   const acc = await prisma.appAccount.findFirst({
     where: { id, projectId: access.project.id },
     select: {
@@ -38,8 +46,11 @@ export async function POST(req: Request, { params }: Params) {
   // DATABASE : rôle Postgres d'une DB managée → ALTER via l'admin du service lié.
   if (acc.rotationStrategy === "DATABASE") {
     try {
-      await rotateAppAccountDatabaseDirect(acc.id, access.tenantSlug);
+      await rotateAppAccountDatabaseDirect(acc.id, access.tenantSlug ?? "");
     } catch (e) {
+      if (e instanceof RotationDisabledError) {
+        return NextResponse.json({ error: e.message }, { status: 403 });
+      }
       const msg = e instanceof Error ? e.message : String(e);
       return NextResponse.json({ error: `Échec de la rotation : ${msg}` }, { status: 502 });
     }
@@ -65,8 +76,11 @@ export async function POST(req: Request, { params }: Params) {
 
   if (acc.service.rotationExecMode === "DIRECT") {
     try {
-      await rotateAppAccountWebhook(acc.id, access.tenantSlug);
+      await rotateAppAccountWebhook(acc.id, access.tenantSlug ?? "");
     } catch (e) {
+      if (e instanceof RotationDisabledError) {
+        return NextResponse.json({ error: e.message }, { status: 403 });
+      }
       const msg = e instanceof Error ? e.message : String(e);
       return NextResponse.json({ error: `Échec du hook : ${msg}` }, { status: 502 });
     }

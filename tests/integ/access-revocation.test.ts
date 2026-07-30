@@ -33,12 +33,14 @@ import { execSql } from "./helpers/db";
 const SUFFIX = `${Date.now()}`;
 const BOB_EMAIL = `bob-revoke-${SUFFIX}@test.local`;
 const BOB_PASSWORD = "bobtestpassword12";
+const PROJECT_A_SLUG = `revoc-proj-${Date.now()}`;
 const ORG_A_SLUG = `revoke-${SUFFIX}`;
 
 let admin: Session;
 let bob: Session; // session pré-révocation
 let orgAId = "";
 let bobUserId = "";
+let projectAId = "";
 let adminUserId = "";
 
 async function provisionOrg(slug: string, ownerId: string): Promise<string> {
@@ -95,11 +97,28 @@ beforeAll(async () => {
   bobUserId = (
     await execSql(`SELECT id FROM "${TENANT_SCHEMA}"."User" WHERE email = '${BOB_EMAIL}'`)
   ).trim();
+
+  // §4/règle 6 — on pose à Bob une ligne ProjectMember explicite. Le retrait
+  // d'org DOIT la purger : c'est cette cascade qui rend inatteignable l'état
+  // « ProjectMember sans OrgMember », lequel accorderait sinon un accès projet
+  // à un ancien membre (cf. lib/project-access.ts, règle 6).
+  projectAId = "ck" + randomBytes(11).toString("hex");
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."Project" (id, name, slug, "organizationId")
+     VALUES ('${projectAId}', 'Revoc project', '${PROJECT_A_SLUG}', '${orgAId}')`,
+  );
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."ProjectMember" (id, "userId", "projectId", role, hidden)
+     VALUES ('${"ck" + randomBytes(11).toString("hex")}', '${bobUserId}', '${projectAId}', 'EDITOR', false)`,
+  );
   bob = await loginAs(BOB_EMAIL, BOB_PASSWORD);
 });
 
 afterAll(async () => {
   await execSql(`DELETE FROM "${TENANT_SCHEMA}"."User" WHERE email = '${BOB_EMAIL}'`);
+  await execSql(
+    `DELETE FROM "${TENANT_SCHEMA}"."Project" WHERE slug = '${PROJECT_A_SLUG}'`,
+  );
   await execSql(
     `DELETE FROM "${TENANT_SCHEMA}"."Organization" WHERE slug = '${ORG_A_SLUG}'`,
   );
@@ -121,6 +140,14 @@ describe("Révocation utilisateur (RBAC #5)", () => {
       const data = (await res.json()) as { organizations?: { slug: string }[] };
       const slugs = (data.organizations ?? []).map((o) => o.slug);
       expect(slugs).toContain(ORG_A_SLUG);
+    });
+
+    it("DB confirme : Bob a une ligne ProjectMember sur le projet d'orgA", async () => {
+      const rows = await execSql(
+        `SELECT role FROM "${TENANT_SCHEMA}"."ProjectMember"
+          WHERE "userId" = '${bobUserId}' AND "projectId" = '${projectAId}'`,
+      );
+      expect(rows.trim()).toBe("EDITOR");
     });
 
     it("DB confirme : Bob est OrgMember de orgA", async () => {
@@ -185,6 +212,18 @@ describe("Révocation utilisateur (RBAC #5)", () => {
       expect(count.trim()).toBe("0");
     });
 
+    // §4/règle 6 — LE test de l'invariant. `effectiveProjectRole` accorde le
+    // rôle d'une ligne ProjectMember même sans appartenance org : c'est cette
+    // purge, et elle seule, qui rend cet état inatteignable. Si elle saute, un
+    // ancien membre garde son accès PROJET tout en ayant perdu l'accès ORG.
+    it("la cascade a purgé les ProjectMember de Bob (invariant règle 6)", async () => {
+      const rows = await execSql(
+        `SELECT count(*) FROM "${TENANT_SCHEMA}"."ProjectMember"
+          WHERE "userId" = '${bobUserId}'`,
+      );
+      expect(rows.trim()).toBe("0");
+    });
+
     it("GET /api/orgs (liste) ne contient plus orgA", async () => {
       const res = await bob.fetch("/api/orgs");
       expect(res.status).toBe(200);
@@ -194,16 +233,30 @@ describe("Révocation utilisateur (RBAC #5)", () => {
     });
   });
 
-  describe("Re-login post-révocation", () => {
-    it("Bob peut toujours s'authentifier (User existe)", async () => {
-      const fresh = await loginAs(BOB_EMAIL, BOB_PASSWORD);
-      expect(fresh).toBeDefined();
+  describe("Post-révocation : le compte lui-même", () => {
+    // L'attente d'origine (« Bob peut toujours s'authentifier, User existe »)
+    // était DOUBLEMENT fausse :
+    //   - elle n'assertait que `expect(fresh).toBeDefined()`, or `loginAs`
+    //     renvoie TOUJOURS un objet Session — NextAuth répond 302 même en
+    //     échec. L'assertion ne pouvait rien détecter ;
+    //   - et surtout Bob n'existe plus : le retrait d'org SUPPRIME le compte
+    //     quand il ne reste aucune appartenance ET que le coffre perso est
+    //     vide, pour éviter un compte fantôme (orgs/[slug]/members/[userId]).
+    // On asserte donc la purge en base — la seule preuve non ambiguë.
+    it("le compte de Bob a été purgé (plus aucune appartenance + coffre vide)", async () => {
+      const rows = await execSql(
+        `SELECT count(*) FROM "${TENANT_SCHEMA}"."User" WHERE email = '${BOB_EMAIL}'`,
+      );
+      expect(rows.trim()).toBe("0");
     });
 
-    it("Re-loggué, Bob ne voit toujours pas orgA", async () => {
+    it("un login avec les creds de Bob ne donne aucune session (401)", async () => {
+      // 401 = non authentifié, et c'est le comportement ATTENDU : le compte a
+      // été purgé ci-dessus. Ce test attendait 403/404 (session valide mais
+      // sans droit) et échouait donc depuis toujours.
       const fresh = await loginAs(BOB_EMAIL, BOB_PASSWORD);
       const res = await fresh.fetch(`/api/orgs/${ORG_A_SLUG}`);
-      expect([403, 404]).toContain(res.status);
+      expect(res.status).toBe(401);
     });
   });
 });

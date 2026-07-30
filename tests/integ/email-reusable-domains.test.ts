@@ -9,7 +9,7 @@
 // pour ça qu'on ne part pas des `projectRef` du relais, qui sont un champ libre
 // et le slug figé à l'enregistrement).
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll , afterAll} from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import {
   Session,
@@ -21,6 +21,7 @@ import {
   TENANT_HOST,
 } from "./helpers/api";
 import { execSql } from "./helpers/db";
+import { cleanupFixtures } from "./helpers/cleanup";
 
 const SUFFIX = `${Date.now()}`;
 const DENIS_EMAIL = `denis-reuse-${SUFFIX}@test.local`;
@@ -134,6 +135,14 @@ beforeAll(async () => {
   const otherId = await seedProject(OTHER_ORG, orgBId);
   await seedEmailConfig(otherId, DOM_OTHER_ORG);
 });
+
+// Le tenant de test est PARTAGÉ et plafonné à 5 sièges : un fichier qui
+// sème un utilisateur sans le reprendre occupe un siège définitivement, et
+// finit par faire échouer les invitations des autres en 403.
+afterAll(async () => {
+  await cleanupFixtures(SUFFIX);
+});
+
 
 describe("domaines réutilisables — cloisonnement", () => {
   async function reusable(): Promise<string[]> {

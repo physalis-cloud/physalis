@@ -60,7 +60,11 @@ export async function POST(req: Request) {
     tag: dbUser.twoFactorTag,
   });
 
-  if (!(await verifyTotp(code, secret))) {
+  // §2.17 — pas d'`afterTimeStep` ici (aucun pas antérieur à l'enrôlement), mais on
+  // capture le `timeStep` pour INITIALISER la base anti-rejeu : sans ça, le code qui
+  // vient d'activer la 2FA resterait rejouable ~90 s sur un login/plugin.
+  const totpRes = await verifyTotp(code, secret);
+  if (!totpRes.valid) {
     logAction({
       action: "TWO_FACTOR_FAILURE",
       actor: { kind: "user", userId: user.id, email: user.email },
@@ -79,6 +83,7 @@ export async function POST(req: Request) {
     data: {
       twoFactorEnabled: true,
       backupCodes: hashes,
+      lastTotpTimeStep: totpRes.timeStep,
     },
   });
 

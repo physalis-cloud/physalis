@@ -3,6 +3,7 @@ import { withTenantSchema } from "@/lib/tenant";
 import { decrypt } from "@/lib/crypto";
 import { generatePassword } from "@/lib/generate-password";
 import { applyAccountRotationSuccess } from "./app-account-webhook";
+import { RotationDisabledError, rotationGateOpen } from "@/lib/rotation-gate";
 
 // Rotation DATABASE d'un AppAccount sur une DB MANAGÉE (Supabase / RDS / Neon…).
 // Deux cibles selon `rotationDbTarget` :
@@ -31,6 +32,13 @@ export async function rotateAppAccountDatabaseDirect(
         tag: true,
         // "role" (rôle Postgres → ALTER ROLE) ou "supabase_auth" (auth.users).
         rotationDbTarget: true,
+        // §2.24c — gate d'org (bloque un « Forcer » sur une org rotation-off).
+        project: {
+          select: {
+            rotationPaused: true,
+            organization: { select: { rotationFeatureEnabled: true } },
+          },
+        },
         // Le service backend lié porte la connexion DB + les creds admin DB
         // DÉDIÉS (dbUser + dbPw*), distincts des creds dashboard du service.
         service: {
@@ -49,6 +57,7 @@ export async function rotateAppAccountDatabaseDirect(
     }),
   );
   if (!acc) throw new Error(`[rotateAppAccountDatabaseDirect] compte ${accountId} introuvable`);
+  if (!rotationGateOpen(acc.project)) throw new RotationDisabledError();
   const svc = acc.service;
   if (!svc) throw new Error(`compte non lié à un service backend`);
   if (svc.dbType !== "POSTGRESQL") {

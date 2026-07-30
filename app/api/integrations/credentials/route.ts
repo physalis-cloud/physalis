@@ -31,6 +31,7 @@ import {
 } from "@/lib/integration-token";
 import { withTenantSchema } from "@/lib/tenant";
 import { logAction } from "@/lib/audit";
+import { machineFetchRateLimited } from "@/lib/machine-rate-limit";
 
 type ItemType = "secret" | "service" | "account";
 
@@ -59,6 +60,14 @@ export async function GET(req: Request) {
   if (!ctx) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Plafond par token (120/min) — cf. lib/machine-rate-limit.ts.
+  const limited = machineFetchRateLimited(req, {
+    tokenId: ctx.tokenId,
+    tokenName: ctx.tokenName,
+    tenantSlug: ctx.tenantSlug,
+  });
+  if (limited) return limited;
 
   const url = new URL(req.url);
   const projectSlug = url.searchParams.get("project");

@@ -19,6 +19,10 @@ import { readJson, requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { rateLimit } from "@/lib/rate-limit";
+import { hashShareToken, isShareTokenFormat } from "@/lib/share-token";
+import { tenantBaseUrl } from "@/lib/app-url";
+import { esc } from "@/lib/email-layout";
+import { routing } from "@/i18n/routing";
 
 export const runtime = "nodejs";
 
@@ -34,7 +38,7 @@ type Body = {
 export async function POST(req: Request, { params }: Params) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user } = userRes;
+  const { user, tenantSlug } = userRes;
   const { id } = await params;
 
   const limited = rateLimit(
@@ -55,11 +59,7 @@ export async function POST(req: Request, { params }: Params) {
       { status: 400 },
     );
   }
-  if (
-    typeof body.url !== "string" ||
-    !body.url.startsWith("http") ||
-    body.url.length > 2048
-  ) {
+  if (typeof body.url !== "string" || body.url.length > 2048) {
     return NextResponse.json({ error: "valid url required" }, { status: 400 });
   }
 
@@ -76,11 +76,46 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
+  // §2.22 — l'URL n'était validée que par `startsWith("http")`, sans AUCUN lien
+  // avec le share, puis interpolée non échappée : un utilisateur (même un compte
+  // FREE auto-créé) envoyait un mail signé par notre DKIM pointant vers un host
+  // arbitraire (phishing) + injectait du markup. On VÉRIFIE que l'URL désigne
+  // bien CE share (token → hash — impossible à forger sans le vrai token), puis
+  // on RECONSTRUIT l'origine côté serveur (`tenantBaseUrl`, dérivée de la session,
+  // non forgeable — cf. §2.11) en ne conservant QUE le fragment (la clé, jamais
+  // reconstructible côté serveur : design zero-knowledge).
+  let safeUrl: string;
+  try {
+    const parsed = new URL(body.url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const token = segments.at(-1) ?? "";
+    if (!isShareTokenFormat(token) || hashShareToken(token) !== share.tokenHash) {
+      throw new Error("url does not match this share");
+    }
+    const localeSeg = segments.at(-3); // forme canonique : /<locale>/share/<token>
+    const locale = (routing.locales as readonly string[]).includes(
+      localeSeg ?? "",
+    )
+      ? localeSeg
+      : routing.defaultLocale;
+    safeUrl = `${tenantBaseUrl(tenantSlug)}/${locale}/share/${token}${parsed.hash}`;
+  } catch {
+    return NextResponse.json(
+      { error: "url does not match this share" },
+      { status: 400 },
+    );
+  }
+
   const recipient = body.email.trim().toLowerCase();
   const expires = share.expiresAt.toLocaleString("fr-FR", {
     timeZone: "Europe/Paris",
   });
-  const label = share.title?.trim() || "Sans titre";
+  // Sanitize : retire les caractères de contrôle (dont newline → injection de
+  // sujet) et borne la longueur ; `label` est interpolé dans le texte, le HTML
+  // (échappé) et le sujet.
+  const label =
+    share.title?.replace(/\p{Cc}/gu, " ").trim().slice(0, 200) ||
+    "Sans titre";
   const hasPassword = share.passwordHash !== null;
 
   const text = [
@@ -89,7 +124,7 @@ export async function POST(req: Request, { params }: Params) {
     `${user.email} t'a partagé un secret via Physalis : "${label}".`,
     ``,
     `Ouvre ce lien à usage unique avant ${expires} :`,
-    body.url,
+    safeUrl,
     ``,
     hasPassword
       ? `Un mot de passe te sera demandé. ${user.email} te l'a (ou va te le) communiquer via un autre canal.`
@@ -102,10 +137,10 @@ export async function POST(req: Request, { params }: Params) {
     <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
       <h2 style="margin:0 0 16px;font-size:20px">Un secret t'a été partagé</h2>
       <p style="margin:0 0 12px">
-        <strong>${user.email}</strong> t'a partagé "<strong>${label}</strong>" via Physalis.
+        <strong>${esc(user.email)}</strong> t'a partagé "<strong>${esc(label)}</strong>" via Physalis.
       </p>
-      <p style="margin:0 0 16px">Ouvre ce lien à usage unique avant <strong>${expires}</strong> :</p>
-      <a href="${body.url}"
+      <p style="margin:0 0 16px">Ouvre ce lien à usage unique avant <strong>${esc(expires)}</strong> :</p>
+      <a href="${esc(safeUrl)}"
          style="display:inline-block;margin:0 0 16px;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500;word-break:break-all">
         Voir le secret
       </a>

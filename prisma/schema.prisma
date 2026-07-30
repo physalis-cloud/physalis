@@ -38,6 +38,9 @@ model User {
   twoFactorTag         String?
   /// 8 codes de secours bcrypt-hashés. Vidé à chaque rotation 2FA.
   backupCodes          String[]          @default([])
+  /// §2.17 — dernier pas de temps TOTP consommé (RFC 6238 §5.2, anti-rejeu).
+  /// Un code n'est accepté que si son timeStep > lastTotpTimeStep.
+  lastTotpTimeStep     Int?
   projects             ProjectMember[]
   organizations        OrgMember[]
   invitationsSent      Invitation[]      @relation("invitedBy")
@@ -60,6 +63,18 @@ model User {
   /// date est rejeté par requireUser(). Posé au reset password / 2FA disable
   /// pour couper les sessions existantes. NULL = jamais invalidé (legacy).
   sessionsValidFrom    DateTime?
+  /// Suppression de compte MEMBRE (self-service) — à ne pas confondre avec la
+  /// suppression du compte CLIENT, qui vit sur `admin.clients`. Ici le tenant
+  /// survit : seule cette ligne `User` et ses dépendances en Cascade (coffre
+  /// perso, appartenances, tokens) disparaissent à `purgeAt`. C'est
+  /// `deletionRequestedAt` — et non un statut — qui fait foi et déclenche le
+  /// verrou d'espace. NULL hors processus.
+  deletionRequestedAt  DateTime?
+  purgeAt              DateTime?
+  /// Dernier export RGPD réussi (/api/me/export). Alimente le compteur
+  /// « X membres sur Y ont récupéré leurs données » et la règle du plancher
+  /// côté owner ; seul un export POSTÉRIEUR à la demande compte.
+  dataExportedAt       DateTime?
   /// Identités externes liées (social login / SSO perso, Phase F).
   socialIdentities     UserSocialIdentity[]
 }
@@ -450,6 +465,9 @@ model Invitation {
   email          String
   organizationId String
   role           OrgRole   @default(MEMBER)
+  /// #2 — accès projet pré-attribués à l'invitation (appliqués à l'acceptation).
+  /// Tableau JSON `[{ projectId, role }]`. Null = aucun accès projet pré-set.
+  projectAccess  Json?
   tokenHash      String    @unique
   expiresAt      DateTime
   acceptedAt     DateTime?
@@ -1260,6 +1278,14 @@ enum AccessAction {
   SSO_LOGIN_SUCCESS
   SSO_LOGIN_FAILURE
   MEMBER_SSO_PROVISIONED
+  // §2.25a — export .env en masse (tous les secrets d'un env déchiffrés d'un coup).
+  SECRET_EXPORT
+  /// Suppression de compte MEMBRE (self-service). Ces entrées survivent à
+  /// la suppression de l'user (actorUserId → SetNull, actorUserEmail
+  /// dénormalisé) : c'est la seule trace qu'il en reste.
+  USER_ACCOUNT_DELETE_REQUESTED
+  USER_ACCOUNT_DELETE_CANCELLED
+  USER_ACCOUNT_DELETED
 }
 
 /// Demande de secret externe (Phase 9). Un user DEV+ crée la demande,

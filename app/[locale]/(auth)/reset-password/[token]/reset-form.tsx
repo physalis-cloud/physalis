@@ -38,8 +38,9 @@ export default function ResetForm({ token }: { token: string }) {
     <form action={action} className="login-form">
       <input type="hidden" name="token" value={token} />
       <div className="field">
-        <label>{t("newPasswordLabel")}</label>
+        <label htmlFor="reset-password">{t("newPasswordLabel")}</label>
         <input
+          id="reset-password"
           type="password"
           name="password"
           required
@@ -48,11 +49,13 @@ export default function ResetForm({ token }: { token: string }) {
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          className="input"
         />
       </div>
       <div className="field">
-        <label>{t("confirmPasswordLabel")}</label>
+        <label htmlFor="reset-confirm">{t("confirmPasswordLabel")}</label>
         <input
+          id="reset-confirm"
           type="password"
           name="confirm"
           required
@@ -60,6 +63,7 @@ export default function ResetForm({ token }: { token: string }) {
           minLength={12}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
+          className="input"
         />
       </div>
       <p className="help" style={{ fontSize: 13 }}>

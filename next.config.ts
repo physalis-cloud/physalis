@@ -15,6 +15,17 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=()",
   },
+  {
+    key: "Strict-Transport-Security",
+    // Posé par l'APP et pas seulement par le reverse proxy. Deux raisons :
+    //   • le self-host tourne sans NPM devant — sans ça, une instance
+    //     auto-hébergée n'a aucun HSTS ;
+    //   • défense en profondeur si la config du proxy dérive.
+    // Inoffensif en dev : RFC 6797 §7.2 impose aux navigateurs d'IGNORER cet
+    // en-tête reçu sur une connexion non sécurisée. Un doublon avec celui du
+    // proxy est sans effet (le premier reçu fait foi, même valeur).
+    value: "max-age=63072000; includeSubDomains; preload",
+  },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
   {

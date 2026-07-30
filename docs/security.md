@@ -107,6 +107,25 @@ Règles critiques :
 - OrgMEMBER → accès projet uniquement si `ProjectMember` explicite.
 - `User.role = ADMIN` → dieu mode global, **sauf** sur les coffres personnels (volontaire — l'admin ne peut pas lire les entrées privées des autres users).
 
+**Barrière `ProjectMember.hidden` — INVARIANT.** `hidden = true` sur une ligne
+`ProjectMember` est une **barrière d'accès** (règle 2 de `requireProjectMember` →
+**403**), pas un confort d'affichage : elle masque un projet à un membre donné
+tout en préservant sa ligne (donc son historique de rôle). L'invariant : **tout
+calcul d'accès projet doit dériver du prédicat central
+`accessibleProjectsWhere(orgId, userId, orgRole)` ([lib/api.ts](../lib/api.ts)),
+miroir strict des 6 règles de `requireProjectMember`** — jamais re-dériver
+l'autorisation à la main depuis `ProjectMember` (`members[0]?.role`,
+`members: { some }`) en oubliant `hidden`. Sémantique par rôle : OrgADMIN/OWNER
+(et platform-admin) **ignorent** `hidden` (règle 1) ; une ligne masquée **bloque**
+(règle 2) **sans** retomber sur l'EDITOR implicite du DEV (règles 2 > 4).
+
+> Pourquoi l'invariant est fragile : `middleware.ts` **exclut `/api`** (aucun
+> goulot central), `hidden` n'existe nulle part dans `lib/` hors `lib/api.ts`, et
+> `accessibleProjectsWhere` — qui se déclare « source unique » — n'avait qu'un
+> seul appelant. Historiquement une dizaine de surfaces re-dérivaient le prédicat
+> sans lire la barrière (cf. §3.14.6). Toute **nouvelle** surface d'accès projet
+> doit passer par `requireProjectMember`/`requireEnvironment`/`accessibleProjectsWhere`.
+
 ### 2.7 Isolation multi-tenant (✅)
 
 - Schema-per-tenant `client_<slug>`. Client Prisma `prisma` (avec extension) **throw** si pas de `tenantSlug` dans AsyncLocalStorage — aucun fallback silencieux sur `public`.
@@ -226,13 +245,14 @@ Secret TOTP chiffré AES-256-GCM. 8 backup codes 64 bits bcrypt one-shot. Single
 Endpoint consommé par N8n pour lire/écrire la valeur d'un secret DB avant/après rotation.
 
 - **Auth** : `Authorization: Bearer <CRON_SECRET_ADMIN>` (tier admin) — comparaison `timingSafeEqual` via le helper partagé `requireCronAuth(req, "admin")` (`lib/cron-auth.ts`, Phase 1 cron-secret-hardening). Header standardisé pour tous les endpoints opérateur.
+- **Origine privée tailnet** (`requirePrivateOrigin`, actif si `CRON_PRIVATE_ONLY=1`) : rejette une requête arrivée par l'edge Cloudflare public sauf IP Tailscale. **GET *et* PATCH** l'exigent désormais (fix 2026-07-18) — auparavant seul le GET l'appliquait, laissant l'**écriture destructive cross-tenant** (`PATCH`, écrase la valeur d'un secret) joignable depuis l'edge public avec le seul bearer. Une écriture doit être au moins aussi gardée que la lecture.
 - **Pas de rate-limit IP** — accès opérateur uniquement (N8n interne). `CRON_SECRET_ADMIN` doit être ≥ 32 bytes hex aléatoires.
 - **Réponses d'erreur génériques** (fix 2026-05-15) : les blocs catch (Prisma et déchiffrement) retournent `{ error: "Internal server error" }` sans `err.message`. L'erreur brute reste dans `console.error` (opérateur uniquement).
 - **ROTATION_HMAC_KEY** : clé critique — si elle fuite, un attaquant peut forger des callbacks N8n et écrire n'importe quelle valeur dans un secret DB via `PATCH`. À traiter avec la même rigueur que `ENCRYPTION_KEY`. Voir §3.14.
 
 ### 3.10 Tokens d'intégration — UserToken / OrgToken (✅)
 
-- **UserToken** (`sv_user_<hex>`) : scopé user, multi-projets via membership. Expiration 1-365j obligatoire, max 20 actifs/user. RBAC : vérification `ProjectMember` pour chaque accès. Quota DEV : max 10, expiration ≤ 90j, projets ⊆ ses memberships.
+- **UserToken** (`sv_user_<hex>`) : scopé user, multi-projets via membership (PAT — agit AU NOM de l'user). Expiration OPTIONNELLE (1-365j, `null` = jamais), max 20 actifs/user. RBAC : vérification `ProjectMember` (non masqué) pour chaque accès. ⚠️ PAS de quota DEV (contrairement à OrgToken) : un UserToken n'a pas de niveau d'émission. Survit au reset de mot de passe (sémantique PAT, cf. failles §2.20a) ; le vecteur « session volée → token permanent » se ferme par ré-auth à l'émission (à faire).
 - **OrgToken** (`sv_org_<hex>`) : scopé org, scopes `SECRETS_READ / SERVICES_READ / ACCOUNTS_READ / PROJECTS_LIST`. `allProjects: Boolean` + `allowedProjectIds: String[]`. Max 50 actifs/org. Scope enforced sur chaque appel `/api/integrations/credentials`.
 - Tous deux indexés dans `admin.token_index` pour résolution cross-tenant. Audit `INTEGRATION_CREDENTIALS_FETCH` par appel.
 - **OrgToken RBAC DEV** : gardé dans [lib/org-token-rbac.ts](../lib/org-token-rbac.ts) — pas de `allProjects`, projets ⊆ ses memberships, expiration ≤ 90j, quota 10/user. 13 tests unit dédiés.
@@ -283,15 +303,13 @@ Scan SCA des dépendances en CI. Les packages suivants sont critiques pour la s�
 
 **Livré** : job `npm-audit` dans [.github/workflows/security.yml](../.github/workflows/security.yml) — `npm audit --omit=dev --audit-level=high` sur chaque push (`main`/`staging`) et PR, **bloque sur high/critical**. Cible les dépendances de production (runtime) pour rester actionnable ; les advisories dev-only ne bloquent pas. Complémentaire des scans DAST (§3.16) : SCA = vulnérabilités des packages, DAST = app en exécution.
 
-#### 3.14.3 Session fixation après changement de mot de passe / révocation 2FA (⚠️ non vérifié)
+#### 3.14.3 Invalidation des sessions après changement de mot de passe / révocation 2FA (✅ — livré ; trou PluginToken fermé 2026-07-18)
 
-NextAuth v5 émet des JWT sessionToken avec expiration. Après un changement de mot de passe ou une révocation 2FA, les JWT existants restent cryptographiquement valides jusqu'à leur expiration naturelle — il n'existe pas de mécanisme de révocation JWT intrinsèque.
+NextAuth v5 émet des JWT sessionToken stateless — pas de révocation JWT intrinsèque. Le mécanisme livré : chaque JWT porte son instant d'émission (`loginAt`, ms epoch) et l'utilisateur porte une borne `User.sessionsValidFrom` ; un token émis **avant** cette borne est périmé (`isSessionInvalidated`, [lib/session-validity.ts](../lib/session-validity.ts)). Le reset de mot de passe et le 2FA-disable posent `sessionsValidFrom = now` → toutes les sessions web antérieures sont coupées.
 
-**Non vérifié** : est-ce que l'app invalide explicitement les sessions actives (via `sessionToken` en DB ou rotation de `NEXTAUTH_SECRET`) après ces opérations ?
+**Trou identifié et corrigé (2026-07-18)** : les **PluginTokens** (extension navigateur, `sv_plugin_*`) — une session au même titre qu'un JWT web — n'étaient **pas** soumis à cette borne. `validatePluginToken` vérifiait format/hash/`revokedAt`/`expiresAt`, jamais `sessionsValidFrom`. Un token volé survivait au reset censé l'évincer (jusqu'à 8h de TTL) — **pire**, le provider Credentials `pluginToken` ([lib/auth.ts](../lib/auth.ts)) l'échangeait contre une **session web fraîche** (`loginAt = now > sessionsValidFrom` → non invalidée). Le reset offrait une session au lieu de l'expulser. Il n'existait **aucune** révocation en masse des PluginTokens.
 
-**Risque** : si un attaquant vole un sessionToken avant que la victime change son mot de passe, il garde l'accès jusqu'à l'expiration du JWT.
-
-**Action recommandée** : vérifier [lib/auth.ts](../lib/auth.ts) et les routes `/api/auth/reset-password`, `/api/user/2fa/disable`. Si pas d'invalidation, documenter la fenêtre de risque et envisager une table `SessionRevocation` ou un champ `sessionVersion` sur `User`.
+**Fix** : `validatePluginToken` rejette le token si `createdAt < user.sessionsValidFrom` (même borne que les JWT web ; `createdAt` = instant d'émission du token, équivalent du `loginAt`). Le provider Credentials appelant `validatePluginToken` en premier, **les deux vecteurs** (API plugin directe + échange NextAuth) tombent d'un coup. Test rouge→vert dans `tests/integ/plugin.test.ts`.
 
 #### 3.14.4 ENCRYPTION_KEY re-keying (✅ — script + procédure livrés 2026-06-24)
 
@@ -331,6 +349,22 @@ Le middleware `routing locale` ([middleware.ts](../middleware.ts), cf. `physalis
 - Fix client-side dans `login-form.tsx` qui préfixe `data.url` retourné par `/api/login-resolve` avant `window.location.href`, defense-in-depth
 
 **Limite du mitigant** : un futur `<Link>` ou `router.push("/foo")` ajouté par erreur (oubli de l'import depuis `@/i18n/navigation`) recrée le bug silencieusement. Pas de garde-fou compilation/lint — la convention est documentée mais reposée sur la discipline. Cf. `todo_v2.md → i18n — root cause cross-domain` pour le fix à la source (utiliser `x-forwarded-host` côté middleware).
+
+#### 3.14.6 Audit RBAC — famille « barrière `ProjectMember.hidden` contournée » (✅ — livré 2026-07-18)
+
+Audit d'une **classe de failles d'autorisation** : le prédicat d'accès projet re-dérivé à la main depuis la table `ProjectMember` **sans lire la barrière `hidden`** (cf. l'invariant en §2.6). Une dizaine de surfaces le violaient ; plusieurs permettaient de **lire des secrets déchiffrés** ou d'**écrire dans un projet interdit** (élévation de privilège, pas simple divulgation).
+
+Surfaces corrigées :
+- **`/api/me/export`** (RGPD) — le seul endpoint qui déchiffre par conception : un membre masqué recevait tous les secrets du projet **en clair** en un GET.
+- **`/api/plugin/match`** — l'extension autofillait les credentials déchiffrés d'un projet masqué sur match de domaine (deux chemins : requête directe + `getAccessibleCollectionIds`).
+- **Coffres d'équipe** (`lib/vault-access.ts` : `requireProjectCollectionAccess`, `requireProjectScope`) + vecteurs d'écriture (`plugin/vault` auto-save, `vault/entries/[id]/move` cas `team_project`/`project_account`, `vault-entry-handlers`) → injection de credentials dans un projet barré. Énumération : `vault/destinations`.
+- **`/api/secret-requests/[id]/import`** — écrivait un secret dans le projet cible en ne vérifiant que l'org-role ; corrigé en passant par `requireEnvironment(EDITOR)` (garde d'écriture standard).
+- **Tokens d'intégration / listings** (lot initial : `org-tokens`, `integrations/*`, `orgs/[slug]/projects`) + création de `accessibleProjectsWhere`.
+- **Page d'audit projet** (défense en profondeur — l'API refusait déjà la donnée).
+
+Durcissements connexes du même cycle : invalidation PluginToken au reset (§3.14.3), garde tailnet PATCH `secret-value` (§3.9), **type-confusion `expiresInDays` → token DEV éternel** (une valeur non numérique passait la garde `> 90` puis laissait `expiresAt` null ; corrigé par normalisation + durcissement de `validateDevTokenCreation`), rôle **`ADMIN_DEV` rendu assignable** (absent des `VALID_ROLES` → rôle mort).
+
+**0 migration** (code-only). Chaque faille exploitable est verrouillée par un test **rouge→vert** doublé d'un test anti sur-restriction. Faux positifs écartés : `OrgMember`/`TeamVaultMember` n'ont pas de colonne `hidden`.
 
 ### 3.15 Module Email (Physalis Email) (✅ — revu 2026-05-30)
 
@@ -377,7 +411,7 @@ Exécutés automatiquement à chaque push sur `staging`, après le déploiement,
 Avant chaque livraison touchant à l'auth, au chiffrement, ou aux routes API :
 
 1. Vérifier qu'aucune valeur de secret ne transite par les logs (`grep "console" lib/ app/api/`).
-2. Confirmer que les nouvelles routes appellent `requireUser` / `requireOrgMember` / `requireProjectMember` avec le bon rôle — ou `validateIntegrationToken` pour les endpoints intégration.
+2. Confirmer que les nouvelles routes appellent `requireUser` / `requireOrgMember` / `requireProjectMember` avec le bon rôle — ou `validateIntegrationToken` pour les endpoints intégration. **Toute dérivation d'accès projet faite à la main (query `ProjectMember` : `members[0]?.role`, `members: { some }`) doit lire la barrière `hidden` — préférer `requireProjectMember`/`requireEnvironment` ou le prédicat `accessibleProjectsWhere` (cf. §2.6, §3.14.6).**
 3. Vérifier que les nouveaux endpoints opérateur appellent bien le helper partagé `requireCronAuth(req, tier)` (`lib/cron-auth.ts`) avec le bon tier (`"report"` pour le bas-privilège, `"admin"` sinon) — jamais de vérif inline copiée-collée.
 4. Lancer `npm test && npm run test:integ` (docker compose up -d au préalable). Tout vert avant merge.
 5. Lancer `npm audit --audit-level=high` — zéro high/critical avant merge. (En attendant l'intégration CI, cf. §3.14.2.)

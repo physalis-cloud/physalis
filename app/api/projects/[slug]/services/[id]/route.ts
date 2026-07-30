@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { readJson, requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { normalizeTags, TAG_VALIDATION_ERROR } from "@/lib/tags";
+import { validateHookUrlSyntax } from "@/lib/safe-fetch";
 
 type Params = { params: Promise<{ slug: string; id: string }> };
 
@@ -132,6 +133,13 @@ export async function PATCH(req: Request, { params }: Params) {
   if ("rotationHookToken" in body) data.rotationHookToken = body.rotationHookToken?.trim() || null;
   if ("rotationExecMode" in body) {
     data.rotationExecMode = body.rotationExecMode === "DIRECT" ? "DIRECT" : body.rotationExecMode === "AGENT" ? "AGENT" : null;
+  }
+  // Passage explicite en DIRECT avec une URL de hook → refus des cibles internes
+  // (garde SSRF, cf. docs/failles.md §6). L'enforcement autoritaire reste
+  // `safeFetchHook` à l'appel ; ceci est un retour clair à la configuration.
+  if (data.rotationExecMode === "DIRECT" && typeof data.rotationWebhookUrl === "string") {
+    const urlError = validateHookUrlSyntax(data.rotationWebhookUrl);
+    if (urlError) return NextResponse.json({ error: urlError }, { status: 400 });
   }
 
   // Cible DB de rotation des comptes liés (service base de données managée).

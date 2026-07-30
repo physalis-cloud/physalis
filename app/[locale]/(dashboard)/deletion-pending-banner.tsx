@@ -7,8 +7,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "@/i18n/navigation";
-import { RiAlarmWarningLine } from "@remixicon/react";
+import { RiAlarmWarningLine, RiDownloadLine } from "@remixicon/react";
 import { useTranslations } from "next-intl";
+import PurgeNowDialog from "./purge-now-dialog";
 
 export default function DeletionPendingBanner({
   isOwner,
@@ -21,6 +22,7 @@ export default function DeletionPendingBanner({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
 
   const purgeDate = purgeAtIso
     ? new Date(purgeAtIso).toLocaleDateString(undefined, {
@@ -77,17 +79,51 @@ export default function DeletionPendingBanner({
         </div>
         {error && <div style={{ fontSize: 12, marginTop: 6 }}>{error}</div>}
       </div>
+      {/* Récupération des données — offerte à TOUT LE MONDE, pas seulement à
+          l'owner. Sans elle, le bandeau annonçait aux membres la destruction de
+          leur coffre en les renvoyant vers le propriétaire, sans leur donner le
+          moindre moyen d'emporter leurs données. L'export est auto-scopé :
+          chacun n'obtient que ce à quoi il a accès. */}
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        // Même motif que account/export-button.tsx : le serveur pose
+        // Content-Disposition, le navigateur gère le download. Pas un <Link>,
+        // ce n'est pas une navigation de page.
+        onClick={() => {
+          window.location.href = "/api/me/export";
+        }}
+        style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}
+      >
+        <RiDownloadLine size={16} aria-hidden />
+        {t("downloadBtn")}
+      </button>
       {isOwner && (
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          disabled={pending}
-          onClick={reactivate}
-          style={{ flexShrink: 0 }}
-        >
-          {pending ? t("reactivatingBtn") : t("reactivateBtn")}
-        </button>
+        <>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={pending}
+            onClick={reactivate}
+            style={{ flexShrink: 0 }}
+          >
+            {pending ? t("reactivatingBtn") : t("reactivateBtn")}
+          </button>
+          {/* Raccourci vers l'irréversible : gardé par le plancher côté
+              serveur, qui protège les membres n'ayant pas encore récupéré
+              leurs données. */}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={pending}
+            onClick={() => setPurgeOpen(true)}
+            style={{ flexShrink: 0 }}
+          >
+            {t("purgeNow.openBtn")}
+          </button>
+        </>
       )}
+      {purgeOpen && <PurgeNowDialog onClose={() => setPurgeOpen(false)} />}
     </div>
   );
 }

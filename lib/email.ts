@@ -13,6 +13,15 @@
  * NEVER log secrets, only invitation links.
  */
 
+import {
+  renderEmail,
+  esc,
+  p,
+  panel,
+  noticePanel,
+  dataRows,
+} from "./email-layout";
+
 export type EmailMessage = {
   to: string;
   subject: string;
@@ -58,9 +67,10 @@ async function mailgunTransport(): Promise<Transport> {
 function consoleTransport(): Transport {
   return {
     async send(msg) {
-      console.log(
-        `[email:stub] to=${msg.to} subject="${msg.subject}"\n${msg.text}`,
-      );
+      // §2.25e — ne JAMAIS imprimer msg.text : il porte les liens bruts
+      // (resetUrl → sv_reset_<64hex>, acceptUrl, requestUrl). On ne loggue que
+      // les métadonnées d'acheminement.
+      console.log(`[email:stub] to=${msg.to} subject="${msg.subject}"`);
     },
   };
 }
@@ -80,6 +90,20 @@ async function transport(): Promise<Transport> {
     // Brancher d'autres providers ici si besoin :
     // if (process.env.RESEND_API_KEY) cachedTransport = await resendTransport();
     // if (process.env.SMTP_URL)       cachedTransport = await smtpTransport();
+    //
+    // §2.25e — le stub stdout n'envoie RIEN. Le laisser dégrader silencieusement
+    // en prod = mails transactionnels (reset, invitation, secret request) perdus
+    // sans le moindre signal. On refuse de basculer sur le stub hors dev : une
+    // mauvaise conf email doit échouer bruyamment, pas fuir.
+    if (
+      process.env.NODE_ENV !== "development" &&
+      process.env.NODE_ENV !== "test"
+    ) {
+      throw new Error(
+        "Aucun provider email configuré (EMAIL_MAILGUN_API_KEY/DOMAIN). Le " +
+          "transport stdout est interdit hors développement — refus d'envoyer.",
+      );
+    }
     cachedTransport = consoleTransport();
   }
   return cachedTransport;
@@ -118,23 +142,14 @@ export async function sendInvitationEmail(
     `Si vous n'attendiez pas cette invitation, ignorez ce message.`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Invitation à rejoindre ${params.organizationName}</h2>
-      <p style="margin:0 0 12px">
-        <strong>${params.inviterEmail}</strong> vous invite à rejoindre l'organisation
-        <strong>${params.organizationName}</strong> sur Physalis.
-      </p>
-      <a href="${params.acceptUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Accepter l'invitation
-      </a>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        Ce lien expire le ${expires}.<br>
-        Si vous n'attendiez pas cette invitation, ignorez ce message.
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: `Invitation à rejoindre ${esc(params.organizationName)}`,
+    bodyHtml: p(
+      `<strong>${esc(params.inviterEmail)}</strong> vous invite à rejoindre l'organisation <strong>${esc(params.organizationName)}</strong> sur Physalis.`,
+    ),
+    cta: { label: "Accepter l'invitation", url: params.acceptUrl },
+    footerHtml: `Ce lien expire le ${esc(expires)}.<br>Si vous n'attendiez pas cette invitation, ignorez ce message.`,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -175,22 +190,14 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<void
     `L'équipe Physalis`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Bienvenue sur Physalis</h2>
-      <p style="margin:0 0 12px">
-        Le compte <strong>${params.clientName}</strong> a été créé avec succès
-        (offre <strong>${params.plan}</strong>).
-      </p>
-      <a href="${params.loginUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Accéder à mon espace
-      </a>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        ${trialLine}
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Bienvenue sur Physalis",
+    bodyHtml: p(
+      `Le compte <strong>${esc(params.clientName)}</strong> a été créé avec succès (offre <strong>${esc(params.plan)}</strong>).`,
+    ),
+    cta: { label: "Accéder à mon espace", url: params.loginUrl },
+    footerHtml: trialLine,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -233,23 +240,14 @@ export async function sendPasswordResetEmail(
     `Si vous n'êtes pas à l'origine de cette demande, ignorez ce message — votre mot de passe actuel reste valide.`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Réinitialisation du mot de passe</h2>
-      <p style="margin:0 0 12px">
-        Vous (ou quelqu'un d'autre) avez demandé la réinitialisation du mot de
-        passe pour ce compte sur <strong>Physalis</strong>.
-      </p>
-      <a href="${params.resetUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Définir un nouveau mot de passe
-      </a>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        Ce lien est valable jusqu'au ${expires} et ne peut être utilisé qu'une seule fois.<br>
-        Si vous n'êtes pas à l'origine de cette demande, ignorez ce message — votre mot de passe actuel reste valide.
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Réinitialisation du mot de passe",
+    bodyHtml: p(
+      `Vous (ou quelqu'un d'autre) avez demandé la réinitialisation du mot de passe pour ce compte sur <strong>Physalis</strong>.`,
+    ),
+    cta: { label: "Définir un nouveau mot de passe", url: params.resetUrl },
+    footerHtml: `Ce lien est valable jusqu'au ${esc(expires)} et ne peut être utilisé qu'une seule fois.<br>Si vous n'êtes pas à l'origine de cette demande, ignorez ce message — votre mot de passe actuel reste valide.`,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -297,26 +295,16 @@ export async function sendSecretRequestEmail(
     `Si vous n'attendiez pas cette demande, ignorez ce message.`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Demande de secret sécurisée</h2>
-      <p style="margin:0 0 12px">
-        <strong>${params.requesterEmail}</strong> (via Physalis) vous demande de partager :
-      </p>
-      <p style="margin:0 0 12px;padding:12px;background:#f5f5f5;border-radius:8px;font-weight:500">
-        ${params.label}
-      </p>
-      ${params.description ? `<p style="margin:0 0 12px;color:#4a5568">${params.description}</p>` : ""}
-      <a href="${params.requestUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Transmettre le secret
-      </a>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        🔐 Le secret est chiffré dans votre navigateur avant envoi — Physalis ne peut pas le lire.<br>
-        Ce lien expire le ${expires} et ne peut être utilisé qu'une seule fois.
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Demande de secret sécurisée",
+    bodyHtml: [
+      p(`<strong>${esc(params.requesterEmail)}</strong> (via Physalis) vous demande de partager :`),
+      panel(`<strong>${esc(params.label)}</strong>`),
+      params.description ? p(esc(params.description), { muted: true }) : "",
+    ].join(""),
+    cta: { label: "Transmettre le secret", url: params.requestUrl },
+    footerHtml: `🔐 Le secret est chiffré dans votre navigateur avant envoi — Physalis ne peut pas le lire.<br>Ce lien expire le ${esc(expires)}.`,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -353,24 +341,15 @@ export async function sendSecretReceivedEmail(
     `Si ce timing ne correspond pas à ce que vous attendiez, révoquez la demande sans la révéler.`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Secret reçu</h2>
-      <p style="margin:0 0 12px">
-        Le secret demandé pour <strong>« ${params.label} »</strong> vient d'être
-        transmis sur Physalis.
-      </p>
-      ${params.submitterIp ? `<p style="margin:0 0 12px;font-size:13px;color:#4a5568">IP du soumetteur : <code>${params.submitterIp}</code></p>` : ""}
-      <a href="${params.reviewUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Révéler le secret
-      </a>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        Si ce timing ne correspond pas à ce que vous attendiez, révoquez la
-        demande sans la révéler.
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Secret reçu",
+    bodyHtml: [
+      p(`Le secret demandé pour <strong>« ${esc(params.label)} »</strong> vient d'être transmis sur Physalis.`),
+      params.submitterIp ? dataRows([["IP du soumetteur :", esc(params.submitterIp)]]) : "",
+    ].join(""),
+    cta: { label: "Révéler le secret", url: params.reviewUrl },
+    footerHtml: `Si ce timing ne correspond pas à ce que vous attendiez, révoquez la demande sans la révéler.`,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -418,23 +397,17 @@ export async function sendShareConsumedEmail(
     `Si ce n'est pas vous (ou la personne à qui vous l'avez envoyé), considerez le contenu comme compromis et changez-le si besoin.`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Partage consommé</h2>
-      <p style="margin:0 0 12px">
-        Votre partage <strong>"${label}"</strong> vient d'être ouvert sur Physalis.
-      </p>
-      <table style="margin:16px 0;font-size:14px;color:#4a5568">
-        <tr><td style="padding:4px 12px 4px 0">Créé le :</td><td>${created}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0">Consommé le :</td><td>${consumed}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0">Depuis l'IP :</td><td><code>${ip}</code></td></tr>
-      </table>
-      <p style="margin:16px 0 0;font-size:13px;color:#718096">
-        Si ce n'est pas vous (ou la personne destinataire), considérez le
-        contenu comme compromis et changez-le si besoin.
-      </p>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Partage consommé",
+    bodyHtml:
+      p(`Votre partage <strong>"${esc(label)}"</strong> vient d'être ouvert sur Physalis.`) +
+      dataRows([
+        ["Créé le :", esc(created)],
+        ["Consommé le :", esc(consumed)],
+        ["Depuis l'IP :", esc(ip)],
+      ]),
+    footerHtml: `Si ce n'est pas vous (ou la personne destinataire), considérez le contenu comme compromis et changez-le si besoin.`,
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -487,26 +460,14 @@ export async function sendCheckoutCompletedEmail(
     `L'équipe Physalis`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Abonnement activé</h2>
-      <p style="margin:0 0 12px">
-        Votre abonnement Physalis <strong>${params.planLabel.toUpperCase()}</strong>
-        est maintenant actif pour <strong>${params.clientName}</strong>.
-      </p>
-      <div style="margin:16px 0;padding:12px 16px;background:#f5f3ef;border-radius:8px;font-size:14px">
-        <strong>Tarif de base :</strong> ${priceLabel}/mois (hors add-ons éventuels).
-      </div>
-      <p style="margin:0 0 12px;font-size:13px;color:#718096">
-        Stripe vous a envoyé séparément le reçu de paiement détaillé avec
-        le montant exact et le lien pour télécharger votre facture.
-      </p>
-      <a href="${params.accountUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Gérer mon abonnement
-      </a>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Abonnement activé",
+    bodyHtml:
+      p(`Votre abonnement Physalis <strong>${esc(params.planLabel.toUpperCase())}</strong> est maintenant actif pour <strong>${esc(params.clientName)}</strong>.`) +
+      panel(`<strong>Tarif de base :</strong> ${esc(priceLabel)}/mois (hors add-ons éventuels).`) +
+      p(`Stripe vous a envoyé séparément le reçu de paiement détaillé avec le montant exact et le lien pour télécharger votre facture.`, { muted: true }),
+    cta: { label: "Gérer mon abonnement", url: params.accountUrl },
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -595,45 +556,28 @@ export async function sendDowngradeFreeEmail(
   const text = lines.join("\n");
 
   const overageBlockHtml = inOverage
-    ? `
-      <div style="margin:16px 0;padding:14px 18px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;color:#78350f">
-        <strong>Votre compte est en overage</strong>
-        <ul style="margin:8px 0 0 18px;padding:0;font-size:14px">
-          <li>Création de nouvelles organisations / utilisateurs bloquée.</li>
-          <li>Déploiements automatiques (GitHub Actions OIDC) désactivés sur les organisations excédentaires (l'organisation principale reste autorisée).</li>
-        </ul>
-        <p style="margin:8px 0 0;font-size:13px">
-          Vos données sont conservées. Re-souscrivez à tout moment pour tout réactiver.
-        </p>
-      </div>
-    `
-    : `
-      <p style="margin:8px 0;font-size:14px;color:#14532d">
-        Votre usage rentre dans les quotas FREE. Aucune restriction.
-      </p>
-    `;
+    ? noticePanel(
+        `<strong>Votre compte est en overage</strong>` +
+          `<ul style="margin:8px 0 0 18px;padding:0">` +
+          `<li>Création de nouvelles organisations / utilisateurs bloquée.</li>` +
+          `<li>Déploiements automatiques (GitHub Actions OIDC) désactivés sur les organisations excédentaires (l'organisation principale reste autorisée).</li>` +
+          `</ul>` +
+          `<div style="margin:8px 0 0;font-size:13px">Repassez sur une offre payante ou réduisez vos ressources pour lever ces limitations.</div>`,
+      )
+    : p("Vos ressources tiennent dans les quotas FREE — rien n'est bloqué.", { muted: true });
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">Passage au plan FREE confirmé</h2>
-      <p style="margin:0 0 12px">
-        Votre abonnement Physalis pour <strong>${params.clientName}</strong> a été
-        basculé sur le plan FREE. Votre carte ne sera plus prélevée.
-      </p>
-      <div style="margin:16px 0;padding:12px 16px;background:#f5f3ef;border-radius:8px;font-size:14px">
-        <strong>État de votre compte :</strong><br>
-        • ${params.orgsCount} organisation${params.orgsCount > 1 ? "s" : ""}
-        (quota FREE : ${FREE_MAX_ORGS})<br>
-        • ${params.usersCount} utilisateur${params.usersCount > 1 ? "s" : ""}
-        (quota FREE : ${FREE_MAX_USERS})
-      </div>
-      ${overageBlockHtml}
-      <a href="${params.accountUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Gérer mon abonnement
-      </a>
-    </div>
-  `;
+  const html = renderEmail({
+    title: "Passage au plan FREE confirmé",
+    bodyHtml:
+      p(`Votre abonnement Physalis pour <strong>${esc(params.clientName)}</strong> a été basculé sur le plan FREE. Votre carte ne sera plus prélevée.`) +
+      panel(
+        `<strong>État de votre compte :</strong><br>` +
+        `• ${params.orgsCount} organisation${params.orgsCount > 1 ? "s" : ""} (quota FREE : ${FREE_MAX_ORGS})<br>` +
+        `• ${params.usersCount} utilisateur${params.usersCount > 1 ? "s" : ""} (quota FREE : ${FREE_MAX_USERS})`,
+      ) +
+      overageBlockHtml,
+    cta: { label: "Gérer mon abonnement", url: params.accountUrl },
+  }, "fr");
 
   await sendEmail({
     to: params.to,
@@ -679,6 +623,11 @@ async function sendOverageReminderEmail(
     variant === "J7"
       ? `Cela fait une semaine que votre compte ${params.clientName} est en overage sur le plan FREE.`
       : `Cela fait un mois que votre compte ${params.clientName} est en overage sur le plan FREE.`;
+  // Variante HTML : `clientName` est choisi par le client, donc à échapper.
+  const leadH =
+    variant === "J7"
+      ? `Cela fait une semaine que votre compte ${esc(params.clientName)} est en overage sur le plan FREE.`
+      : `Cela fait un mois que votre compte ${esc(params.clientName)} est en overage sur le plan FREE.`;
 
   const text = [
     `Bonjour,`,
@@ -700,25 +649,18 @@ async function sendOverageReminderEmail(
     `L'équipe Physalis`,
   ].join("\n");
 
-  const html = `
-    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1a1a2e">
-      <h2 style="margin:0 0 16px;font-size:20px">${subject}</h2>
-      <p style="margin:0 0 12px">${lead}</p>
-      <div style="margin:16px 0;padding:12px 16px;background:#f5f3ef;border-radius:8px;font-size:14px">
-        <strong>Vos ressources actuelles :</strong><br>
-        • ${params.orgsCount} organisation${params.orgsCount > 1 ? "s" : ""}<br>
-        • ${params.usersCount} utilisateur${params.usersCount > 1 ? "s" : ""}
-      </div>
-      <p style="margin:0 0 12px;font-size:14px">
-        Toutes vos données sont conservées. Re-souscrivez à tout moment
-        pour tout réactiver instantanément.
-      </p>
-      <a href="${params.accountUrl}"
-         style="display:inline-block;margin:16px 0;padding:12px 24px;background:#1a1f35;color:#fff;border-radius:8px;text-decoration:none;font-weight:500">
-        Re-souscrire un plan
-      </a>
-    </div>
-  `;
+  const html = renderEmail({
+    title: subject,
+    bodyHtml:
+      p(leadH) +
+      panel(
+        `<strong>Vos ressources actuelles :</strong><br>` +
+        `• ${params.orgsCount} organisation${params.orgsCount > 1 ? "s" : ""}<br>` +
+        `• ${params.usersCount} utilisateur${params.usersCount > 1 ? "s" : ""}`,
+      ) +
+      p(`Tout est conservé en l'état, rien n'est supprimé.`),
+    cta: { label: "Gérer mon abonnement", url: params.accountUrl },
+  }, "fr");
 
   await sendEmail({
     to: params.to,

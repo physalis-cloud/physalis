@@ -22,11 +22,22 @@
 
 import {
   createRemoteJWKSet,
+  customFetch,
   jwtVerify,
   decodeJwt,
   errors as joseErrors,
 } from "jose";
 import type { JWTPayload } from "jose";
+import { safeFetchHook } from "./safe-fetch";
+
+// §2.25d — SSRF : l'issuer d'une connexion CI GitLab/Bitbucket est choisi par un
+// ADMIN_DEV et devient l'URL fetchée pour le JWKS (createRemoteJWKSet) ou la
+// discovery OIDC — AVANT toute vérification crypto (un JWT non signé suffit à
+// déclencher le fetch). Sans garde, `https://169.254.169.254/…` ou
+// `https://10.0.0.5:8200/…#` devient un oracle de joignabilité du réseau interne.
+// On route tous ces fetch par `safeFetchHook` (résout le DNS + rejette les plages
+// privées/loopback/link-local/CGNAT, revalide chaque redirection). En dev / self-host
+// interne, `allowInternalTargets()` (ROTATION_HOOK_ALLOW_INTERNAL) lève la garde.
 
 // ── Issuers connus (confiance intrinsèque) ────────────────────────────────
 const GITHUB_ISSUER = "https://token.actions.githubusercontent.com";
@@ -63,7 +74,10 @@ const discoveryCache = new Map<string, string>();
 function jwksForUrl(url: string) {
   let j = jwksByUrl.get(url);
   if (!j) {
-    j = createRemoteJWKSet(new URL(url));
+    // §2.25d — le fetch interne du JWKS par jose passe par notre fetch SSRF-safe.
+    j = createRemoteJWKSet(new URL(url), {
+      [customFetch]: (u, o) => safeFetchHook(u, o),
+    });
     jwksByUrl.set(url, j);
   }
   return j;
@@ -83,7 +97,8 @@ async function discoverJwksUri(issuer: string): Promise<string> {
   const key = stripTrailingSlash(issuer);
   const cached = discoveryCache.get(key);
   if (cached) return cached;
-  const res = await fetch(`${key}/.well-known/openid-configuration`);
+  // §2.25d — fetch SSRF-safe (l'issuer est attaquant-contrôlé pour bitbucket).
+  const res = await safeFetchHook(`${key}/.well-known/openid-configuration`, {});
   if (!res.ok) throw new Error(`discovery ${res.status}`);
   const cfg = (await res.json()) as { jwks_uri?: unknown };
   if (typeof cfg.jwks_uri !== "string" || !cfg.jwks_uri) {
@@ -153,6 +168,9 @@ export type VerifyError =
   | "wrong_audience"
   | "missing_claims"
   | "unparseable_ref"
+  /** Le ref n'est pas une BRANCHE (tag, PR merge-ref…). Les policies ne
+   *  s'expriment qu'en branches — cf. docs/failles.md §2.5. */
+  | "ref_not_branch"
   | "jwks_unreachable";
 
 /** Issuer dynamique de confiance, résolu depuis l'allowlist (DB). */
@@ -200,25 +218,47 @@ function mapJoseError(err: unknown): { ok: false; reason: VerifyError } {
   return { ok: false, reason: "bad_signature" };
 }
 
-// Branche depuis un ref GitHub : "refs/heads/x" | "refs/tags/x" ou `ref_name`.
+// ─── Extraction de la BRANCHE (et rien d'autre) ────────────────────────────
+//
+// Les policies ne s'expriment qu'en branches (l'UI n'a qu'un champ `branch`,
+// aucun concept de tag). Or les espaces de nommage branches et tags sont
+// DISTINCTS côté forge : par défaut les rulesets de branche GitHub ne couvrent
+// pas les tags, et la liste des tags protégés GitLab est vide. Confondre les
+// deux laissait un dev sans droit de push sur `main` pousser un TAG nommé
+// `main` → policy matchée → secrets de prod + clé SSH. Cf. docs/failles.md §2.5.
+//
+// On refuse donc tout ref qui n'est pas une branche (tag, ref de merge de PR…).
+// Le type vient du claim `ref_type` ("branch" | "tag", posé par GitHub ET
+// GitLab) ; à défaut on le dérive du préfixe de la forme longue. Si aucun des
+// deux ne permet de conclure → on refuse (fail-closed).
+
+// GitHub : `ref` est toujours la forme longue ("refs/heads/x" | "refs/tags/x"),
+// `ref_name` le nom court (ATTENTION : posé aussi pour un tag — il ne dit rien
+// du type, on ne peut donc pas s'en servir pour décider).
 function githubBranch(payload: JWTPayload): string | null {
-  const refName = str((payload as Record<string, unknown>).ref_name);
-  if (refName) return refName;
+  const p = payload as Record<string, unknown>;
   const ref = str(payload.ref);
+  const refType = str(p.ref_type);
+  const isBranch = refType ? refType === "branch" : ref.startsWith("refs/heads/");
+  if (!isBranch) return null;
+
+  const refName = str(p.ref_name);
+  if (refName) return refName;
   if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
-  if (ref.startsWith("refs/tags/")) return ref.slice("refs/tags/".length);
   return null;
 }
 
-// Branche depuis les claims GitLab : `ref` est déjà le nom court ; `ref_path`
-// est la forme longue "refs/heads/x".
+// GitLab : `ref` est le nom court, `ref_path` la forme longue "refs/heads/x".
 function gitlabBranch(payload: JWTPayload): string | null {
-  const ref = str((payload as Record<string, unknown>).ref);
+  const p = payload as Record<string, unknown>;
+  const refType = str(p.ref_type);
+  const refPath = str(p.ref_path);
+  const isBranch = refType ? refType === "branch" : refPath.startsWith("refs/heads/");
+  if (!isBranch) return null;
+
+  const ref = str(p.ref);
   if (ref && !ref.startsWith("refs/")) return ref;
-  const refPath = str((payload as Record<string, unknown>).ref_path);
   if (refPath.startsWith("refs/heads/")) return refPath.slice("refs/heads/".length);
-  if (refPath.startsWith("refs/tags/")) return refPath.slice("refs/tags/".length);
-  if (ref) return ref;
   return null;
 }
 
@@ -244,7 +284,9 @@ function extractClaims(
     const wfRef = str(p.job_workflow_ref);
     if (!repo || !ref || !wfRef) return { ok: false, reason: "missing_claims" };
     const branch = githubBranch(payload);
-    if (!branch) return { ok: false, reason: "unparseable_ref" };
+    // `ref` est garanti présent ci-dessus → un branch null signifie « ce ref
+    // n'est pas une branche » (tag, merge-ref de PR…), pas un ref illisible.
+    if (!branch) return { ok: false, reason: "ref_not_branch" };
     // "owner/repo/.github/workflows/<file>@<ref>" → basename "<file>".
     const m = wfRef.match(/\.github\/workflows\/([^@]+)/);
     if (!m || !m[1]) return { ok: false, reason: "missing_claims" };
@@ -266,7 +308,9 @@ function extractClaims(
     const repo = str(p.project_path);
     if (!repo) return { ok: false, reason: "missing_claims" };
     const branch = gitlabBranch(payload);
-    if (!branch) return { ok: false, reason: "unparseable_ref" };
+    // Tag, ou type de ref indéterminable (ni `ref_type` ni `ref_path`) → refus
+    // fail-closed : on ne devine pas qu'un ref court est une branche.
+    if (!branch) return { ok: false, reason: "ref_not_branch" };
     // `environment` absent quand le job ne déclare pas `environment:` → "".
     const env = str(p.environment);
     return {

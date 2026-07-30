@@ -276,7 +276,7 @@ export default function SecretsPanel({
                 }
                 title={t("categoryLabel")}
                 className="select"
-                style={{ width: "auto", padding: "4px 8px", fontSize: 11 }}
+                style={{ width: "auto", padding: "4px 40px 4px 8px", fontSize: 11 }}
               >
                 <option value="">— {UNCATEGORIZED_LABEL} —</option>
                 {SECRET_CATEGORIES.map((c) => (
@@ -853,8 +853,10 @@ function SecretRotationDialog({
   }
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog dialog-lg" onClick={(e) => e.stopPropagation()}>
+    <div className="dialog-overlay">
+      {/* Pas de fermeture au clic sur le backdrop (config longue, évite la perte
+          de saisie par clic accidentel) — fermeture via la croix / Annuler. */}
+      <div className="dialog dialog-lg">
         <div className="dialog-header">
           <h2 className="dialog-title">
             {t("dialogTitle", { key: secretKey })}
