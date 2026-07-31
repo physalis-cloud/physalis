@@ -7,6 +7,7 @@ import { getTranslations } from "next-intl/server";
 import type { useTranslations } from "next-intl";
 import {
   RiBuilding2Line,
+  RiDashboardLine,
   RiDoorOpenLine,
   RiFolderOpenLine,
   RiIdCardLine,
@@ -24,6 +25,7 @@ import {
   RiUserLine,
   type RemixiconComponentType,
 } from "@remixicon/react";
+import PageHero from "@/components/PageHero";
 import { auth } from "@/lib/auth";
 
 type DashT = ReturnType<typeof useTranslations<"dashboard">>;
@@ -239,10 +241,11 @@ export default async function DashboardPage({
     <div className="page">
       <div className="page-content">
         <PendingInvitations />
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">{t("page.title")}</h1>
-            <div className="page-subtitle">
+        <PageHero
+          icon={<RiDashboardLine size={28} aria-hidden />}
+          title={t("page.title")}
+          subtitle={
+            <>
               {t("page.connectedAs")} <strong>{session.user.email}</strong> (
               {session.user.role})
               {org ? (
@@ -254,9 +257,9 @@ export default async function DashboardPage({
                   </Link>
                 </>
               ) : null}
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         {!org && (
           <>

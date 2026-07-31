@@ -1990,7 +1990,7 @@
     }
   },
   "account": {
-    "pageTitle": "Compte & facturation",
+    "pageTitle": "Mon compte",
     "noTenant": "Aucun tenant associé",
     "noTenantHint": "Cette page n'est disponible que dans un tenant.",
     "clientNotFound": "Client introuvable",

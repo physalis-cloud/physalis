@@ -82,10 +82,16 @@ async function main() {
 
   const handle = email.split("@")[0] || "org";
   const orgSlug = await uniqueOrgSlug(handle);
+  // Première org de l'instance = org principale (nom du compte affiché sur
+  // /account, protégée contre la suppression). Conditionné pour rester
+  // idempotent si le bootstrap est rejoué sur une base déjà peuplée.
+  const hasPrimary =
+    (await prisma.organization.count({ where: { isPrimary: true } })) > 0;
   await prisma.organization.create({
     data: {
       name: `${handle}'s organization`,
       slug: orgSlug,
+      isPrimary: !hasPrimary,
       members: { create: { userId: user.id, role: "OWNER" } },
     },
   });

@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
+import { RiSettings3Line } from "@remixicon/react";
+import PageHero from "@/components/PageHero";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -46,27 +48,34 @@ export default async function OrgPage({
         <div className="breadcrumb">
           <Link href="/dashboard">← Tableau de bord</Link>
         </div>
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">
-              {org.name}{" "}
-              <span className={`role role-${role.toLowerCase()}`}>{role}</span>
-            </h1>
-            <div className="page-subtitle">
-              {t("pageStats", { projects: org._count.projects, members: org._count.members })}
-            </div>
-          </div>
-          {canSeeAudit && (
-            <div className="page-actions">
+        <PageHero
+          icon={<RiSettings3Line size={28} aria-hidden />}
+          title={org.name}
+          subtitle={
+            <>
+              <span
+                className={`role role-${role.toLowerCase()}`}
+                style={{ marginRight: 8 }}
+              >
+                {role}
+              </span>
+              {t("pageStats", {
+                projects: org._count.projects,
+                members: org._count.members,
+              })}
+            </>
+          }
+          actions={
+            canSeeAudit ? (
               <Link
                 href={`/orgs/${org.slug}/audit`}
                 className="btn btn-ghost btn-sm"
               >
                 Audit
               </Link>
-            </div>
-          )}
-        </div>
+            ) : undefined
+          }
+        />
 
         <OrgPanels
           slug={org.slug}

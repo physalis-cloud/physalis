@@ -1798,7 +1798,7 @@
     }
   },
   "account": {
-    "pageTitle": "Account & billing",
+    "pageTitle": "My account",
     "noTenant": "No associated tenant",
     "noTenantHint": "This page is only available in a tenant.",
     "clientNotFound": "Client not found",

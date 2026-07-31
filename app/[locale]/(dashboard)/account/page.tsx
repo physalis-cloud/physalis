@@ -1,16 +1,23 @@
 // /account — page de gestion du compte (self-host, mono-tenant).
 //
-// Server component : infos du compte + export RGPD. Pas de billing /
-// abonnement / quotas (édition SaaS uniquement).
+// Server component : infos du compte + sécurité personnelle (2FA, jetons,
+// sessions plugin) + export RGPD. Pas de billing / abonnement / quotas
+// (édition SaaS uniquement), pas de SSO / social login (différé en self-host).
 
 import { Link } from "@/i18n/navigation";
+import { RiAccountCircleLine } from "@remixicon/react";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import PageHero from "@/components/PageHero";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isPlatformAdmin } from "@/lib/roles";
 import ExportButton from "./export-button";
+import SecurityPanel from "./security-panel";
+import UserTokensPanel from "./user-tokens-panel";
+import PluginSessionsPanel from "./plugin-sessions-panel";
 import DeleteMyAccountPanel from "./delete-my-account-panel";
+import pkg from "@/package.json";
 
 export default async function AccountPage({
   params,
@@ -25,8 +32,11 @@ export default async function AccountPage({
   const platformAdmin = isPlatformAdmin(session.user.role);
 
   // Mono-tenant : org principale (affichage) + memberships de l'user
-  // (rôle + scope export). Aucune donnée billing.
-  const [primary, myMemberships] = await Promise.all([
+  // (rôle + scope export) + état 2FA. Aucune donnée billing.
+  const [primary, myMemberships, me] = await Promise.all([
+    // `isPrimary` marque l'org créée au signup / au bootstrap. Repli sur la
+    // plus ancienne org : les installs antérieures à la migration de backfill
+    // n'ont aucune ligne marquée.
     prisma.organization.findFirst({
       where: { isPrimary: true },
       select: { name: true, slug: true },
@@ -35,10 +45,22 @@ export default async function AccountPage({
       where: { userId: session.user.id },
       select: { role: true },
     }),
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { twoFactorEnabled: true, backupCodes: true },
+    }),
   ]);
 
-  const accountName = primary?.name ?? session.user.tenantSlug ?? "—";
-  const accountSlug = primary?.slug ?? session.user.tenantSlug ?? "—";
+  const fallbackOrg = primary
+    ? null
+    : await prisma.organization.findFirst({
+        orderBy: { createdAt: "asc" },
+        select: { name: true, slug: true },
+      });
+  const org = primary ?? fallbackOrg;
+
+  const accountName = org?.name ?? "—";
+  const accountSlug = org?.slug ?? "—";
 
   const isOwner =
     platformAdmin || myMemberships.some((m) => m.role === "OWNER");
@@ -52,17 +74,34 @@ export default async function AccountPage({
   return (
     <div className="page">
       <div className="page-content">
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">{t("pageTitle")}</h1>
-            <div className="page-subtitle">
+        <PageHero
+          icon={<RiAccountCircleLine size={28} aria-hidden />}
+          title={t("pageTitle")}
+          subtitle={
+            <>
               {accountName} ·{" "}
               <span style={{ fontFamily: "var(--font-mono, monospace)" }}>
                 {accountSlug}
               </span>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+          actions={
+            <span
+              className="code-mono"
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                background: "#fff",
+                color: "var(--muted)",
+                border: "1px solid var(--border)",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t("versionInfo", { version: pkg.version })}
+            </span>
+          }
+        />
 
         {/* ─── Infos du compte (1ère carte, bord coloré) ──────────── */}
         <section className="section">
@@ -90,6 +129,27 @@ export default async function AccountPage({
               <span className="help" style={{ minWidth: 120 }}>{t("roleLabel")}</span>
               <span>{isOwner ? t("roleOwner") : t("roleMember")}</span>
             </div>
+          </div>
+        </section>
+
+        {/* ─── Sécurité & accès personnels (2FA, jetons, sessions) ─── */}
+        {/* Jumeau de la section source, moins SsoPanel/SocialLoginPanel
+            (cluster SSO/social denylisté du build self-host). Les panneaux
+            eux-mêmes coulent verbatim : ils tapent /api/me/2fa,
+            /api/user-tokens et /api/plugin/tokens, tous présents ici. */}
+        <section className="section">
+          <div className="section-header">
+            <h2 className="section-title">{t("securitySection")}</h2>
+          </div>
+          <div className="flex flex-col gap-4">
+            {me && (
+              <SecurityPanel
+                initialEnabled={me.twoFactorEnabled}
+                initialBackupCount={me.backupCodes.length}
+              />
+            )}
+            <UserTokensPanel />
+            <PluginSessionsPanel />
           </div>
         </section>
 

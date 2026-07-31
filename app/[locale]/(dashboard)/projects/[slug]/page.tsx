@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { Link } from "@/i18n/navigation";
+import { RiFolderOpenLine } from "@remixicon/react";
+import PageHero from "@/components/PageHero";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
@@ -85,32 +87,31 @@ export default async function ProjectPage({
         <div className="breadcrumb">
           <Link href="/projects">← Projets</Link>
         </div>
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">
-              {project.name}{" "}
+        <PageHero
+          icon={<RiFolderOpenLine size={28} aria-hidden />}
+          title={project.name}
+          subtitle={
+            <>
               <span
                 className={`role role-${role.toLowerCase()}`}
-                style={{ verticalAlign: "middle", marginLeft: 10 }}
+                style={{ marginRight: 8 }}
               >
                 {role}
               </span>
-            </h1>
-            <div className="page-subtitle">
               <span className="code-mono">/{project.slug}</span>
-            </div>
-          </div>
-          {canSeeAudit && (
-            <div className="page-actions">
+            </>
+          }
+          actions={
+            canSeeAudit ? (
               <Link
                 href={`/projects/${project.slug}/audit`}
                 className="btn btn-ghost btn-sm"
               >
                 {t("auditLink")}
               </Link>
-            </div>
-          )}
-        </div>
+            ) : undefined
+          }
+        />
 
         <ProjectView
           projectName={project.name}

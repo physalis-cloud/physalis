@@ -1798,7 +1798,7 @@
     }
   },
   "account": {
-    "pageTitle": "Cuenta y facturación",
+    "pageTitle": "Mi cuenta",
     "noTenant": "Sin tenant asociado",
     "noTenantHint": "Esta página solo está disponible en un tenant.",
     "clientNotFound": "Cliente no encontrado",
