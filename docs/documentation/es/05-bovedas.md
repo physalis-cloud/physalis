@@ -131,6 +131,9 @@ Physalis genera automáticamente **códigos TOTP de 6 dígitos** cada 30 segundo
 
 ### Introducir una clave TOTP
 
+El campo TOTP pertenece al tipo **Credencial** — el único que representa una
+cuenta en un sitio.
+
 Cuando activas el 2FA en un sitio externo, obtienes un código QR
 o una cadena `otpauth://totp/...?secret=XXXX&...`. Pega esa cadena
 en el campo **TOTP** de la entrada:
@@ -163,6 +166,21 @@ proyecto:
 3. Envía. La entrada queda **re-cifrada y movida de forma atómica** — desaparece
    de tu bóveda personal y aparece en el destino elegido.
 
+Solo los tipos **Credencial** y **Secreto** se pueden mover: su contenido cabe
+por completo en una entrada de equipo. Las **Listas** y las **Notas** aún no
+tienen equivalente en la bóveda de equipo — el botón «Mover» no aparece en
+ellas, en lugar de vaciarlas en silencio.
+
+## Importar desde otro gestor
+
+El botón **«Importar»** de la bóveda personal acepta una exportación CSV de
+**Bitwarden**, de **Chrome** o un CSV genérico. Las carpetas de Bitwarden se
+convierten en colecciones. Se muestra una vista previa antes de guardar nada.
+
+Se importan las credenciales y las **notas seguras** de Bitwarden (que pasan a
+ser entradas de tipo Nota). Las tarjetas y las identidades se omiten: ningún
+tipo de la bóveda las representa.
+
 ## Leer entradas desde la extensión de navegador
 
 La extensión de Physalis (Chrome / Firefox, ver
@@ -174,7 +192,10 @@ simultáneamente:
 - Bóvedas de equipo (proyecto)
 
 En el sitio visitado, sugiere credenciales que coincidan con el dominio
-(a través de las URLs almacenadas en las entradas).
+(a través de las URLs almacenadas en las entradas). Solo las entradas de tipo
+**Credencial** entran en juego — son las únicas que llevan una URL. Tus
+Secretos, Listas y Notas siguen siendo consultables desde el sitio, pero nunca
+se ofrecen para autocompletar.
 
 ## Más información
 

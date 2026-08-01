@@ -131,6 +131,9 @@ Physalis automatically generates **6-digit TOTP codes** every 30 seconds
 
 ### Enter a TOTP key
 
+The TOTP field belongs to the **Login** type — the only one that represents
+an account on a site.
+
 When you enable 2FA on an external site, you get a QR code
 or an `otpauth://totp/...?secret=XXXX&...` string. Paste that string
 into the **TOTP** field of the entry:
@@ -163,6 +166,20 @@ project:
 3. Submit. The entry is **atomically re-encrypted and moved** — it disappears
    from your personal vault and appears in the chosen destination.
 
+Only the **Login** and **Secret** types can be moved: their content fits
+entirely into a team entry. **Lists** and **Notes** have no team-vault
+equivalent yet — the "Move" button simply does not appear on them, rather
+than emptying them silently.
+
+## Import from another password manager
+
+The personal vault's **"Import"** button accepts a CSV export from
+**Bitwarden**, from **Chrome**, or a generic CSV. Bitwarden folders become
+collections. A preview is shown before anything is saved.
+
+Logins and Bitwarden **secure notes** are imported (notes become entries of
+type Note). Cards and identities are skipped: no vault type represents them.
+
 ## Reading entries from the browser extension
 
 The Physalis extension (Chrome / Firefox, see
@@ -174,7 +191,9 @@ simultaneously:
 - Team vaults (project)
 
 On the visited site, it suggests credentials matching the domain
-(via the URLs stored in the entries).
+(via the URLs stored in the entries). Only **Login** entries are eligible —
+they are the only ones carrying a URL. Your Secrets, Lists and Notes stay
+readable from the site itself, but are never offered for autofill.
 
 ## Go further
 

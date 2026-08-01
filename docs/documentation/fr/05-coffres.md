@@ -133,6 +133,9 @@ toutes les 30 secondes (RFC 6238).
 
 ### Saisir une clé TOTP
 
+Le champ TOTP appartient au type **Identifiant** — c'est le seul qui
+représente un compte sur un site.
+
 Quand vous activez la 2FA sur un site externe, vous obtenez un QR code
 ou une chaîne `otpauth://totp/...?secret=XXXX&...`. Collez cette chaîne
 dans le champ **TOTP** de l'entrée :
@@ -165,6 +168,21 @@ rattachée à un projet :
 3. Validez. L'entrée est **re-chiffrée et déplacée atomiquement** — elle
    disparaît de votre coffre perso et apparaît dans la destination choisie.
 
+Seuls les types **Identifiant** et **Secret** sont déplaçables : leur contenu
+tient entièrement dans une entrée d'équipe. Les **Listes** et les **Notes**
+n'ont pas encore d'équivalent côté coffre d'équipe — le bouton « Déplacer »
+n'apparaît pas sur elles, plutôt que de les vider en silence.
+
+## Importer depuis un autre gestionnaire
+
+Le bouton **« Importer »** du coffre personnel accepte un export CSV de
+**Bitwarden**, de **Chrome**, ou un CSV générique. Les dossiers Bitwarden
+deviennent des collections. Un aperçu est affiché avant tout enregistrement.
+
+Sont importés les identifiants et les **notes sécurisées** Bitwarden (elles
+deviennent des entrées de type Note). Les cartes bancaires et les identités
+sont ignorées : aucun type du coffre ne les représente.
+
 ## Lecture par l'extension navigateur
 
 L'extension Physalis (Chrome / Firefox, voir
@@ -176,7 +194,10 @@ coffre simultanément :
 - Coffres d'équipe (projet)
 
 Sur le site visité, elle propose les credentials matchant le domaine
-(via les URLs stockées dans les entrées).
+(via les URLs stockées dans les entrées). Seules les entrées de type
+**Identifiant** sont concernées — ce sont les seules à porter une URL. Vos
+Secrets, Listes et Notes restent consultables depuis le site, mais ne sont
+jamais proposés en remplissage automatique.
 
 ## Aller plus loin
 
