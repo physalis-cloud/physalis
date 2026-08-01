@@ -289,8 +289,11 @@ export async function GET(req: Request) {
   const matchedVault: VaultEntryOut[] = [];
 
   // 4a. Coffre personnel : VaultEntry ou userId = session.userId.
+  // `type: LOGIN` est redondant avec `url != null` (seul LOGIN porte une
+  // URL, cf. lib/vault-entry-types.ts) mais rend l'invariant visible ici :
+  // l'autofill ne propose jamais un SECRET, une LIST ou une NOTE.
   const personalEntries = await prisma.vaultEntry.findMany({
-    where: { userId, url: { not: null } },
+    where: { userId, type: "LOGIN", url: { not: null } },
     select: {
       id: true,
       name: true,

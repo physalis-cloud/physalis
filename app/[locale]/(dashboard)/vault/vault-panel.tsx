@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState, useTransition, type ReactNode, type C
 import TagsInput from "@/components/TagsInput";
 import { useTranslations } from "next-intl";
 import {
+  RiFileTextLine,
   RiFolderOpenLine,
   RiGridLine,
   RiInboxArchiveLine,
+  RiKey2Line,
   RiListCheck2,
   RiShuffleLine,
   RiStarFill,
@@ -14,12 +16,22 @@ import {
 import { generatePassword } from "@/lib/generate-password";
 import { estimateStrength, strengthMeta } from "@/lib/password-strength";
 import { computeDuplicates, extractDomain } from "@/lib/vault-duplicates";
+import { maskedInputProps } from "@/lib/masked-input";
+import {
+  CARRIES,
+  conversionBlocker,
+  VAULT_ENTRY_TYPES,
+  VAULT_TYPE_LIMITS,
+  type VaultEntryType,
+  type VaultListItem,
+} from "@/lib/vault-entry-types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ExtensionBanner from "./extension-banner";
 import RenameCollectionDialog from "../rename-collection-dialog";
 
 type VaultEntryListItem = {
   id: string;
+  type: VaultEntryType;
   name: string;
   url: string | null;
   username: string | null;
@@ -27,10 +39,33 @@ type VaultEntryListItem = {
   favorite: boolean;
   passwordStrength: number | null;
   hasTotpSecret: boolean;
+  /** Nombre d'items d'une LIST (en clair côté serveur). NULL hors LIST. */
+  itemCount: number | null;
   collectionId: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Contenu déchiffré d'une entrée, tel que renvoyé par GET /entries/[id]. */
+type RevealedEntry = {
+  password: string | null;
+  totpSecret: string | null;
+  items: VaultListItem[];
+  text: string;
+};
+
+/** La valeur unique d'une entrée, quel que soit son type — c'est elle qu'on
+ *  copie depuis la liste et qu'on transporte lors d'un changement de type
+ *  (miroir client de readSingleValue côté serveur). */
+function singleValueOf(
+  type: VaultEntryType,
+  revealed: Partial<RevealedEntry>,
+): string {
+  if (CARRIES[type].password) return revealed.password ?? "";
+  if (type === "LIST") return revealed.items?.[0]?.value ?? "";
+  if (type === "NOTE") return revealed.text ?? "";
+  return "";
+}
 
 type VaultCollection = {
   id: string;
@@ -58,13 +93,30 @@ function initials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+// Glyphe des entrées sans URL : un SECRET, une LIST ou une NOTE n'a pas de
+// favicon à afficher, et deux initiales ne disent pas de quoi il s'agit.
+function TypeGlyph({ type, size = 18 }: { type: VaultEntryType; size?: number }) {
+  if (type === "LIST") return <RiListCheck2 size={size} aria-hidden />;
+  if (type === "NOTE") return <RiFileTextLine size={size} aria-hidden />;
+  return <RiKey2Line size={size} aria-hidden />;
+}
+
 // Favicon du domaine (API Google), qui remplit son conteneur (liste ou grille).
 // Fallback sur les initiales si l'URL est absente/invalide ou si le favicon ne
 // charge pas (onError). L'échec est mémorisé PAR domaine : éditer l'URL d'une
 // entrée re-tente automatiquement le nouveau favicon.
-function EntryIcon({ name, url }: { name: string; url: string | null }) {
+function EntryIcon({
+  name,
+  url,
+  type = "LOGIN",
+}: {
+  name: string;
+  url: string | null;
+  type?: VaultEntryType;
+}) {
   const domain = extractDomain(url);
   const [failedDomain, setFailedDomain] = useState<string | null>(null);
+  if (type !== "LOGIN") return <TypeGlyph type={type} />;
   if (domain && failedDomain !== domain) {
     return (
       // favicon externe arbitraire : next/image n'apporte rien et imposerait
@@ -134,6 +186,31 @@ function relativeTime(iso: string, t: VaultT): string {
   if (month < 12) return t("relTime.monthsAgo", { n: month });
   const year = Math.floor(day / 365);
   return t("relTime.yearsAgo", { n: year });
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+
+/** Le coffre d'équipe (TeamVaultEntry) n'a ni colonne `type` ni blob de
+ *  charge utile : y déplacer une LIST ou une NOTE la viderait. L'API refuse,
+ *  l'UI ne propose pas. Miroir du garde-fou de /entries/[id]/move. */
+function isMovable(type: VaultEntryType): boolean {
+  return type === "LOGIN" || type === "SECRET";
+}
+
+/** Nom lisible d'un type d'entrée. */
+function typeLabel(type: VaultEntryType, t: VaultT): string {
+  return t(`types.${type}.label`);
+}
+
+/** Libellé du bouton « copier » — ce qu'on copie n'est pas un mot de passe
+ *  pour tous les types. */
+function copyValueLabel(type: VaultEntryType, t: VaultT): string {
+  if (type === "SECRET") return t("copySecretBtn");
+  if (type === "NOTE") return t("copyTextBtn");
+  return t("copyPasswordBtn");
 }
 
 export default function VaultPanel({ children }: { children?: ReactNode }) {
@@ -312,7 +389,8 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
     setRenamingCollection(c);
   }
 
-  async function reveal(id: string) {
+  async function reveal(entry: VaultEntryListItem) {
+    const id = entry.id;
     if (revealed[id] !== undefined) {
       setRevealed((r) => {
         const copy = { ...r };
@@ -326,8 +404,8 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
       setError(t("revealError"));
       return;
     }
-    const data = (await res.json()) as { entry: { password: string | null } };
-    setRevealed((r) => ({ ...r, [id]: data.entry.password ?? "" }));
+    const data = (await res.json()) as { entry: RevealedEntry };
+    setRevealed((r) => ({ ...r, [id]: singleValueOf(entry.type, data.entry) }));
   }
 
   async function copyToClipboard(text: string, label: string) {
@@ -340,18 +418,22 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
     }
   }
 
-  async function copyPassword(id: string) {
-    const res = await fetch(`/api/vault/entries/${id}`);
+  /** Copie la valeur unique de l'entrée : mot de passe (LOGIN/SECRET) ou
+   *  texte (NOTE). Les LIST n'ont pas de valeur unique à copier — leurs items
+   *  se copient un par un depuis la modale. */
+  async function copyValue(entry: VaultEntryListItem) {
+    const res = await fetch(`/api/vault/entries/${entry.id}`);
     if (!res.ok) {
       setError(t("revealError"));
       return;
     }
-    const data = (await res.json()) as { entry: { password: string | null } };
-    if (!data.entry.password) {
+    const data = (await res.json()) as { entry: RevealedEntry };
+    const value = singleValueOf(entry.type, data.entry);
+    if (!value) {
       setError(t("copyPasswordEmpty"));
       return;
     }
-    copyToClipboard(data.entry.password, t("copyPasswordBtn"));
+    copyToClipboard(value, copyValueLabel(entry.type, t));
   }
 
   async function toggleFavorite(entry: VaultEntryListItem) {
@@ -751,7 +833,7 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                       overflow: "hidden",
                     }}
                   >
-                    <EntryIcon name={e.name} url={e.url} />
+                    <EntryIcon name={e.name} url={e.url} type={e.type} />
                   </div>
 
                   {/* Name + domain */}
@@ -789,9 +871,16 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                     </div>
                   )}
 
-                  {/* Badges 2FA + doublon */}
-                  {(e.hasTotpSecret || duplicateIds.has(e.id)) && (
+                  {/* Badges type + 2FA + doublon */}
+                  {(e.type !== "LOGIN" || e.hasTotpSecret || duplicateIds.has(e.id)) && (
                     <div className="flex items-center gap-1 justify-center" style={{ flexWrap: "wrap" }}>
+                      {e.type !== "LOGIN" && (
+                        <span className="chip" style={{ fontSize: 10 }}>
+                          {e.type === "LIST"
+                            ? t("itemCount", { n: e.itemCount ?? 0 })
+                            : typeLabel(e.type, t)}
+                        </span>
+                      )}
                       {e.hasTotpSecret && (
                         <span className="chip" style={{ fontSize: 10 }}>{t("form.twoFaBadge")}</span>
                       )}
@@ -838,15 +927,19 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                         👤
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => copyPassword(e.id)}
-                      title={t("copyPasswordBtn")}
-                      className="btn btn-ghost btn-xs"
-                      style={{ padding: "4px 8px" }}
-                    >
-                      🔑
-                    </button>
+                    {/* Une LIST n'a pas de valeur unique : ses items se
+                        copient un par un depuis la modale. */}
+                    {e.type !== "LIST" && (
+                      <button
+                        type="button"
+                        onClick={() => copyValue(e)}
+                        title={copyValueLabel(e.type, t)}
+                        className="btn btn-ghost btn-xs"
+                        style={{ padding: "4px 8px" }}
+                      >
+                        🔑
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setEditing(e)}
@@ -859,6 +952,7 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                     <GridMoreMenu
                       onMove={() => setMoving(e)}
                       onDelete={() => remove(e)}
+                      canMove={isMovable(e.type)}
                     />
                   </div>
                 </div>
@@ -869,7 +963,7 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
           <div className="row-list">
             {entries.map((e) => (
               <div key={e.id} className="row">
-                <div className="row-icon"><EntryIcon name={e.name} url={e.url} /></div>
+                <div className="row-icon"><EntryIcon name={e.name} url={e.url} type={e.type} /></div>
                 <div className="row-info">
                   <div className="flex items-center gap-2">
                     <button
@@ -884,6 +978,16 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                     </button>
                     <div className="row-name">
                       {e.name}
+                      {e.type !== "LOGIN" && (
+                        <span
+                          className="chip"
+                          style={{ marginLeft: 6, fontSize: 10 }}
+                        >
+                          {e.type === "LIST"
+                            ? t("itemCount", { n: e.itemCount ?? 0 })
+                            : typeLabel(e.type, t)}
+                        </span>
+                      )}
                       {e.hasTotpSecret && (
                         <span
                           className="chip"
@@ -927,11 +1031,21 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                     {e.username && (
                       <span className="code-mono">{e.username}</span>
                     )}
-                    <span className="code-mono">
-                      {revealed[e.id] !== undefined
-                        ? revealed[e.id]
-                        : "••••••••••••"}
-                    </span>
+                    {/* Une LIST n'a pas de valeur unique à masquer/révéler —
+                        ses items s'ouvrent dans la modale. Le texte d'une
+                        NOTE est tronqué : la ligne n'est pas un lecteur. */}
+                    {e.type !== "LIST" && (
+                      <span
+                        className="code-mono"
+                        title={
+                          revealed[e.id] !== undefined ? revealed[e.id] : undefined
+                        }
+                      >
+                        {revealed[e.id] !== undefined
+                          ? truncate(revealed[e.id], 120)
+                          : "••••••••••••"}
+                      </span>
+                    )}
                     <span className="text-muted" title={new Date(e.updatedAt).toLocaleString()}>
                       {relativeTime(e.updatedAt, t)}
                     </span>
@@ -960,20 +1074,24 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                       {t("copyLoginBtn")}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => copyPassword(e.id)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {t("copyPasswordBtn")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => reveal(e.id)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {revealed[e.id] !== undefined ? t("hideBtn") : t("revealBtn")}
-                  </button>
+                  {e.type !== "LIST" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => copyValue(e)}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {copyValueLabel(e.type, t)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => reveal(e)}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {revealed[e.id] !== undefined ? t("hideBtn") : t("revealBtn")}
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => setEditing(e)}
@@ -981,14 +1099,16 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                   >
                     {t("editBtn")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setMoving(e)}
-                    className="btn btn-ghost btn-xs"
-                    title={t("moveBtn")}
-                  >
-                    {t("moveBtn")}
-                  </button>
+                  {isMovable(e.type) && (
+                    <button
+                      type="button"
+                      onClick={() => setMoving(e)}
+                      className="btn btn-ghost btn-xs"
+                      title={t("moveBtn")}
+                    >
+                      {t("moveBtn")}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => remove(e)}
@@ -1115,9 +1235,13 @@ function CreateCollectionInline({
 function GridMoreMenu({
   onMove,
   onDelete,
+  canMove = true,
 }: {
   onMove: () => void;
   onDelete: () => void;
+  /** false pour les types que le coffre d'équipe ne sait pas encore porter
+   *  (LIST, NOTE) — l'API refuse le move, on ne propose pas l'action. */
+  canMove?: boolean;
 }) {
   const t = useTranslations("vault");
   const [open, setOpen] = useState(false);
@@ -1164,18 +1288,20 @@ function GridMoreMenu({
             boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
           }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onMove();
-            }}
-            className="btn btn-ghost btn-sm"
-            style={{ width: "100%", justifyContent: "flex-start", padding: "6px 10px" }}
-          >
-            {t("moveBtn")}
-          </button>
+          {canMove && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onMove();
+              }}
+              className="btn btn-ghost btn-sm"
+              style={{ width: "100%", justifyContent: "flex-start", padding: "6px 10px" }}
+            >
+              {t("moveBtn")}
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -1352,6 +1478,85 @@ function OnboardingCard({
   );
 }
 
+/**
+ * Sélecteur de forme de l'entrée.
+ *
+ * En création les quatre formes sont libres. En édition, seules les
+ * conversions qui ne détruisent rien sont proposées — miroir client de
+ * conversionBlocker, calculé sur les MÉTADONNÉES STOCKÉES (pas sur l'état du
+ * formulaire) puisque c'est la ligne en base que le serveur convertit. Vider
+ * l'URL dans le formulaire ne débloque donc pas la conversion tant qu'on n'a
+ * pas enregistré : le serveur reste l'autorité, l'UI ne promet rien qu'il
+ * refuserait.
+ */
+function TypeSwitcher({
+  value,
+  entry,
+  onChange,
+  disabled,
+}: {
+  value: VaultEntryType;
+  entry: VaultEntryListItem | null;
+  onChange: (next: VaultEntryType) => void;
+  disabled?: boolean;
+}) {
+  const t = useTranslations("vault");
+  return (
+    // Pas de label : les quatre pastilles se lisent seules, et la phrase
+    // d'aide sous le groupe dit déjà ce que fait le type sélectionné.
+    <div className="field">
+      <div className="flex flex-wrap gap-1.5" role="group">
+        {VAULT_ENTRY_TYPES.map((candidate) => {
+          const blocker = entry
+            ? conversionBlocker(
+                {
+                  type: entry.type,
+                  url: entry.url,
+                  username: entry.username,
+                  hasTotpSecret: entry.hasTotpSecret,
+                  itemCount: entry.itemCount,
+                },
+                candidate,
+              )
+            : null;
+          const locked = blocker !== null;
+          const active = candidate === value;
+          return (
+            <button
+              key={candidate}
+              type="button"
+              onClick={() => onChange(candidate)}
+              disabled={disabled || locked}
+              aria-pressed={active}
+              title={
+                locked
+                  ? t(`form.typeLocked.${blocker}`)
+                  : t(`types.${candidate}.hint`)
+              }
+              className={`chip chip-button ${active ? "active chip-active" : ""}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                // Un peu plus grandes que les pastilles de tags : c'est le
+                // premier choix du formulaire, pas une étiquette.
+                fontSize: 12.5,
+                padding: "6px 12px",
+                opacity: locked ? 0.45 : 1,
+                cursor: locked ? "not-allowed" : "pointer",
+              }}
+            >
+              <TypeGlyph type={candidate} size={13} />
+              {t(`types.${candidate}.label`)}
+            </button>
+          );
+        })}
+      </div>
+      <div className="help">{t(`types.${value}.hint`)}</div>
+    </div>
+  );
+}
+
 function EntryDialog({
   initial,
   collections,
@@ -1370,6 +1575,7 @@ function EntryDialog({
 }) {
   const t = useTranslations("vault");
   const isEdit = Boolean(initial);
+  const [type, setType] = useState<VaultEntryType>(initial?.type ?? "LOGIN");
   const [name, setName] = useState(initial?.name ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");
   const [username, setUsername] = useState(initial?.username ?? "");
@@ -1378,51 +1584,144 @@ function EntryDialog({
   const [totpSecret, setTotpSecret] = useState("");
   const [showTotpSecret, setShowTotpSecret] = useState(false);
   const [totpLoaded, setTotpLoaded] = useState(false);
+  const [items, setItems] = useState<VaultListItem[]>([{ label: "", value: "" }]);
+  const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [favorite, setFavorite] = useState(initial?.favorite ?? false);
   const [collectionId, setCollectionId] = useState<string | "">(
     initial?.collectionId ?? defaultCollectionId ?? "",
   );
   const [pwdLoaded, setPwdLoaded] = useState(false);
+  /** Le contenu chiffré (mot de passe, 2FA, items, texte) a été chargé. */
+  const [secretsLoaded, setSecretsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  async function loadCurrentSecrets() {
+  const carries = CARRIES[type];
+
+  /**
+   * Charge le contenu déchiffré de l'entrée et renvoie ce qui a été lu — le
+   * retour sert au changement de type, qui doit reporter la valeur courante
+   * dans les champs de la cible.
+   *
+   * `reveal` ne vaut true que lorsque l'utilisateur a CLIQUÉ « Charger
+   * l'actuel » : il a demandé à voir, on affiche. Le chargement automatique
+   * des LIST/NOTE ci-dessous, lui, ne doit rien démasquer — sinon ouvrir une
+   * entrée en édition étalerait tous ses secrets à l'écran.
+   */
+  const loadSecrets = useCallback(
+    async ({ reveal = false } = {}): Promise<RevealedEntry | null> => {
+      if (!initial) return null;
+      const res = await fetch(`/api/vault/entries/${initial.id}`);
+      if (!res.ok) {
+        setError(t("revealError"));
+        return null;
+      }
+      const data = (await res.json()) as { entry: RevealedEntry };
+      const entry = data.entry;
+      setPassword(entry.password ?? "");
+      setPwdLoaded(true);
+      if (reveal) setShowPassword(true);
+      setTotpSecret(entry.totpSecret ?? "");
+      setTotpLoaded(true);
+      setItems(
+        entry.items.length > 0 ? entry.items : [{ label: "", value: "" }],
+      );
+      setText(entry.text ?? "");
+      setSecretsLoaded(true);
+      return entry;
+    },
+    [initial, t],
+  );
+
+  // Une LIST ou une NOTE ne s'édite pas à l'aveugle : contrairement au mot de
+  // passe (chargé à la demande), son contenu EST le formulaire. On le charge
+  // donc à l'ouverture — le REVEAL est audité, ce qui est exactement ce qui
+  // se passe — mais MASQUÉ : c'est le bouton « Afficher » qui décide.
+  useEffect(() => {
     if (!initial) return;
-    const res = await fetch(`/api/vault/entries/${initial.id}`);
-    if (!res.ok) return;
-    const data = (await res.json()) as {
-      entry: { password: string | null; totpSecret: string | null };
-    };
-    setPassword(data.entry.password ?? "");
-    setPwdLoaded(true);
-    setShowPassword(true);
-    setTotpSecret(data.entry.totpSecret ?? "");
-    setTotpLoaded(true);
-  }
+    if (initial.type !== "LIST" && initial.type !== "NOTE") return;
+    void loadSecrets();
+  }, [initial, loadSecrets]);
 
   function generate() {
     setPassword(generatePassword(24));
     setShowPassword(true);
   }
 
+  /** Change le type courant en reportant la valeur unique dans les champs de
+   *  la cible. En édition le clair est chargé d'abord : le serveur sait
+   *  convertir seul, mais le formulaire doit refléter ce qui sera enregistré
+   *  (la valeur y est reportée masquée, comme partout ailleurs). */
+  async function changeType(next: VaultEntryType) {
+    if (next === type) return;
+    setError(null);
+    let current: Partial<RevealedEntry> = { password, items, text };
+    if (isEdit && !secretsLoaded) {
+      const loaded = await loadSecrets();
+      if (!loaded) return;
+      current = loaded;
+    }
+    const value = singleValueOf(type, current);
+    if (CARRIES[next].password) {
+      setPassword(value);
+      setPwdLoaded(true);
+      // Valeur reportée mais MASQUÉE : rien ne s'affiche en clair sans un
+      // clic sur « Afficher », conversion comprise.
+    }
+    if (next === "LIST") {
+      setItems(
+        value ? [{ label: name, value }] : [{ label: "", value: "" }],
+      );
+    }
+    if (next === "NOTE") setText(value);
+    setType(next);
+  }
+
+  function addItem() {
+    if (items.length >= VAULT_TYPE_LIMITS.itemsMax) return;
+    setItems((prev) => [...prev, { label: "", value: "" }]);
+  }
+
+  function updateItem(index: number, patch: Partial<VaultListItem>) {
+    setItems((prev) =>
+      prev.map((it, i) => (i === index ? { ...it, ...patch } : it)),
+    );
+  }
+
+  function removeItem(index: number) {
+    setItems((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length > 0 ? next : [{ label: "", value: "" }];
+    });
+  }
+
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
+      // Seuls les champs que le type sait porter sont envoyés — le serveur
+      // ignore les autres de toute façon, autant ne pas les transmettre.
       const body: Record<string, unknown> = {
+        type,
         name,
-        url: url.trim() || null,
-        username: username.trim() || null,
         tags,
         favorite,
         collectionId: collectionId === "" ? null : collectionId,
       };
-      if (!isEdit || pwdLoaded) {
+      if (carries.url) body.url = url.trim() || null;
+      if (carries.username) body.username = username.trim() || null;
+      if (carries.password && (!isEdit || pwdLoaded)) {
         body.password = password;
       }
-      if (!isEdit || totpLoaded) {
+      if (carries.totp && (!isEdit || totpLoaded)) {
         body.totpSecret = totpSecret.trim() || null;
+      }
+      if (carries.items && (!isEdit || secretsLoaded)) {
+        body.items = items.filter((it) => it.label.trim() || it.value);
+      }
+      if (carries.text && (!isEdit || secretsLoaded)) {
+        body.text = text;
       }
 
       const url2 = isEdit
@@ -1446,8 +1745,10 @@ function EntryDialog({
   }
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+    // Pas de fermeture au clic sur le fond : un clic à côté ne doit pas jeter
+    // une saisie en cours. On ferme par ✕ ou Annuler.
+    <div className="dialog-overlay">
+      <div className="dialog dialog-md">
         <div className="dialog-header">
           <h2 className="dialog-title">
             {isEdit ? t("form.editTitle") : t("form.createTitle")}
@@ -1462,177 +1763,333 @@ function EntryDialog({
           </button>
         </div>
 
-        <form onSubmit={submit}>
-          <div className="dialog-body">
+        {/* autoComplete=off + `name` dédiés : sans ça le navigateur prenait la
+            modale pour un formulaire de connexion et pré-remplissait le login
+            et le mot de passe avec les credentials du site. */}
+        <form onSubmit={submit} autoComplete="off">
+          <div className="dialog-body vault-dialog-body">
+            <TypeSwitcher
+              value={type}
+              entry={initial}
+              onChange={changeType}
+              disabled={pending}
+            />
+
             <div className="field">
               <label>{t("form.nameLabel")} *</label>
               <input
                 required
                 autoFocus
+                name="vault-entry-name"
+                autoComplete="off"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Gmail perso"
+                placeholder={t(`types.${type}.namePlaceholder`)}
                 className="input"
               />
             </div>
-            <div className="field">
-              <label>{t("form.urlLabel")}</label>
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://gmail.com"
-                className="input input-mono"
-              />
-            </div>
-            <div className="field">
-              <label>{t("form.usernameLabel")}</label>
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="gael@gmail.com"
-                className="input input-mono"
-              />
-            </div>
+            {carries.url && (
+              <div className="field">
+                <label>{t("form.urlLabel")}</label>
+                <input
+                  name="vault-entry-url"
+                  autoComplete="off"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://gmail.com"
+                  className="input input-mono"
+                />
+              </div>
+            )}
+            {carries.username && (
+              <div className="field">
+                <label>{t("form.usernameLabel")}</label>
+                <input
+                  name="vault-entry-login"
+                  autoComplete="off"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="gael@gmail.com"
+                  className="input input-mono"
+                />
+              </div>
+            )}
 
-            <div className="field">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                }}
-              >
-                <label style={{ margin: 0 }}>{t("form.passwordLabel")}</label>
-                <div className="flex items-center gap-2">
-                  {isEdit && !pwdLoaded && (
+            {carries.password && (
+              <div className="field">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <label style={{ margin: 0 }}>
+                    {type === "SECRET"
+                      ? t("form.secretValueLabel")
+                      : t("form.passwordLabel")}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {isEdit && !pwdLoaded && (
+                      <button
+                        type="button"
+                        onClick={() => void loadSecrets({ reveal: true })}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {t("form.loadCurrentBtn")}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={loadCurrentSecrets}
+                      onClick={generate}
+                      title={t("generator.refreshBtn")}
                       className="btn btn-ghost btn-xs"
                     >
-                      {t("form.loadCurrentBtn")}
+                      <RiShuffleLine size={12} aria-hidden /> {t("generator.refreshBtn")}
                     </button>
+                    {(pwdLoaded || password !== "") && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {showPassword ? t("hideBtn") : t("revealBtn")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  {...maskedInputProps(showPassword)}
+                  name="vault-entry-value"
+                  autoComplete="off"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPwdLoaded(true);
+                  }}
+                  placeholder={
+                    isEdit && !pwdLoaded ? t("form.unchanged") : "••••••••••••"
+                  }
+                />
+                {/* Jauge de force réservée au vrai mot de passe : le serveur
+                    ne score pas les autres types, l'UI non plus. */}
+                {type === "LOGIN" &&
+                  (pwdLoaded || !isEdit) &&
+                  password.length > 0 && (
+                    <PasswordStrengthMeter password={password} />
                   )}
+              </div>
+            )}
+
+            {carries.items && (
+              <div className="field">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <label style={{ margin: 0 }}>{t("form.itemsLabel")}</label>
                   <button
                     type="button"
-                    onClick={generate}
-                    title={t("generator.refreshBtn")}
+                    onClick={addItem}
+                    disabled={items.length >= VAULT_TYPE_LIMITS.itemsMax}
                     className="btn btn-ghost btn-xs"
                   >
-                    <RiShuffleLine size={12} aria-hidden /> {t("generator.refreshBtn")}
+                    {t("form.addItemBtn")}
                   </button>
-                  {(pwdLoaded || password !== "") && (
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="btn btn-ghost btn-xs"
-                    >
-                      {showPassword ? t("hideBtn") : t("revealBtn")}
-                    </button>
-                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {items.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        name={`vault-entry-item-label-${i}`}
+                        autoComplete="off"
+                        value={item.label}
+                        onChange={(ev) => updateItem(i, { label: ev.target.value })}
+                        placeholder={t("form.itemLabelPlaceholder")}
+                        className="input"
+                        style={{ flex: "1 1 40%" }}
+                      />
+                      <input
+                        {...maskedInputProps(showPassword)}
+                        name={`vault-entry-item-${i}`}
+                        autoComplete="off"
+                        value={item.value}
+                        onChange={(ev) => updateItem(i, { value: ev.target.value })}
+                        placeholder={t("form.itemValuePlaceholder")}
+                        style={{ flex: "1 1 60%" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeItem(i)}
+                        title={t("form.removeItemBtn")}
+                        aria-label={t("form.removeItemBtn")}
+                        className="btn btn-ghost btn-xs"
+                        // Même hauteur que les deux champs de la ligne.
+                        style={{
+                          height: 42,
+                          flex: "0 0 auto",
+                          padding: "0 10px",
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="btn btn-ghost btn-xs"
+                  >
+                    {showPassword ? t("hideBtn") : t("revealBtn")}
+                  </button>
+                  <span className="help">
+                    {t("form.itemsHint", { max: VAULT_TYPE_LIMITS.itemsMax })}
+                  </span>
                 </div>
               </div>
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setPwdLoaded(true);
-                }}
-                placeholder={
-                  isEdit && !pwdLoaded ? t("form.unchanged") : "••••••••••••"
-                }
-                className="input input-mono"
-              />
-              {(pwdLoaded || !isEdit) && password.length > 0 && (
-                <PasswordStrengthMeter password={password} />
-              )}
-            </div>
+            )}
 
-            <div className="field">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                }}
-              >
-                <label style={{ margin: 0 }}>{t("form.totpLabel")}</label>
-                <div className="flex items-center gap-2">
-                  {isEdit && !totpLoaded && (
-                    <button
-                      type="button"
-                      onClick={loadCurrentSecrets}
-                      className="btn btn-ghost btn-xs"
-                    >
-                      {t("form.loadCurrentBtn")}
-                    </button>
-                  )}
-                  {(totpLoaded || totpSecret !== "") && (
-                    <button
-                      type="button"
-                      onClick={() => setShowTotpSecret((v) => !v)}
-                      className="btn btn-ghost btn-xs"
-                    >
-                      {showTotpSecret ? t("hideBtn") : t("revealBtn")}
-                    </button>
-                  )}
+            {carries.text && (
+              <div className="field vault-grow-field">
+                <label>{t("form.textLabel")}</label>
+                <textarea
+                  name="vault-entry-text"
+                  autoComplete="off"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={6}
+                  maxLength={VAULT_TYPE_LIMITS.noteTextMax}
+                  placeholder={t("form.textPlaceholder")}
+                  className="textarea"
+                />
+                <div className="help" style={{ marginTop: 4 }}>
+                  {t("form.textHint", {
+                    n: text.length,
+                    max: VAULT_TYPE_LIMITS.noteTextMax,
+                  })}
                 </div>
               </div>
-              <input
-                type={showTotpSecret ? "text" : "password"}
-                value={totpSecret}
-                onChange={(e) => {
-                  setTotpSecret(e.target.value);
-                  setTotpLoaded(true);
-                }}
-                placeholder={
-                  isEdit && !totpLoaded
-                    ? t("form.unchanged")
-                    : t("form.totpPlaceholder")
-                }
-                className="input input-mono"
-              />
-              <div className="help" style={{ marginTop: 4 }}>
-                {t("form.totpHint")}
+            )}
+
+            {carries.totp && (
+              <div className="field">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                  }}
+                >
+                  <label style={{ margin: 0 }}>{t("form.totpLabel")}</label>
+                  <div className="flex items-center gap-2">
+                    {isEdit && !totpLoaded && (
+                      <button
+                        type="button"
+                        onClick={() => void loadSecrets({ reveal: true })}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {t("form.loadCurrentBtn")}
+                      </button>
+                    )}
+                    {(totpLoaded || totpSecret !== "") && (
+                      <button
+                        type="button"
+                        onClick={() => setShowTotpSecret((v) => !v)}
+                        className="btn btn-ghost btn-xs"
+                      >
+                        {showTotpSecret ? t("hideBtn") : t("revealBtn")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  {...maskedInputProps(showTotpSecret)}
+                  name="vault-entry-totp"
+                  autoComplete="off"
+                  value={totpSecret}
+                  onChange={(e) => {
+                    setTotpSecret(e.target.value);
+                    setTotpLoaded(true);
+                  }}
+                  placeholder={
+                    isEdit && !totpLoaded
+                      ? t("form.unchanged")
+                      : t("form.totpPlaceholder")
+                  }
+                />
+                <div className="help" style={{ marginTop: 4 }}>
+                  {t("form.totpHint")}
+                </div>
+              </div>
+            )}
+
+            {/* Classement : collection · tags · favori sur une seule ligne.
+                La collection prend plus de place que les tags (ses libellés
+                sont plus longs) ; l'étoile ne prend que sa largeur et se passe
+                de titre — elle reprend .star-btn de la liste, même affordance
+                ici et sur la carte. La ligne est ancrée en bas du corps de la
+                modale (cf. .vault-classify-row). */}
+            <div className="form-row vault-classify-row">
+              <div className="field" style={{ flex: "3 1 190px" }}>
+                <label>{t("form.collectionLabel")}</label>
+                <select
+                  value={collectionId}
+                  onChange={(e) => setCollectionId(e.target.value)}
+                  className="select"
+                >
+                  <option value="">{t("form.noneCollection")}</option>
+                  {collections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field" style={{ flex: "2 1 150px" }}>
+                <label>{t("form.tagsLabel")}</label>
+                <TagsInput
+                  value={tags}
+                  onChange={setTags}
+                  suggestions={suggestions}
+                  lowercase={false}
+                  size="md"
+                />
+              </div>
+
+              <div className="field" style={{ flex: "0 0 auto", minWidth: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setFavorite((v) => !v)}
+                  aria-pressed={favorite}
+                  aria-label={
+                    favorite ? t("form.removeFavorite") : t("form.addFavorite")
+                  }
+                  title={
+                    favorite ? t("form.removeFavorite") : t("form.addFavorite")
+                  }
+                  className={`star-btn ${favorite ? "active" : ""}`}
+                  style={{
+                    fontSize: 22,
+                    height: 42,
+                    padding: "0 10px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ★
+                </button>
               </div>
             </div>
-
-            <div className="field">
-              <label>{t("form.collectionLabel")}</label>
-              <select
-                value={collectionId}
-                onChange={(e) => setCollectionId(e.target.value)}
-                className="select"
-              >
-                <option value="">{t("form.noneCollection")}</option>
-                {collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label>Tags</label>
-              <TagsInput value={tags} onChange={setTags} suggestions={suggestions} lowercase={false} />
-            </div>
-
-            <label
-              className="flex items-center gap-2"
-              style={{ cursor: "pointer", fontSize: 13 }}
-            >
-              <input
-                type="checkbox"
-                checked={favorite}
-                onChange={(e) => setFavorite(e.target.checked)}
-                style={{ cursor: "pointer" }}
-              />
-              <span>{t("form.favoriteLabel")} Favori</span>
-            </label>
 
             {error && <p className="error-text">{error}</p>}
           </div>
@@ -1970,6 +2427,7 @@ type ImportPreview = {
   collectionsCreated: number;
   dryRun: boolean;
   sample: Array<{
+    type: VaultEntryType;
     name: string;
     url: string | null;
     username: string | null;
@@ -2106,6 +2564,11 @@ function ImportDialog({
                 {preview.sample.map((e, i) => (
                   <li key={i}>
                     <strong>{e.name}</strong>
+                    {/* Les notes sécurisées Bitwarden arrivent désormais :
+                        on le montre dans l'aperçu. */}
+                    {e.type !== "LOGIN" && (
+                      <> · <span className="chip">{typeLabel(e.type, t)}</span></>
+                    )}
                     {e.username && <> · <span className="code-mono">{e.username}</span></>}
                     {e.collectionName && <> · <span className="chip">{e.collectionName}</span></>}
                   </li>

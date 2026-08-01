@@ -28,11 +28,30 @@ Accessible via **🔒 Personal vault** in the dashboard nav, at the URL
 `/vault`. No one other than you can read your entries — not even the
 OWNERs of your organisation.
 
+### The four entry types
+
+Not everything is a login on a website. The add dialog starts with a
+**type** selector, and the form adapts:
+
+| Type       | What it holds                                   | Example                     |
+|------------|-------------------------------------------------|-----------------------------|
+| **Login**  | URL *(optional)*, username, password, 2FA code  | AWS Console, Gmail          |
+| **Secret** | A single value                                  | API key, licence number     |
+| **List**   | Several labels + values                         | A bank's security questions |
+| **Note**   | Free-form text                                  | Recovery procedure          |
+
+Only the **Login** type carries a URL — so it is the only one the browser
+extension offers for autofill. The other three remain readable from the
+site itself.
+
+For a **List**, labels are encrypted just like values: search does not
+cover them, and the list simply shows "N secrets".
+
 ### Create an entry
 
 1. Click **"+ Add"** on `/vault`.
-2. Fill in:
-   - **Name** — short label (e.g. "AWS prod Console")
+2. Pick the type, then fill in:
+   - **Name** — short label (e.g. "AWS prod Console"), shared by all types
    - **URL** — associated website (used by the browser extension for
      domain matching)
    - **Username** — login / email
@@ -40,7 +59,20 @@ OWNERs of your organisation.
      (length, symbols, ambiguous character exclusion are configurable)
    - **TOTP** *(optional)* — `otpauth://...` key to generate 2FA codes
      for the third-party site (see below)
-   - **Note** — free-form context
+3. **Collection**, **tags** and **★ favourite** sit on the last row of
+   the form.
+
+### Change the type of an existing entry
+
+The type selector stays active when editing, but **only conversions that
+lose nothing** are offered. In practice: an entry that only has a name
+and a password can become a Secret, a List or a Note — its value is
+carried over automatically. If the entry still has a URL, a username or
+a 2FA code, the target type is greyed out: remove the offending field
+and save before converting.
+
+A List holding several secrets converts to nothing: empty it first if
+you want to change its shape.
 
 ### Password generator
 

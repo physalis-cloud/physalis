@@ -24,6 +24,7 @@ import {
 } from "@remixicon/react";
 import { useTranslations, useLocale } from "next-intl";
 import { encryptShareContent, generateShareKey } from "@/lib/share-crypto";
+import { maskedInputProps } from "@/lib/masked-input";
 import {
   encodeEnvelope,
   encodedByteLength,
@@ -510,12 +511,12 @@ function ShareCreateDialog({ onClose }: { onClose: () => void }) {
                 <div className="field">
                   <label>{t("createDialog.passwordLabel")}</label>
                   <input
-                    type="password"
+                    {...maskedInputProps(false, "input")}
+                    name="share-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={`≥ ${PASSWORD_MIN} chars`}
-                    autoComplete="new-password"
-                    className="input"
+                    autoComplete="off"
                   />
                 </div>
               )}

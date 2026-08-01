@@ -989,6 +989,11 @@ model VaultEntry {
   /// SetNull on delete : supprimer une collection ne supprime pas ses entrées.
   collectionId        String?
   collection          VaultCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  /// Forme de l'entrée : LOGIN | SECRET | LIST | NOTE (cf.
+  /// lib/vault-entry-types.ts). TEXTE et pas enum PG : un enum tenant-only
+  /// absent de `public` casse le deploy admin, et une 5ᵉ forme demanderait
+  /// un ALTER TYPE … ADD VALUE avec le même piège.
+  type                String           @default("LOGIN")
   name                String
   url                 String?
   username            String?
@@ -999,8 +1004,20 @@ model VaultEntry {
   totpSecretIv        String?
   totpSecretTag       String?
   /// Score de force du mot de passe (0-4, heuristique à la zxcvbn), calculé
-  /// côté serveur au save. NULL = pas de mot de passe.
+  /// côté serveur au save. NULL = pas de mot de passe. Renseigné pour le
+  /// seul type LOGIN — le scorer sur une clé d'API polluerait le filtre
+  /// « mots de passe faibles ».
   passwordStrength    Int?
+  /// Charge utile chiffrée des types LIST et NOTE (JSON AES-256-GCM :
+  /// {items:[{label,value}]} ou {text}). Libellés compris — ils en disent
+  /// plus long qu'une URL. NULL pour LOGIN et SECRET, qui n'utilisent que
+  /// les colonnes ci-dessus.
+  encryptedData       String?
+  dataIv              String?
+  dataTag             String?
+  /// Nombre d'items d'une LIST, EN CLAIR : permet d'afficher « N secrets »
+  /// dans la liste sans déchiffrer. NULL hors LIST.
+  itemCount           Int?
   tags                String[]         @default([])
   favorite            Boolean          @default(false)
   createdAt           DateTime         @default(now())

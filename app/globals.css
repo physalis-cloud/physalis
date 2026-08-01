@@ -610,6 +610,27 @@ h1.page-hero-title {
 }
 .input[readonly] { background: var(--code-bg); }
 
+/* Champ masqué SANS `type="password"` — cf. lib/masked-input.ts pour le
+ * pourquoi (pop-up « Enregistrer ce mot de passe ? » et pré-remplissage par
+ * le navigateur, absurdes dans un gestionnaire de secrets).
+ *
+ * `-webkit-text-security` couvre Chromium, Safari et Firefox 122+. */
+.input-masked {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+/* Repli pour un navigateur qui ne connaît pas la propriété : la valeur doit
+ * rester ILLISIBLE. `color: transparent` la rend invisible (pas de points,
+ * mais rien à lire par-dessus l'épaule) ; le curseur et le placeholder,
+ * eux, restent visibles pour que le champ reste utilisable. */
+@supports not (-webkit-text-security: disc) {
+  .input-masked {
+    color: transparent;
+    caret-color: var(--fg);
+  }
+  .input-masked::placeholder { color: var(--muted); }
+}
+
 /* ─── Select (dropdown) ───────────────────────────────────────────────
  * Chevron custom (SVG cuivre) avec de l'air à droite — le chevron natif est
  * basique et collé au bord. La liste déroulée (« picker ») reçoit coins
@@ -1089,6 +1110,7 @@ h1.page-hero-title {
   border-radius: 14px;
   box-shadow: 0 20px 60px -20px rgba(31,31,31,0.3);
 }
+.dialog-md { max-width: 560px; }
 .dialog-lg { max-width: 640px; }
 .dialog-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -1116,6 +1138,36 @@ h1.page-hero-title {
   background: var(--bg);
   border-radius: 0 0 14px 14px;
 }
+
+/* Modale du coffre personnel : hauteur CONSTANTE quel que soit le type
+ * d'entrée, pour que basculer Identifiant → Note ne fasse pas sauter la
+ * fenêtre. La valeur est la hauteur MAXIMALE du formulaire Identifiant —
+ * mesurée à 620px au repos, 656px une fois la jauge de force affichée. Caler
+ * sur 620 aurait fait scroller le type le plus courant dès la saisie d'un mot
+ * de passe. Les autres types (347 → 517px) sont plus courts et complètent
+ * avec du vide.
+ * Sur écran court, `max-height` reprend la main : le corps se comprime et
+ * défile, en gardant en-tête et pied de modale visibles. */
+.vault-dialog-body {
+  height: 660px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+/* `.field` porte `flex: 1` — utile en ligne, désastreux dans une colonne de
+ * hauteur fixe : chaque champ s'étirait et le formulaire se retrouvait criblé
+ * de trous. Les champs gardent donc leur hauteur naturelle et se tassent en
+ * HAUT du corps de la modale. */
+.vault-dialog-body > * { flex: 0 0 auto; }
+/* La ligne de classement (collection · tags · favori) reste ancrée EN BAS,
+ * quelle que soit la hauteur du formulaire au-dessus : c'est un pied de
+ * formulaire, il ne doit pas flotter au milieu du vide. */
+.vault-dialog-body .vault-classify-row { margin-top: auto; }
+/* Exception : l'éditeur de la Note absorbe l'espace disponible. flex-grow est
+ * résolu AVANT les marges auto, donc il ne reste rien à absorber pour la
+ * marge ci-dessus — la ligne de classement se retrouve en bas de toute façon,
+ * mais collée à un grand éditeur plutôt qu'à du vide. */
+.vault-dialog-body .vault-grow-field { flex: 1 1 auto; min-height: 0; }
+.vault-dialog-body .vault-grow-field .textarea { flex: 1 1 auto; min-height: 120px; }
 
 /* ─── Misc utilities ──────────────────────────────────────────────── */
 
@@ -1978,6 +2030,12 @@ a.text-accent { text-decoration: underline; }
     border-radius: 12px 12px 0 0;
   }
   .dialog-body { padding: 14px 16px; gap: 12px; }
+  /* En mobile les champs passent en colonne : la hauteur fixe desktop n'a
+     plus de sens, on laisse le contenu dicter. */
+  .vault-dialog-body {
+    height: auto;
+    max-height: none;
+  }
   .dialog-footer {
     padding: 12px 16px;
     border-radius: 0 0 12px 12px;

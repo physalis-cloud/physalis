@@ -28,11 +28,31 @@ Accessible via **🔒 Coffre personnel** dans la nav du dashboard, à
 l'URL `/vault`. Personne d'autre que vous ne peut lire vos entrées —
 même les OWNER de votre organisation.
 
+### Les quatre types d'entrée
+
+Tout n'est pas un login sur un site. La modale d'ajout commence par un
+sélecteur de **type**, et le formulaire s'adapte :
+
+| Type            | Ce qu'il contient                                  | Exemple                          |
+|-----------------|----------------------------------------------------|----------------------------------|
+| **Identifiant** | URL *(facultative)*, login, mot de passe, code 2FA | Console AWS, Gmail               |
+| **Secret**      | Une seule valeur                                   | Clé d'API, numéro de licence     |
+| **Liste**       | Plusieurs libellés + valeurs                       | Questions secrètes d'une banque  |
+| **Note**        | Un texte libre                                     | Procédure de récupération        |
+
+Seul le type **Identifiant** porte une URL — c'est donc le seul que
+l'extension navigateur propose en remplissage automatique. Les trois
+autres restent lisibles depuis le site.
+
+Pour une **Liste**, les libellés sont chiffrés au même titre que les
+valeurs : la recherche ne les couvre pas, la liste affiche simplement
+« N secrets ».
+
 ### Créer une entrée
 
 1. Bouton **« + Ajouter »** sur `/vault`.
-2. Remplissez :
-   - **Nom** — libellé court (ex. « Console AWS prod »)
+2. Choisissez le type, puis remplissez :
+   - **Nom** — libellé court (ex. « Console AWS prod »), commun à tous les types
    - **URL** — site web associé (utilisé par l'extension navigateur pour
      le matching de domaine)
    - **Identifiant** — login / email
@@ -40,7 +60,20 @@ même les OWNER de votre organisation.
      (longueur, symboles, exclusion de caractères ambigus configurables)
    - **TOTP** *(facultatif)* — clé `otpauth://...` pour générer les codes
      2FA du site tiers (voir plus bas)
-   - **Note** — contexte libre
+3. **Collection**, **tags** et **★ favori** se règlent sur la dernière
+   ligne du formulaire.
+
+### Changer le type d'une entrée existante
+
+Le sélecteur de type reste actif en modification, mais **seules les
+conversions qui ne perdent rien** sont proposées. Concrètement : une
+entrée qui n'a qu'un nom et un mot de passe peut devenir un Secret, une
+Liste ou une Note — sa valeur est reportée automatiquement. Si l'entrée
+porte encore une URL, un login ou un code 2FA, le type visé est grisé :
+retirez le champ gênant et enregistrez avant de convertir.
+
+Une Liste de plusieurs secrets ne se convertit vers rien : videz-la
+d'abord si vous voulez en changer la forme.
 
 ### Générateur de mot de passe
 

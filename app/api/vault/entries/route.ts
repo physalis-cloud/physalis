@@ -10,6 +10,18 @@ import { estimateStrength } from "@/lib/password-strength";
 import { readJson, requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { parseTotpInput } from "@/lib/otpauth-parse";
+import {
+  CARRIES,
+  isVaultEntryType,
+  normalizeEntryType,
+  typeHasPasswordStrength,
+  validateListItems,
+  validateNoteText,
+  VAULT_ENTRY_TYPES,
+  VAULT_TYPE_LIMITS,
+  type VaultEntryType,
+} from "@/lib/vault-entry-types";
+import { encryptPayload } from "@/lib/vault-entry-payload";
 
 const NAME_MAX = 200;
 const URL_MAX = 2048;
@@ -79,6 +91,7 @@ export async function GET(req: Request) {
     where,
     select: {
       id: true,
+      type: true,
       name: true,
       url: true,
       username: true,
@@ -86,6 +99,7 @@ export async function GET(req: Request) {
       favorite: true,
       passwordStrength: true,
       encryptedTotpSecret: true,
+      itemCount: true,
       collectionId: true,
       createdAt: true,
       updatedAt: true,
@@ -103,10 +117,13 @@ export async function GET(req: Request) {
       )
     : entries;
 
-  // Convertit encryptedTotpSecret en booleen pour le shape liste.
+  // Convertit encryptedTotpSecret en booleen pour le shape liste. Le `type`
+  // est normalise ICI : le client indexe dessus (CARRIES, formulaires) et ne
+  // doit jamais recevoir une valeur hors des 4 formes connues.
   const shaped = filtered.map(
-    ({ encryptedTotpSecret, ...rest }) => ({
+    ({ encryptedTotpSecret, type, ...rest }) => ({
       ...rest,
+      type: normalizeEntryType(type),
       hasTotpSecret: encryptedTotpSecret !== null,
     }),
   );
@@ -121,11 +138,14 @@ export async function POST(req: Request) {
 
   const body = (await readJson(req)) as
     | {
+        type?: string;
         name?: string;
         url?: string | null;
         username?: string | null;
         password?: string | null;
         totpSecret?: string | null;
+        items?: unknown;
+        text?: unknown;
         tags?: string[];
         favorite?: boolean;
         collectionId?: string | null;
@@ -138,6 +158,18 @@ export async function POST(req: Request) {
     );
   }
 
+  // `type` absent → LOGIN (compat : l'extension et les anciens clients ne
+  // l'envoient pas). Un type PRÉSENT mais inconnu est une erreur, pas un
+  // fallback silencieux.
+  if (body.type !== undefined && !isVaultEntryType(body.type)) {
+    return NextResponse.json(
+      { error: `type must be one of ${VAULT_ENTRY_TYPES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+  const type: VaultEntryType = isVaultEntryType(body.type) ? body.type : "LOGIN";
+  const carries = CARRIES[type];
+
   const name = body.name.trim();
   if (!name || name.length > NAME_MAX) {
     return NextResponse.json(
@@ -146,12 +178,14 @@ export async function POST(req: Request) {
     );
   }
 
+  // Les champs étrangers au type sont ignorés, pas persistés : une NOTE ne
+  // garde pas d'URL fantôme même si le client en envoie une.
   const url =
-    typeof body.url === "string" && body.url.trim()
+    carries.url && typeof body.url === "string" && body.url.trim()
       ? body.url.trim().slice(0, URL_MAX)
       : null;
   const username =
-    typeof body.username === "string" && body.username.trim()
+    carries.username && typeof body.username === "string" && body.username.trim()
       ? body.username.trim().slice(0, USERNAME_MAX)
       : null;
   const tags = normalizeTags(body.tags);
@@ -185,9 +219,14 @@ export async function POST(req: Request) {
   let passwordIv: string | null = null;
   let passwordTag: string | null = null;
   // Score de force calculé sur le clair, avant chiffrement (jamais recalculé
-  // depuis la valeur chiffrée). NULL si pas de mot de passe.
+  // depuis la valeur chiffrée). NULL si pas de mot de passe — et jamais
+  // calculé hors LOGIN (une clé d'API n'est pas un mot de passe faible).
   let passwordStrength: number | null = null;
-  if (typeof body.password === "string" && body.password.length > 0) {
+  if (
+    carries.password &&
+    typeof body.password === "string" &&
+    body.password.length > 0
+  ) {
     if (body.password.length > PASSWORD_MAX) {
       return NextResponse.json(
         { error: `password must be <= ${PASSWORD_MAX} chars` },
@@ -198,13 +237,45 @@ export async function POST(req: Request) {
     encryptedPassword = payload.encryptedValue;
     passwordIv = payload.iv;
     passwordTag = payload.tag;
-    passwordStrength = estimateStrength(body.password).score;
+    if (typeHasPasswordStrength(type)) {
+      passwordStrength = estimateStrength(body.password).score;
+    }
+  }
+
+  // Charge utile chiffrée des types LIST / NOTE.
+  let payloadColumns;
+  if (type === "LIST") {
+    const items = validateListItems(body.items ?? []);
+    if (items === null) {
+      return NextResponse.json(
+        {
+          error: `items must be an array of <= ${VAULT_TYPE_LIMITS.itemsMax} {label,value}, label <= ${VAULT_TYPE_LIMITS.itemLabelMax} chars, value <= ${VAULT_TYPE_LIMITS.itemValueMax} chars`,
+        },
+        { status: 400 },
+      );
+    }
+    payloadColumns = encryptPayload(type, { items });
+  } else if (type === "NOTE") {
+    const text = validateNoteText(body.text ?? "");
+    if (text === null) {
+      return NextResponse.json(
+        { error: `text must be a string of <= ${VAULT_TYPE_LIMITS.noteTextMax} chars` },
+        { status: 400 },
+      );
+    }
+    payloadColumns = encryptPayload(type, { text });
+  } else {
+    payloadColumns = encryptPayload(type, {});
   }
 
   let encryptedTotpSecret: string | null = null;
   let totpSecretIv: string | null = null;
   let totpSecretTag: string | null = null;
-  if (typeof body.totpSecret === "string" && body.totpSecret.length > 0) {
+  if (
+    carries.totp &&
+    typeof body.totpSecret === "string" &&
+    body.totpSecret.length > 0
+  ) {
     if (body.totpSecret.length > TOTP_SECRET_MAX) {
       return NextResponse.json(
         { error: `totpSecret must be <= ${TOTP_SECRET_MAX} chars` },
@@ -228,6 +299,7 @@ export async function POST(req: Request) {
     data: {
       userId: user.id,
       collectionId,
+      type,
       name,
       url,
       username,
@@ -238,17 +310,20 @@ export async function POST(req: Request) {
       encryptedTotpSecret,
       totpSecretIv,
       totpSecretTag,
+      ...payloadColumns,
       tags,
       favorite,
     },
     select: {
       id: true,
+      type: true,
       name: true,
       url: true,
       username: true,
       tags: true,
       favorite: true,
       passwordStrength: true,
+      itemCount: true,
       collectionId: true,
       createdAt: true,
       updatedAt: true,
@@ -262,6 +337,7 @@ export async function POST(req: Request) {
     targetId: entry.id,
     metadata: {
       source: "personal",
+      type,
       hasPassword: encryptedPassword !== null,
       tagsCount: tags.length,
     },

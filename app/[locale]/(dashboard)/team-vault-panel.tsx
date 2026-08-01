@@ -11,6 +11,7 @@ import {
 } from "@remixicon/react";
 import EmptyCard from "@/components/EmptyCard";
 import { generatePassword } from "@/lib/generate-password";
+import { maskedInputProps } from "@/lib/masked-input";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ImmediateRotationSection from "@/components/ImmediateRotationSection";
 import TeamVaultImportDialog from "./team-vault-import-dialog";
@@ -976,7 +977,9 @@ function EntryDialog({
             ✕
           </button>
         </div>
-        <form onSubmit={submit}>
+        {/* autoComplete=off : sans ça le navigateur prend la modale pour un
+            formulaire de connexion et pré-remplit les champs. */}
+        <form onSubmit={submit} autoComplete="off">
           <div className="dialog-body">
             <div className="field">
               <label>{t("form.nameLabel")} *</label>
@@ -1048,7 +1051,9 @@ function EntryDialog({
                 </div>
               </div>
               <input
-                type={showPassword ? "text" : "password"}
+                {...maskedInputProps(showPassword)}
+                name="team-vault-password"
+                autoComplete="off"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -1057,7 +1062,6 @@ function EntryDialog({
                 placeholder={
                   isEdit && !pwdLoaded ? t("form.unchanged") : "••••••••••••"
                 }
-                className="input input-mono"
               />
             </div>
             <div className="field">
@@ -1092,7 +1096,9 @@ function EntryDialog({
                 </div>
               </div>
               <input
-                type={showTotpSecret ? "text" : "password"}
+                {...maskedInputProps(showTotpSecret)}
+                name="team-vault-totp"
+                autoComplete="off"
                 value={totpSecret}
                 onChange={(e) => {
                   setTotpSecret(e.target.value);
@@ -1103,7 +1109,6 @@ function EntryDialog({
                     ? t("form.unchanged")
                     : t("form.totpPlaceholder")
                 }
-                className="input input-mono"
               />
               <div className="help" style={{ marginTop: 4 }}>
                 {t("form.totpHint")}

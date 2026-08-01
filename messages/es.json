@@ -2127,7 +2127,23 @@
       "createEntryBtn": "Crear",
       "stayInCollection": "(permanecer en esta colección)",
       "moveCollectionHint": "Para mover esta entrada a otra colección del mismo ámbito.",
-      "tagsLabel": "Etiquetas"
+      "tagsLabel": "Etiquetas",
+      "secretValueLabel": "Valor",
+      "itemsLabel": "Secretos",
+      "addItemBtn": "+ Añadir",
+      "removeItemBtn": "Eliminar esta fila",
+      "itemLabelPlaceholder": "Etiqueta",
+      "itemValuePlaceholder": "Valor",
+      "itemsHint": "Máximo {max} filas. Las etiquetas se cifran junto con los valores.",
+      "textLabel": "Texto",
+      "textPlaceholder": "Contenido cifrado…",
+      "textHint": "{n} / {max} caracteres.",
+      "typeLocked": {
+        "url": "Imposible: esta entrada tiene una URL, que ese tipo no admite. Quítala y guarda primero.",
+        "username": "Imposible: esta entrada tiene un usuario, que ese tipo no admite. Quítalo y guarda primero.",
+        "totp": "Imposible: esta entrada tiene un código 2FA, que ese tipo no admite. Quítalo y guarda primero.",
+        "items": "Imposible: esta lista tiene varios secretos, que ese tipo no puede contener todos."
+      }
     },
     "move": {
       "noDestError": "Seleccione un destino.",
@@ -2149,6 +2165,31 @@
       "movingBtn": "Moviendo…",
       "moveBtn": "Mover",
       "loadingDest": "Cargando destinos…"
+    },
+    "itemCount": "{n} secretos",
+    "copySecretBtn": "Copiar el valor",
+    "copyTextBtn": "Copiar el texto",
+    "types": {
+      "LOGIN": {
+        "label": "Credencial",
+        "hint": "Sitio o aplicación: URL (opcional), usuario, contraseña y código 2FA.",
+        "namePlaceholder": "Gmail personal"
+      },
+      "SECRET": {
+        "label": "Secreto",
+        "hint": "Un único valor que proteger: clave de API, licencia, código.",
+        "namePlaceholder": "Clave API de Stripe"
+      },
+      "LIST": {
+        "label": "Lista",
+        "hint": "Varias etiquetas y valores en una misma entrada.",
+        "namePlaceholder": "Preguntas secretas del banco"
+      },
+      "NOTE": {
+        "label": "Nota",
+        "hint": "Un texto libre, cifrado como el resto.",
+        "namePlaceholder": "Procedimiento de recuperación"
+      }
     }
   },
   "overageBanner": {

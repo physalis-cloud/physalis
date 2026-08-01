@@ -448,6 +448,9 @@ export async function POST(req: Request) {
       const created = await prisma.vaultEntry.create({
         data: {
           userId,
+          // L'autosave navigateur ne produit que des credentials de site.
+          // Explicite plutôt que de dépendre du DEFAULT de la colonne.
+          type: "LOGIN",
           name: data.name,
           url: data.url,
           username: data.username,
@@ -478,9 +481,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // update — verifie la propriete
+    // update — verifie la propriete ET le type. Sans le filtre `type`,
+    // l'autosave ecraserait une NOTE ou une LIST avec des champs de login :
+    // l'entree garderait son type mais gagnerait une URL et un mot de passe,
+    // et son blob chiffre deviendrait orphelin. Une entree non-LOGIN est
+    // invisible pour l'extension (404), c'est volontaire.
     const existing = await prisma.vaultEntry.findFirst({
-      where: { id: data.id!, userId },
+      where: { id: data.id!, userId, type: "LOGIN" },
       select: { id: true },
     });
     if (!existing) {

@@ -16,6 +16,7 @@ import TagsInput from "@/components/TagsInput";
 import SecretsImportDialog from "./secrets-import-dialog";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ImmediateRotationSection from "@/components/ImmediateRotationSection";
+import { maskedInputProps } from "@/lib/masked-input";
 
 type RotationStrategy = "DATABASE" | "JWT_SECRET" | "REMINDER" | "API_KEY" | "WEBHOOK";
 
@@ -1002,7 +1003,7 @@ function SecretRotationDialog({
                       </div>
                       <div className="field">
                         <label>{t("hookTokenLabel")}</label>
-                        <input value={hookToken} onChange={(e) => setHookToken(e.target.value)} type="password" autoComplete="new-password" name="rotation-hook-token" placeholder={t("hookTokenPlaceholder")} className="input input-mono" disabled={pending} />
+                        <input value={hookToken} onChange={(e) => setHookToken(e.target.value)} {...maskedInputProps(false)} autoComplete="off" name="rotation-hook-token" placeholder={t("hookTokenPlaceholder")} disabled={pending} />
                         <p className="help" style={{ fontSize: 11, marginTop: 2 }}>{t("hookTokenNote")}</p>
                       </div>
                       <div className="field">

@@ -146,6 +146,8 @@ export const REGISTRY = [
     triplets: [
       ["encryptedPassword", "passwordIv", "passwordTag"],
       ["encryptedTotpSecret", "totpSecretIv", "totpSecretTag"],
+      // Charge utile des types LIST / NOTE (cf. lib/vault-entry-types.ts).
+      ["encryptedData", "dataIv", "dataTag"],
     ],
   },
   {

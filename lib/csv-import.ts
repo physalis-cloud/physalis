@@ -6,14 +6,25 @@
 //
 // Détection auto du format : Bitwarden / Chrome / générique. Mapping
 // vers la shape canonique :
-//   { name, url, username, password, totpSecret, collectionName, favorite }
+//   { type, name, url, username, password, totpSecret, text,
+//     collectionName, favorite }
+//
+// Les notes sécurisées Bitwarden (type=note) deviennent des entrées NOTE ;
+// tout le reste reste LOGIN. Les cartes et identités ne sont toujours pas
+// importables : leur structure n'a pas d'équivalent dans le coffre.
+
+import type { VaultEntryType } from "./vault-entry-types";
+import { VAULT_TYPE_LIMITS } from "./vault-entry-types";
 
 export type ImportedEntry = {
+  type: VaultEntryType;
   name: string;
   url: string | null;
   username: string | null;
   password: string | null;
   totpSecret: string | null;
+  /** Contenu des entrées NOTE. NULL pour les autres types. */
+  text: string | null;
   collectionName: string | null;
   favorite: boolean;
 };
@@ -149,21 +160,48 @@ function nonEmptyOrNull(s: string, max: number): string | null {
 }
 
 function mapBitwarden(row: string[], idx: Record<string, number>): ImportedEntry | null {
-  // Bitwarden type=login → mappable. Ignore cards/identities/notes.
+  // Bitwarden : type=login et type=note sont mappables. Les cartes et les
+  // identités restent ignorées (aucun type du coffre ne les représente).
   const type = pick(row, idx, "type").toLowerCase();
-  if (type && type !== "login") return null;
+  if (type && type !== "login" && type !== "note") return null;
 
   const name = pick(row, idx, "name");
   if (!name) return null;
 
+  const collectionName = nonEmptyOrNull(pick(row, idx, "folder"), COLLECTION_MAX);
+  const favorite = pick(row, idx, "favorite") === "1";
+
+  if (type === "note") {
+    // Une note secure sans contenu n'a rien à protéger — on la saute plutôt
+    // que de créer une entrée vide.
+    const text = nonEmptyOrNull(
+      pick(row, idx, "notes"),
+      VAULT_TYPE_LIMITS.noteTextMax,
+    );
+    if (!text) return null;
+    return {
+      type: "NOTE",
+      name: clamp(name, NAME_MAX),
+      url: null,
+      username: null,
+      password: null,
+      totpSecret: null,
+      text,
+      collectionName,
+      favorite,
+    };
+  }
+
   return {
+    type: "LOGIN",
     name: clamp(name, NAME_MAX),
     url: nonEmptyOrNull(pick(row, idx, "login_uri"), URL_MAX),
     username: nonEmptyOrNull(pick(row, idx, "login_username"), USERNAME_MAX),
     password: nonEmptyOrNull(pick(row, idx, "login_password"), PASSWORD_MAX),
     totpSecret: nonEmptyOrNull(pick(row, idx, "login_totp"), TOTP_MAX),
-    collectionName: nonEmptyOrNull(pick(row, idx, "folder"), COLLECTION_MAX),
-    favorite: pick(row, idx, "favorite") === "1",
+    text: null,
+    collectionName,
+    favorite,
   };
 }
 
@@ -172,11 +210,13 @@ function mapChrome(row: string[], idx: Record<string, number>): ImportedEntry | 
   if (!name) return null;
 
   return {
+    type: "LOGIN",
     name: clamp(name, NAME_MAX),
     url: nonEmptyOrNull(pick(row, idx, "url"), URL_MAX),
     username: nonEmptyOrNull(pick(row, idx, "username"), USERNAME_MAX),
     password: nonEmptyOrNull(pick(row, idx, "password"), PASSWORD_MAX),
     totpSecret: null,
+    text: null,
     collectionName: null,
     favorite: false,
   };
@@ -220,11 +260,13 @@ function mapGeneric(row: string[], idx: Record<string, number>): ImportedEntry |
     pick(row, idx, "group");
 
   return {
+    type: "LOGIN",
     name: clamp(name, NAME_MAX),
     url: nonEmptyOrNull(url, URL_MAX),
     username: nonEmptyOrNull(username, USERNAME_MAX),
     password: nonEmptyOrNull(password, PASSWORD_MAX),
     totpSecret: nonEmptyOrNull(totp, TOTP_MAX),
+    text: null,
     collectionName: nonEmptyOrNull(folder, COLLECTION_MAX),
     favorite: false,
   };

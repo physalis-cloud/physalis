@@ -25,6 +25,7 @@ import { logAction } from "@/lib/audit";
 import { hasVaultRole } from "@/lib/vault-access";
 import { effectiveProjectRole } from "@/lib/project-access";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
+import { normalizeEntryType } from "@/lib/vault-entry-types";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -207,6 +208,23 @@ export async function POST(req: Request, { params }: Params) {
   });
   if (!source) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // TeamVaultEntry et AppAccount n'ont ni colonne `type` ni blob de charge
+  // utile : deplacer une LIST ou une NOTE viderait l'entree en silence. On
+  // refuse tant que le coffre d'equipe n'a pas la parite des types. LOGIN et
+  // SECRET passent — leur contenu (url/login/mdp/2FA, ou le seul mot de
+  // passe) tient entierement dans la cible.
+  const sourceType = normalizeEntryType(source.type);
+  if (sourceType !== "LOGIN" && sourceType !== "SECRET") {
+    return NextResponse.json(
+      {
+        error: `Les entrées de type ${sourceType} ne peuvent pas être déplacées vers un coffre d'équipe.`,
+        code: "type_not_movable",
+        type: sourceType,
+      },
+      { status: 400 },
+    );
   }
 
   // Cible « compte de projet » (AppAccount) — déplacement INTER-MODÈLES :

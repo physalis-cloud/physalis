@@ -1583,16 +1583,23 @@ PostgreSQL PRIMARY                            PostgreSQL STANDBY (hot)
 
 Le forced-command côté primary passe par `/usr/local/bin/backup-dispatch.sh` qui reconnaît la commande `dump-physalis` et délègue à `/usr/local/bin/physalis-dump.sh` (defaults : container `physalis-db`, user/db `physalis`). Le secondary stocke les archives sous `/srv/backups/physalis/physalis-YYYY-MM-DD.db.gz.gpg` et logge dans `/var/log/physalis-backup.log`.
 
+> 🔺 **Ce paragraphe et le schéma ci-dessus décrivent l'ère GPG, révolue.** La couche GPG a été
+> remplacée par l'**enveloppe OpenBao** (`.penv`) le 2026-06-13, puis **entièrement retirée du parc
+> le 2026-07-29** — archives, clés et scripts. Les horaires, chemins (`.gz.gpg`) et noms de scripts
+> ci-dessus ne correspondent plus à l'installation. **La référence faisant autorité est le document
+> de résilience** (`docs/resilience.md`, interne). Le tableau ci-dessous a été mis à jour ; le schéma
+> ASCII, lui, est conservé à titre historique.
+
 | Élément | Valeur |
 |---|---|
 | **Réplication WAL** | streaming, RPO < 1s, RTO < 5min |
-| **Backup GPG** quotidien | 3h00, RPO 24h, RTO 5-20 min (restore DB) + propagation DNS |
-| Rétention backups | 7 daily + 12 monthly = 18 fichiers max |
-| Chiffrement | GPG RSA 4096 dédié backup, sans passphrase + FS hardening |
-| Vérif intégrité | à chaque pull (decrypt + gunzip + grep entête) |
+| **Backup enveloppe `.penv`** quotidien | pull 04h30 UTC, RPO 24h, RTO 5-20 min (restore DB) + propagation DNS |
+| Rétention backups | 7 daily + 12 monthly ; **copie hors site** `ovh:` (push 05h30 UTC) |
+| Chiffrement | **enveloppe OpenBao Transit** (`physalis-platform`) : DEK par archive, AES-256-CTR + HMAC-SHA256 (*encrypt-then-MAC*). Aucune clé de déchiffrement sur le secondaire |
+| Vérif intégrité | à chaque pull, + contrôle quotidien 05h00 |
 | Test restauration | mensuel automatisé (DB Postgres scratch, count rows + 5 tables sentinelles) |
-| Monitoring | healthchecks.io (heartbeat externe, alerte si silence > 25h) |
-| Escrow | `ENCRYPTION_KEY` + clé GPG privée dans Vaultwarden partagé |
+| Monitoring | healthchecks.io (heartbeat externe, alerte si silence > 25h) + check `seal-status` OpenBao |
+| Escrow | `ENCRYPTION_KEY` + parts Shamir 3/5 — **coffre en ligne + 3 enveloppes papier réparties** sur trois lieux, seuil 3/5, ≥ 2 dépositaires (plus de Vaultwarden, plus de clé GPG) |
 
 Scripts livrés dans [scripts/backup/](../scripts/backup/) (`primary/` + `secondary/`) avec [README d'install](../scripts/backup/README.md). Procédure complète + runbook de basculement dans [todo-backup-failover.md](steps-docs/done/todo-backup-failover.md). État de l'install actuelle dans [doc-install-backup.md](doc-install-backup.md). Réplication WAL dans [replication-wal.md](replication-wal.md).
 

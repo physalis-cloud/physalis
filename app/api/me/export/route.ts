@@ -24,6 +24,11 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  normalizeEntryType,
+  type VaultPayload,
+} from "@/lib/vault-entry-types";
+import { decryptPayload } from "@/lib/vault-entry-payload";
 
 type EncryptedField = {
   encryptedValue: string;
@@ -41,6 +46,21 @@ function safeDecrypt(field: EncryptedField | null): string | null {
   }
 }
 
+/** Charge utile LIST / NOTE d'une VaultEntry. Même tolérance que safeDecrypt :
+ *  un blob illisible ne doit pas faire échouer tout l'export. */
+function safeDecryptPayload(row: {
+  encryptedData: string | null;
+  dataIv: string | null;
+  dataTag: string | null;
+}): VaultPayload {
+  try {
+    return decryptPayload(row);
+  } catch (err) {
+    console.error("[me/export] vault payload decrypt failed:", err);
+    return {};
+  }
+}
+
 /**
  * Charge le coffre personnel (VaultEntry) de l'user, mots de passe
  * déchiffrés. Partagé entre l'export complet et l'export scope=personal.
@@ -50,36 +70,50 @@ async function loadPersonalVaultEntries(userId: string) {
     where: { userId },
     select: {
       id: true,
+      type: true,
       name: true,
       url: true,
       username: true,
       encryptedPassword: true,
       passwordIv: true,
       passwordTag: true,
+      encryptedData: true,
+      dataIv: true,
+      dataTag: true,
       tags: true,
       favorite: true,
       createdAt: true,
       updatedAt: true,
     },
   });
-  return vaultEntries.map((v) => ({
-    id: v.id,
-    name: v.name,
-    url: v.url,
-    username: v.username,
-    password:
-      v.encryptedPassword && v.passwordIv && v.passwordTag
-        ? safeDecrypt({
-            encryptedValue: v.encryptedPassword,
-            iv: v.passwordIv,
-            tag: v.passwordTag,
-          })
-        : null,
-    tags: v.tags,
-    favorite: v.favorite,
-    createdAt: v.createdAt,
-    updatedAt: v.updatedAt,
-  }));
+  return vaultEntries.map((v) => {
+    // Charge utile des types LIST / NOTE. Sans ça, l'export RGPD — le seul
+    // endpoint qui déchiffre par conception — perdrait en silence tout le
+    // contenu des entrées qui ne sont pas des logins.
+    const type = normalizeEntryType(v.type);
+    const payload = safeDecryptPayload(v);
+    return {
+      id: v.id,
+      type,
+      name: v.name,
+      url: v.url,
+      username: v.username,
+      password:
+        v.encryptedPassword && v.passwordIv && v.passwordTag
+          ? safeDecrypt({
+              encryptedValue: v.encryptedPassword,
+              iv: v.passwordIv,
+              tag: v.passwordTag,
+            })
+          : null,
+      ...(type === "LIST" ? { items: payload.items ?? [] } : {}),
+      ...(type === "NOTE" ? { text: payload.text ?? "" } : {}),
+      tags: v.tags,
+      favorite: v.favorite,
+      createdAt: v.createdAt,
+      updatedAt: v.updatedAt,
+    };
+  });
 }
 
 /** Construit la réponse JSON downloadable (Content-Disposition attachment). */

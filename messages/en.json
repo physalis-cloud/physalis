@@ -2127,7 +2127,23 @@
       "createEntryBtn": "Create",
       "stayInCollection": "(stay in this collection)",
       "moveCollectionHint": "To move this entry to another collection in the same scope.",
-      "tagsLabel": "Tags"
+      "tagsLabel": "Tags",
+      "secretValueLabel": "Value",
+      "itemsLabel": "Secrets",
+      "addItemBtn": "+ Add",
+      "removeItemBtn": "Remove this row",
+      "itemLabelPlaceholder": "Label",
+      "itemValuePlaceholder": "Value",
+      "itemsHint": "{max} rows max. Labels are encrypted along with the values.",
+      "textLabel": "Text",
+      "textPlaceholder": "Encrypted content…",
+      "textHint": "{n} / {max} characters.",
+      "typeLocked": {
+        "url": "Not possible: this entry has a URL, which that type cannot hold. Remove it and save first.",
+        "username": "Not possible: this entry has a username, which that type cannot hold. Remove it and save first.",
+        "totp": "Not possible: this entry has a 2FA code, which that type cannot hold. Remove it and save first.",
+        "items": "Not possible: this list holds several secrets, which that type cannot hold."
+      }
     },
     "move": {
       "noDestError": "Select a destination.",
@@ -2149,6 +2165,31 @@
       "movingBtn": "Moving…",
       "moveBtn": "Move",
       "loadingDest": "Loading destinations…"
+    },
+    "itemCount": "{n} secrets",
+    "copySecretBtn": "Copy value",
+    "copyTextBtn": "Copy text",
+    "types": {
+      "LOGIN": {
+        "label": "Login",
+        "hint": "Site or app: URL (optional), username, password and 2FA code.",
+        "namePlaceholder": "Personal Gmail"
+      },
+      "SECRET": {
+        "label": "Secret",
+        "hint": "A single value to protect: API key, licence, code.",
+        "namePlaceholder": "Stripe API key"
+      },
+      "LIST": {
+        "label": "List",
+        "hint": "Several labels and values in one entry.",
+        "namePlaceholder": "Bank security questions"
+      },
+      "NOTE": {
+        "label": "Note",
+        "hint": "Free text, encrypted like everything else.",
+        "namePlaceholder": "Recovery procedure"
+      }
     }
   },
   "overageBanner": {

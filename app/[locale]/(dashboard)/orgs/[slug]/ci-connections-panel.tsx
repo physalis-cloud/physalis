@@ -6,6 +6,7 @@ import type { OrgRole } from "@prisma/client";
 import { RiGitBranchLine } from "@remixicon/react";
 import EmptyCard from "@/components/EmptyCard";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { maskedInputProps } from "@/lib/masked-input";
 
 type Connection = {
   id: string;
@@ -298,8 +299,9 @@ function ConnectionForm({
   }
 
   // Champ secret avec bouton « Afficher » en édition (si le secret est posé).
-  // Après reveal, le champ password passe en clair (sinon il afficherait des
-  // points). autoComplete + name dédié pour éviter l'autofill du navigateur.
+  // Le masquage passe par `.input-masked` et non par `type="password"` :
+  // aucun champ mot de passe dans le DOM, donc pas de pop-up « Enregistrer ce
+  // mot de passe ? » du navigateur (cf. lib/masked-input.ts).
   const secretField = (
     label: string,
     kind: string,
@@ -309,7 +311,6 @@ function ConnectionForm({
     type: "text" | "password",
   ) => {
     const isPassword = type === "password";
-    const effectiveType = isPassword && revealed.has(kind) ? "text" : type;
     return (
       <div className="field">
         <label className="flex items-center justify-between gap-2">
@@ -325,13 +326,14 @@ function ConnectionForm({
           )}
         </label>
         <input
-          type={effectiveType}
+          {...(isPassword
+            ? maskedInputProps(revealed.has(kind))
+            : { type: "text" as const, className: "input input-mono" })}
           name={`ci-${kind}`}
-          autoComplete={isPassword ? "new-password" : "off"}
+          autoComplete="off"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="input input-mono"
         />
       </div>
     );
@@ -406,13 +408,12 @@ function ConnectionForm({
             <label>{t(syncTokenLabelKey)}</label>
             {/* Token write-only : pas de bouton « Afficher » (non relisible). */}
             <input
-              type="password"
+              {...maskedInputProps(false)}
               name={`ci-${syncTokenKind}`}
-              autoComplete="new-password"
+              autoComplete="off"
               value={syncToken}
               onChange={(e) => setSyncToken(e.target.value)}
               placeholder={isEdit && has(syncTokenKind) ? t("secretKeep") : ""}
-              className="input input-mono"
             />
             <p className="help">{t(syncTokenHelpKey)}</p>
           </div>

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { generatePassword } from "@/lib/generate-password";
+import { maskedInputProps } from "@/lib/masked-input";
 
 // Section « Rotation immédiate » embarquée dans une modale de config rotation
 // (REMINDER / manuel). Génère/saisit la nouvelle valeur, confirme (bloquant)
@@ -56,11 +57,11 @@ export default function ImmediateRotationSection({
       <p className="help" style={{ fontSize: 11, marginTop: 0, marginBottom: 6 }}>{t("immediateHint")}</p>
       <div style={{ display: "flex", gap: 6 }}>
         <input
-          type={reveal ? "text" : "password"}
+          {...maskedInputProps(reveal)}
+          name="immediate-rotation-value"
           value={value}
           onChange={(e) => { setValue(e.target.value); setDone(false); }}
           placeholder={t("valuePlaceholder")}
-          className="input input-mono"
           disabled={pending}
           autoComplete="off"
           style={{ flex: 1 }}

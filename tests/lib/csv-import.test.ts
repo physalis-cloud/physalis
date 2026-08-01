@@ -62,14 +62,51 @@ describe("lib/csv-import — parseImport (Bitwarden)", () => {
     expect(gh.favorite).toBe(true);
   });
 
-  it("ignore les types non-login (cards, identities, secureNote)", () => {
+  it("ignore les types sans équivalent dans le coffre (cards, identities)", () => {
     const csv = `folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
 ,,card,"Visa",,,,,,
+,,identity,"Moi",,,,,,
 ,,login,"Gmail",,,,gmail.com,me,pwd,`;
     const r = parseImport(csv);
     if (!r.ok) throw new Error(r.error);
     expect(r.entries).toHaveLength(1);
     expect(r.entries[0].name).toBe("Gmail");
+  });
+
+  it("marque les logins comme type LOGIN", () => {
+    const r = parseImport(BW);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.entries.every((e) => e.type === "LOGIN")).toBe(true);
+    expect(r.entries.every((e) => e.text === null)).toBe(true);
+  });
+
+  it("importe les notes sécurisées comme entrées NOTE", () => {
+    const csv = `folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+"Perso",1,note,"Codes de récupération","AAAA-BBBB
+CCCC-DDDD",,,,,,
+,,login,"Gmail",,,,gmail.com,me,pwd,`;
+    const r = parseImport(csv);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.entries).toHaveLength(2);
+    const note = r.entries[0];
+    expect(note.type).toBe("NOTE");
+    expect(note.name).toBe("Codes de récupération");
+    // Le contenu multi-ligne du champ quoté est préservé tel quel.
+    expect(note.text).toBe("AAAA-BBBB\nCCCC-DDDD");
+    expect(note.collectionName).toBe("Perso");
+    expect(note.favorite).toBe(true);
+    // Une NOTE ne porte ni URL, ni login, ni mot de passe.
+    expect(note.url).toBeNull();
+    expect(note.username).toBeNull();
+    expect(note.password).toBeNull();
+  });
+
+  it("saute les notes vides (rien à protéger)", () => {
+    const csv = `folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+,,note,"Note vide",,,,,,
+,,note,"Note blanche","   ",,,,,,`;
+    const r = parseImport(csv);
+    expect(r.ok).toBe(false);
   });
 });
 

@@ -28,11 +28,30 @@ Accesible mediante **🔒 Bóveda personal** en la navegación del panel, en la 
 `/vault`. Nadie más que tú puede leer tus entradas — ni siquiera los
 OWNERs de tu organización.
 
+### Los cuatro tipos de entrada
+
+No todo es una credencial de un sitio web. El diálogo de creación empieza
+por un selector de **tipo**, y el formulario se adapta:
+
+| Tipo            | Qué contiene                                      | Ejemplo                          |
+|-----------------|---------------------------------------------------|----------------------------------|
+| **Credencial**  | URL *(opcional)*, usuario, contraseña, código 2FA | Consola AWS, Gmail               |
+| **Secreto**     | Un único valor                                    | Clave de API, número de licencia |
+| **Lista**       | Varias etiquetas + valores                        | Preguntas secretas del banco     |
+| **Nota**        | Un texto libre                                    | Procedimiento de recuperación    |
+
+Solo el tipo **Credencial** lleva una URL — por eso es el único que la
+extensión de navegador propone para el autorrelleno. Los otros tres
+siguen siendo legibles desde el sitio.
+
+En una **Lista**, las etiquetas se cifran igual que los valores: la
+búsqueda no las cubre y la lista muestra simplemente "N secretos".
+
 ### Crear una entrada
 
 1. Haz clic en **"+ Añadir"** en `/vault`.
-2. Rellena:
-   - **Nombre** — etiqueta corta (p. ej. "AWS prod Console")
+2. Elige el tipo y luego rellena:
+   - **Nombre** — etiqueta corta (p. ej. "AWS prod Console"), común a todos los tipos
    - **URL** — sitio web asociado (usado por la extensión de navegador para
      la coincidencia de dominio)
    - **Usuario** — login / correo electrónico
@@ -40,7 +59,20 @@ OWNERs de tu organización.
      (longitud, símbolos y exclusión de caracteres ambiguos son configurables)
    - **TOTP** *(opcional)* — clave `otpauth://...` para generar códigos 2FA
      para el sitio de terceros (ver más abajo)
-   - **Nota** — contexto en formato libre
+3. **Colección**, **etiquetas** y **★ favorito** están en la última fila
+   del formulario.
+
+### Cambiar el tipo de una entrada existente
+
+El selector de tipo sigue activo al editar, pero **solo se ofrecen las
+conversiones que no pierden nada**. En la práctica: una entrada que solo
+tiene un nombre y una contraseña puede convertirse en Secreto, Lista o
+Nota — su valor se traslada automáticamente. Si la entrada todavía lleva
+una URL, un usuario o un código 2FA, el tipo de destino aparece
+atenuado: quita el campo que estorba y guarda antes de convertir.
+
+Una Lista con varios secretos no se convierte a nada: vacíala primero si
+quieres cambiar su forma.
 
 ### Generador de contraseñas
 

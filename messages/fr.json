@@ -1517,7 +1517,23 @@
       "createEntryBtn": "Créer",
       "stayInCollection": "(rester dans cette collection)",
       "moveCollectionHint": "Pour déplacer cette entrée vers une autre collection du même scope.",
-      "tagsLabel": "Tags"
+      "tagsLabel": "Tags",
+      "secretValueLabel": "Valeur",
+      "itemsLabel": "Secrets",
+      "addItemBtn": "+ Ajouter",
+      "removeItemBtn": "Supprimer cette ligne",
+      "itemLabelPlaceholder": "Libellé",
+      "itemValuePlaceholder": "Valeur",
+      "itemsHint": "{max} lignes maximum. Les libellés sont chiffrés avec les valeurs.",
+      "textLabel": "Texte",
+      "textPlaceholder": "Contenu chiffré…",
+      "textHint": "{n} / {max} caractères.",
+      "typeLocked": {
+        "url": "Impossible : cette entrée a une URL, que ce type ne porte pas. Retire-la et enregistre d'abord.",
+        "username": "Impossible : cette entrée a un login, que ce type ne porte pas. Retire-le et enregistre d'abord.",
+        "totp": "Impossible : cette entrée a un code 2FA, que ce type ne porte pas. Retire-le et enregistre d'abord.",
+        "items": "Impossible : cette liste a plusieurs secrets, que ce type ne peut pas tous porter."
+      }
     },
     "teamVault": {
       "rotationBtn": "Rotation",
@@ -1601,6 +1617,31 @@
       "movingBtn": "Déplacement…",
       "moveBtn": "Déplacer",
       "loadingDest": "Chargement des destinations…"
+    },
+    "itemCount": "{n} secrets",
+    "copySecretBtn": "Copier la valeur",
+    "copyTextBtn": "Copier le texte",
+    "types": {
+      "LOGIN": {
+        "label": "Identifiant",
+        "hint": "Site ou application : URL (optionnelle), login, mot de passe et code 2FA.",
+        "namePlaceholder": "Gmail perso"
+      },
+      "SECRET": {
+        "label": "Secret",
+        "hint": "Une seule valeur à protéger : clé d'API, licence, code.",
+        "namePlaceholder": "Clé API Stripe"
+      },
+      "LIST": {
+        "label": "Liste",
+        "hint": "Plusieurs libellés et valeurs dans une même entrée.",
+        "namePlaceholder": "Questions secrètes banque"
+      },
+      "NOTE": {
+        "label": "Note",
+        "hint": "Un texte libre, chiffré comme le reste.",
+        "namePlaceholder": "Procédure de récupération"
+      }
     }
   },
   "orgs": {

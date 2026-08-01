@@ -27,6 +27,7 @@ export default function TagsInput({
   placeholder = "+ tag",
   suggestions = [],
   lowercase = true,
+  size = "sm",
 }: {
   value: string[];
   onChange: (tags: string[]) => void;
@@ -34,6 +35,10 @@ export default function TagsInput({
   suggestions?: string[];
   /** Force la minuscule (défaut). `false` = casse préservée (coffres). */
   lowercase?: boolean;
+  /** `sm` (défaut) : champ compact, historique. `md` : mêmes padding et
+   *  taille de police que `.input`/`.select`, pour s'aligner sur eux quand
+   *  les trois vivent sur une même `.form-row`. */
+  size?: "sm" | "md";
 }) {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +120,15 @@ export default function TagsInput({
             </button>
           </span>
         ))}
-        <div style={{ position: "relative" }}>
+        {/* En `md` le champ occupe la largeur restante de sa colonne — sinon
+            il reste à 140px et laisse un trou jusqu'au champ suivant. */}
+        <div
+          style={
+            size === "md"
+              ? { position: "relative", flex: "1 1 120px", minWidth: 0 }
+              : { position: "relative" }
+          }
+        >
           <input
             value={input}
             onChange={(e) => {
@@ -135,7 +148,11 @@ export default function TagsInput({
             }}
             placeholder={placeholder}
             className="input"
-            style={{ width: 140, padding: "6px 10px", fontSize: 12 }}
+            style={
+              size === "md"
+                ? { width: "100%" }
+                : { width: 140, padding: "6px 10px", fontSize: 12 }
+            }
           />
           {filteredSuggestions.length > 0 && (
             <div

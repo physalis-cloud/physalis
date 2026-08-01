@@ -24,6 +24,8 @@ import { readJson, requireUser, slugify } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { parseImport, type ImportedEntry } from "@/lib/csv-import";
 import { parseTotpInput } from "@/lib/otpauth-parse";
+import { typeHasPasswordStrength } from "@/lib/vault-entry-types";
+import { encryptPayload } from "@/lib/vault-entry-payload";
 
 const CSV_MAX = 5_000_000; // 5 MB safety
 
@@ -143,8 +145,14 @@ function buildCreateData(
     encryptedPassword = payload.encryptedValue;
     passwordIv = payload.iv;
     passwordTag = payload.tag;
-    passwordStrength = estimateStrength(e.password).score;
+    passwordStrength = typeHasPasswordStrength(e.type)
+      ? estimateStrength(e.password).score
+      : null;
   }
+
+  // Notes sécurisées : le contenu part dans le blob chiffré, comme pour une
+  // NOTE créée depuis l'UI.
+  const payloadColumns = encryptPayload(e.type, { text: e.text ?? undefined });
 
   let encryptedTotpSecret: string | null = null;
   let totpSecretIv: string | null = null;
@@ -162,6 +170,7 @@ function buildCreateData(
   return {
     userId,
     collectionId,
+    type: e.type,
     name: e.name,
     url: e.url,
     username: e.username,
@@ -172,6 +181,7 @@ function buildCreateData(
     encryptedTotpSecret,
     totpSecretIv,
     totpSecretTag,
+    ...payloadColumns,
     favorite: e.favorite,
   };
 }

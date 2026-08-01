@@ -8,6 +8,7 @@ import EmptyCard from "@/components/EmptyCard";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ImmediateRotationSection from "@/components/ImmediateRotationSection";
 import { generatePassword } from "@/lib/generate-password";
+import { maskedInputProps } from "@/lib/masked-input";
 import TagsInput from "@/components/TagsInput";
 
 const ROLE_RANK: Record<ProjectRole, number> = {
@@ -565,14 +566,14 @@ function ServiceForm({
         <div className="field">
           <label>{t("access.passwordLabel")}</label>
           <input
-            type="password"
+            {...maskedInputProps(false)}
+            name="access-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={
               isEdit ? t("access.leaveBlankHint") : t("access.optionalHint")
             }
-            autoComplete="new-password"
-            className="input input-mono"
+            autoComplete="off"
           />
         </div>
       </div>
@@ -603,7 +604,7 @@ function ServiceForm({
           <div className="field" style={{ flex: 2 }}>
             <label>{t("access.hookTokenLabel")}</label>
             <div style={{ display: "flex", gap: 6 }}>
-              <input value={hookToken} onChange={(e) => setHookToken(e.target.value)} type="password" autoComplete="new-password" name="svc-hook-token" placeholder={isEdit ? t("access.leaveBlankHint") : t("access.hookTokenPlaceholder")} className="input input-mono" disabled={pending} style={{ flex: 1 }} />
+              <input value={hookToken} onChange={(e) => setHookToken(e.target.value)} {...maskedInputProps(false)} autoComplete="off" name="svc-hook-token" placeholder={isEdit ? t("access.leaveBlankHint") : t("access.hookTokenPlaceholder")} disabled={pending} style={{ flex: 1 }} />
               <button type="button" onClick={() => setHookToken(generatePassword(24))} className="btn btn-ghost btn-xs" disabled={pending}>{t("access.generateBtn")}</button>
             </div>
           </div>
@@ -657,7 +658,7 @@ function ServiceForm({
             </div>
             <div className="field" style={{ flex: 1 }}>
               <label>{t("access.dbPasswordLabel")}</label>
-              <input value={dbPassword} onChange={(e) => setDbPassword(e.target.value)} type="password" autoComplete="new-password" name="svc-db-pw" placeholder={isEdit ? t("access.leaveBlankHint") : ""} className="input input-mono" disabled={pending} />
+              <input value={dbPassword} onChange={(e) => setDbPassword(e.target.value)} {...maskedInputProps(false)} autoComplete="off" name="svc-db-pw" placeholder={isEdit ? t("access.leaveBlankHint") : ""} disabled={pending} />
             </div>
           </div>
         </>
@@ -987,14 +988,14 @@ function AccountForm({
           <label>{t("access.passwordLabel")}</label>
           <input
             required={!isEdit}
-            type="password"
+            {...maskedInputProps(false)}
+            name="account-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={
               isEdit ? t("access.leaveBlankHint") : t("access.passwordLabel")
             }
-            autoComplete="new-password"
-            className="input input-mono"
+            autoComplete="off"
           />
         </div>
       </div>
