@@ -1,4 +1,4 @@
-> **Version 1.3.1**
+> **Version 1.3.2**
 >
 > Repo self-host de Physalis. L'API, le schéma de base de données et le flux
 > d'installation suivent le versioning sémantique : les changements cassants
