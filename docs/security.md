@@ -1,84 +1,159 @@
-# Physalis — Audit de sécurité
+# Physalis — Modèle de sécurité (self-host)
 
-> Audit initial : 2026-05-01.
-> Mise à jour 2026-05-15 : intègre les phases 11 (intégration tokens), 12 (rotation automatique),
-> 13 (API Gateway), le timing-attack fix, l'isolation multi-tenant complète,
-> les tests E2E Playwright et les nouvelles lacunes identifiées.
-> Mise à jour 2026-05-30 : module Email (Physalis Email) (§3.15) — revue manuelle + durcissements
-> (scoping expéditeurs au domaine, rate-limit send/reveal, historique indexé par compte).
+> Ce document décrit les protections de l'édition **self-host** — celles que
+> contient ce dépôt — et, tout aussi important, **ce qui reste à votre charge**.
+> Il ne décrit pas l'infrastructure de l'offre hébergée
+> [physalis.cloud](https://physalis.cloud).
 
 ---
 
-## 1. Synthèse
+## 1. Partage des responsabilités
 
-| Domaine | État | Note |
-|---|---|---|
-| Chiffrement des secrets | ✅ | AES-256-GCM, IV unique par secret, auth tag vérifié. Couvre Secret, OrgSecret, Service, AppAccount, Server (clé SSH), 2FA, VaultEntry, ApiKey |
-| Stockage mots de passe | ✅ | bcrypt salt 12 |
-| Stockage tokens | ✅ | SHA-256 en base pour MachineToken, PluginToken, UserToken, OrgToken, ApiKey. Jamais en clair |
-| Headers HTTP | ✅ | X-Frame-Options, HSTS, Permissions-Policy, CSP nonce-based |
-| Réseau base de données | ✅ | DB sur réseau Docker `internal` ; port 5432 bindé pour WAL, restreint par `pg_hba.conf` à l'IP réplica |
-| RBAC 4 niveaux | ✅ | MEMBER < DEV < ADMIN < OWNER (org) ; VIEWER < EDITOR < OWNER (projet). Vérifié à chaque route |
-| Isolation multi-tenant | ✅ | Schema-per-tenant ; `prisma` throw si pas de contexte tenant ; zéro fallback `public` depuis Phase 4 |
-| Logs (stdout) | ✅ | Aucune valeur de secret/mdp/token plaintext dans les logs |
-| Audit log persistant | ✅ | Table `AccessLog` peuplée sur toutes les actions sensibles, export CSV |
-| CSRF (web) | ✅ | Géré par NextAuth sur les callbacks |
-| Rate limiting | ✅ | login, register, deploy, plugin-auth, plugin-vault-write, gateway-verify |
-| Timing attack (login) | ✅ | Fix 2026-05-08 — dummy bcrypt hash + `rejectWithConstantTime` sur tous les chemins rapides |
-| OIDC (GitHub Actions) | ✅ | Validation JWKS + iss/aud/exp stricts ; match Policy strict sans wildcard |
-| 2FA TOTP | ✅ | otplib, secret chiffré AES-256-GCM, backup codes bcrypt one-shot |
-| Plugin navigateur | ✅ | 2FA obligatoire, PluginToken 4h SHA-256, CORS whitelist, scope strict |
-| Rotation automatique | ✅ | Phase 12 livrée — stratégies DATABASE / JWT_SECRET / REMINDER / API_KEY ; cron HMAC-signé |
-| Tokens d'intégration | ✅ | UserToken + OrgToken + MachineToken ; scopes READ stricts ; audit INTEGRATION_CREDENTIALS_FETCH |
-| API Gateway keys | ✅ | Format `ph_live_sk_*`, SHA-256, rate-limit verify 1000/min/IP, audit ApiLog |
-| Versioning secrets | ✅ | Rétention 50 max, rollback en transaction, audit SECRET_VERSION_REVEAL / SECRET_ROLLBACK |
-| Backup chiffré | ✅ | GPG RSA 4096 pull-based, escrow externe, restore-test mensuel automatisé |
-| CSP | ✅ | Nonce-based (`script-src 'strict-dynamic'`), `unsafe-inline` sur styles uniquement |
-| Tests sécurité automatisés | ✅ | 283 unit (25 fichiers) + 26 fichiers integ + 5 specs E2E Playwright |
-| Trufflehog CI | ✅ | Scan git history sur PR + push full history (`--only-verified`) |
-| Scans DAST (ZAP / Nuclei) | ✅ | À chaque push `staging` post-déploiement : OWASP ZAP baseline + Nuclei (cve/misconfig/exposure/headers). Cf. §3.16 |
-| HTTP 405 | ✅ | ~80 tests integ sur les méthodes non autorisées |
-| Module Email (Physalis Email) | ✅ | Config par projet, clé API chiffrée AES-256-GCM, gating allowlist fail-closed, RBAC, historique scopé par compte ; revu 2026-05-30 (§3.15) |
-| npm audit / CVE CI (SCA) | ✅ | Job `npm-audit` (`--omit=dev --audit-level=high`) dans `security.yml`, bloque sur high/critical. Cf. §3.14.2 |
-| Session fixation (password change / 2FA) | ⚠️ | Non vérifié — les JWT NextAuth existants sont-ils invalidés ? |
-| ENCRYPTION_KEY re-keying | ✅ | Script `scripts/rekey-encryption.mjs` (dual-key, idempotent, dry-run) + procédure ops. Cf. §3.14.4 |
+Physalis protège les secrets **dans l'application et dans la base**. Tout ce qui
+est autour reste votre travail.
+
+| Assuré par l'application | À votre charge |
+|---|---|
+| Chiffrement au repos des secrets et credentials | Conservation et escrow de `ENCRYPTION_KEY` |
+| Hachage des mots de passe et des tokens | Terminaison TLS et configuration du reverse proxy |
+| RBAC à trois niveaux, audit log | Ne pas exposer le conteneur en direct sur Internet |
+| Rate limiting applicatif | Réglage de `TRUST_PROXY_HOPS` cohérent avec votre infra |
+| En-têtes HTTP de durcissement | Sauvegardes, réplication, bascule (rien n'est fourni — cf. §11) |
+| Validation OIDC stricte | Mises à jour de l'image et des dépendances hôte |
 
 ---
 
-## 2. Détails par contrôle
+## 2. Chiffrement des secrets
 
-### 2.1 Chiffrement (✅)
+**AES-256-GCM** ([lib/crypto.ts](../lib/crypto.ts)), via `node:crypto`.
 
-- **Implémentation** : [lib/crypto.ts](../lib/crypto.ts) — AES-256-GCM via `node:crypto`.
-- **Clé** : `ENCRYPTION_KEY` dans l'env du conteneur (32 bytes / 64 hex). Validée en longueur à chaque appel via `getKey()`. **Jamais en DB ni dans le code.**
-- **IV** : 12 bytes aléatoires par appel `encrypt`. Stocké en base avec le tag.
-- **Auth tag** : 16 bytes GCM, vérifié à `decrypt` (corruption → exception).
-- **Périmètre complet** : `Secret`, `OrgSecret`, `Service.encryptedData`, `AppAccount.encryptedData`, `User.twoFactorSecret`, `Server.encryptedKey`, `VaultEntry.encryptedPassword`, `VaultEntry.encryptedTotpSecret`, `TeamVaultEntry` (idem), `ApiKey` (hash SHA-256 — la valeur brute n'est jamais stockée).
-- **Vérification non-fuite** : `SELECT * FROM "Secret"` retourne uniquement des chunks base64. Tests integ `db-encryption.test.ts` + `servers.test.ts`.
+- **Clé** : `ENCRYPTION_KEY`, 32 octets fournis en 64 caractères hexadécimaux,
+  lue dans l'environnement du conteneur. Sa longueur est validée à chaque appel.
+  **Jamais en base, jamais dans le code.**
+- **IV** : 12 octets aléatoires tirés à *chaque* chiffrement, stockés à côté du
+  ciphertext.
+- **Tag d'authentification** : 16 octets GCM, vérifiés au déchiffrement — une
+  valeur altérée en base lève une exception au lieu de rendre des octets
+  arbitraires.
+- **Périmètre** : `Secret`, `OrgSecret`, `Service.encryptedData`,
+  `AppAccount.encryptedData`, `User.twoFactorSecret`, `Server.encryptedKey`
+  (clé SSH), `VaultEntry` (mot de passe + secret TOTP), `TeamVaultEntry`,
+  credentials des connexions CI et des cibles de synchronisation.
+- **Vérification** : un `SELECT * FROM "Secret"` ne rend que du base64. Couvert
+  par les tests d'intégration.
 
-### 2.2 Mots de passe (✅)
+**Rotation de la clé** : [scripts/rekey-encryption.mjs](../scripts/rekey-encryption.mjs)
+re-chiffre toutes les colonnes sous une nouvelle clé, en mode dual-key
+(l'ancienne clé reste acceptée en lecture pendant la bascule), idempotent, avec
+un mode `--dry-run`. À lancer en fenêtre de maintenance, dump préalable pris.
 
-- bcrypt salt 12 à la création (register, bootstrap admin).
-- Comparaison via `bcrypt.compare`, jamais en plain.
-- Validation : ≥ 12 chars.
+> **Invariant de revue — pas d'AAD.** Le chiffrement n'utilise pas de données
+> authentifiées additionnelles : un triplet `{encryptedValue, iv, tag}` se
+> déchiffre correctement dans n'importe quelle ligne. Rien dans le ciphertext ne
+> le lie à son enregistrement d'origine. La règle qui tient cet invariant :
+> **ne jamais persister un triplet que l'on n'a pas produit soi-même via
+> `encrypt()` dans la même requête**, sauf pour snapshoter un secret vers *sa
+> propre* version. Toute copie vers une ligne située derrière une autre
+> frontière d'accès doit faire decrypt → encrypt avec un nouvel IV, jamais un
+> transplant d'octets. Un test de non-régression garde la règle.
 
-### 2.3 Tokens (✅)
+---
 
-Cinq catégories, toutes hashées SHA-256 en base :
+## 3. Mots de passe et sessions
 
-| Type | Préfixe | TTL | Usage |
+- **Mots de passe** : bcrypt, salt 12, comparaison via `bcrypt.compare`.
+  Minimum 12 caractères, contrôle de robustesse à la saisie
+  ([lib/password-strength.ts](../lib/password-strength.ts)).
+- **Sessions** : JWT NextAuth, durée de vie **8 h**, signés par `AUTH_SECRET`.
+- **Invalidation anticipée** ([lib/session-validity.ts](../lib/session-validity.ts)) :
+  chaque JWT est estampillé de son instant d'émission et l'utilisateur porte une
+  borne `sessionsValidFrom`. Un reset de mot de passe ou une désactivation de la
+  2FA avance la borne — tous les JWT antérieurs sont refusés, sans attendre leur
+  expiration naturelle.
+- **Attaque temporelle au login** ([lib/auth.ts](../lib/auth.ts)) : un hash
+  bcrypt factice est calculé au chargement du module, et `rejectWithConstantTime`
+  effectue une comparaison sur ce hash sur **tous** les chemins rapides
+  (utilisateur inexistant, compte sans mot de passe). Un attaquant ne peut pas
+  distinguer « email inconnu » de « mauvais mot de passe » au chronomètre.
+- **CSRF** : géré par NextAuth sur les callbacks de connexion.
+
+---
+
+## 4. Double authentification (TOTP)
+
+RFC 6238 via `otplib` ([lib/totp.ts](../lib/totp.ts)). Le secret est chiffré en
+base en AES-256-GCM. **8 codes de secours** de 64 bits d'entropie sont générés à
+l'activation, hachés en bcrypt, à usage unique. Une réauthentification est
+exigée pour les actions sensibles ([lib/reauth.ts](../lib/reauth.ts)).
+
+La 2FA est **obligatoire** pour utiliser l'extension navigateur.
+
+---
+
+## 5. Tokens
+
+Quatre familles, toutes stockées **hachées en SHA-256**. La valeur brute n'est
+retournée qu'une seule fois, à la création. Toutes révocables (`revokedAt`),
+toutes horodatées (`lastUsedAt`).
+
+| Famille | Préfixe | Durée | Portée |
 |---|---|---|---|
-| `MachineToken` | `sv_<32 hex>` | permanent (révocable) | CI/CD VPS Bearer |
-| `PluginToken` | `sv_plugin_<hex>` | 4h (configurable) | Extension navigateur |
-| `UserToken` | `sv_user_<hex>` | 1-365j | Intégrations user-scoped |
-| `OrgToken` | `sv_org_<hex>` | optionnel | Intégrations org-scoped (N8n, Make) |
-| `ApiKey` | `ph_live_sk_*` / `ph_test_sk_*` | optionnel | API Gateway clients tiers |
+| `MachineToken` | `sv_<hex>` | permanent, révocable | Un couple `(projet, environnement)` — toute autre combinaison renvoie 403 |
+| `PluginToken` | `sv_plugin_<hex>` | 4 h | Session de l'extension navigateur |
+| `UserToken` | `sv_user_<hex>` | 1 à 365 j | Lecture des projets dont l'utilisateur est membre |
+| `OrgToken` | `sv_org_<hex>` | optionnelle | Une organisation, avec liste blanche de projets et de scopes |
 
-Tous : SHA-256(token) en base, jamais le brut. Plaintext retourné **une seule fois** à la création. Lookup en O(1) via index unique. `admin.token_index` résout quel schéma tenant contient le token (cross-tenant sans scan).
+Le lookup se fait en O(1) sur un index unique du hash. Un token révoqué renvoie
+401 ; un token valide hors de sa portée renvoie 403, et le refus est journalisé.
 
-### 2.4 Headers HTTP (✅)
+---
 
-Définis dans [next.config.ts](../next.config.ts) :
+## 6. Contrôle d'accès
+
+Deux échelles de rangs, comparées numériquement :
+**organisation** MEMBER < DEV < ADMIN_DEV < ADMIN < OWNER, **projet**
+VIEWER < EDITOR < OWNER.
+
+Helpers centraux dans [lib/api.ts](../lib/api.ts) : `requireUser`,
+`requireOrgMember(slug, role)`, `requireProjectMember(slug, role)`,
+`requireEnvironment(slug, env, role)`. Toute route passe par l'un d'eux.
+
+Règles critiques :
+
+- Org ADMIN / OWNER → `ProjectRole.OWNER` implicite sur tous les projets de
+  l'org.
+- Org DEV → `ProjectRole.EDITOR` implicite, sans ligne `ProjectMember`.
+- Org MEMBER → accès à un projet **uniquement** s'il en est `ProjectMember`
+  explicite.
+- `User.role = ADMIN` → administrateur de l'instance, **sauf** sur les coffres
+  personnels : c'est délibéré, un administrateur ne peut pas lire les entrées
+  privées des autres utilisateurs.
+
+### Barrière `ProjectMember.hidden` — invariant
+
+`hidden = true` sur une ligne `ProjectMember` est une **barrière d'accès**
+(403), pas un confort d'affichage : elle masque un projet à un membre donné tout
+en préservant sa ligne, donc son rôle.
+
+L'invariant : **tout calcul d'accès projet doit dériver du prédicat central
+`accessibleProjectsWhere(orgId, userId, orgRole)`**, miroir strict des règles de
+`requireProjectMember`. Ne jamais re-dériver l'autorisation à la main depuis
+`ProjectMember` (`members[0]?.role`, `members: { some }`) en oubliant `hidden`.
+
+Sémantique : Org ADMIN / OWNER **ignorent** `hidden` ; une ligne masquée
+**bloque** un DEV ou un MEMBER **sans** retomber sur l'EDITOR implicite du DEV.
+
+> Pourquoi l'invariant est fragile : le middleware **exclut `/api`** — il n'y a
+> pas de goulot central côté API — et `hidden` n'apparaît nulle part ailleurs
+> que dans `lib/api.ts`. Toute **nouvelle** surface d'accès projet doit passer
+> par `requireProjectMember` / `requireEnvironment` / `accessibleProjectsWhere`.
+
+---
+
+## 7. En-têtes HTTP
+
+Deux couches. Les en-têtes statiques sont posés par
+[next.config.ts](../next.config.ts) :
 
 ```
 X-Frame-Options: DENY
@@ -86,346 +161,167 @@ X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 Permissions-Policy: camera=(), microphone=(), geolocation=()
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Resource-Policy: same-origin
 ```
 
-### 2.5 Réseau (✅)
+HSTS est posé par l'**application** et pas seulement par le reverse proxy : une
+erreur de configuration du proxy ne doit pas faire disparaître l'en-tête
+silencieusement.
 
-- Réseau Docker `db_network` (non-internal) en prod — port 5432 bindé sur l'hôte pour la réplication WAL streaming vers le VPS secondaire.
-- Accès DB filtré strictement par `pg_hba.conf` : seule l'IP du VPS secondaire est autorisée en connexion de réplication (`host replication replicator <IP>/32 md5`). Toutes les autres connexions externes sont rejetées.
-- App exposée uniquement via `nginx_default` (NPM fait la terminaison TLS).
-- `pg_hba.conf` versionné dans le repo + synchronisé via workflow GitHub Actions à chaque déploiement.
-
-### 2.6 RBAC (✅)
-
-**Org** : MEMBER < DEV < ADMIN < OWNER. **Projet** : VIEWER < EDITOR < OWNER.
-
-Helpers centraux dans [lib/api.ts](../lib/api.ts) : `requireUser`, `requireOrgMember(slug, role)`, `requireProjectMember(slug, role)`, `requireEnvironment(slug, env, role)`. Rang comparé numériquement.
-
-Règles critiques :
-- OrgADMIN/OWNER → `ProjectRole.OWNER` implicite sur tous les projets.
-- OrgDEV → `ProjectRole.EDITOR` implicite, sans row `ProjectMember`.
-- OrgMEMBER → accès projet uniquement si `ProjectMember` explicite.
-- `User.role = ADMIN` → dieu mode global, **sauf** sur les coffres personnels (volontaire — l'admin ne peut pas lire les entrées privées des autres users).
-
-**Barrière `ProjectMember.hidden` — INVARIANT.** `hidden = true` sur une ligne
-`ProjectMember` est une **barrière d'accès** (règle 2 de `requireProjectMember` →
-**403**), pas un confort d'affichage : elle masque un projet à un membre donné
-tout en préservant sa ligne (donc son historique de rôle). L'invariant : **tout
-calcul d'accès projet doit dériver du prédicat central
-`accessibleProjectsWhere(orgId, userId, orgRole)` ([lib/api.ts](../lib/api.ts)),
-miroir strict des 6 règles de `requireProjectMember`** — jamais re-dériver
-l'autorisation à la main depuis `ProjectMember` (`members[0]?.role`,
-`members: { some }`) en oubliant `hidden`. Sémantique par rôle : OrgADMIN/OWNER
-(et platform-admin) **ignorent** `hidden` (règle 1) ; une ligne masquée **bloque**
-(règle 2) **sans** retomber sur l'EDITOR implicite du DEV (règles 2 > 4).
-
-> Pourquoi l'invariant est fragile : `middleware.ts` **exclut `/api`** (aucun
-> goulot central), `hidden` n'existe nulle part dans `lib/` hors `lib/api.ts`, et
-> `accessibleProjectsWhere` — qui se déclare « source unique » — n'avait qu'un
-> seul appelant. Historiquement une dizaine de surfaces re-dérivaient le prédicat
-> sans lire la barrière (cf. §3.14.6). Toute **nouvelle** surface d'accès projet
-> doit passer par `requireProjectMember`/`requireEnvironment`/`accessibleProjectsWhere`.
-
-### 2.7 Isolation multi-tenant (✅)
-
-- Schema-per-tenant `client_<slug>`. Client Prisma `prisma` (avec extension) **throw** si pas de `tenantSlug` dans AsyncLocalStorage — aucun fallback silencieux sur `public`.
-- Phase 4 exécutée : tables tenant droppées de `public` (`OrgMember`, `MachineToken`, etc.). `public` ne contient plus que `User` (SUPERADMIN) + extensions Postgres.
-- Commentaire `lib/auth.ts:315` : `// public.OrgMember n'existe plus` confirme l'état post-drop.
-- `admin.token_index` permet la résolution cross-tenant sans scanner toutes les bases.
-
-### 2.8 Timing attack — login (✅)
-
-Fix poussé 2026-05-08 (commit c076f7e).
-
-- Dummy bcrypt hash chargé au module load (`bcrypt.hashSync` une fois au démarrage).
-- Helper `rejectWithConstantTime` : sur tous les chemins rapides (tenant inconnu, user inexistant, role insuffisant), effectue un `bcrypt.compare` sur le dummy hash avant de retourner 401. Même durée que le chemin "mauvais mot de passe".
-- Implémentation : [lib/auth.ts](../lib/auth.ts).
-- Test : [tests/integ/account-enumeration.test.ts](../tests/integ/account-enumeration.test.ts) — vérifie que le ratio de durée mauvais-user / mauvais-mdp reste < 1.5×.
-
-### 2.9 CSRF (✅)
-
-NextAuth génère et valide automatiquement un token CSRF à chaque login via `/api/auth/csrf` + `/api/auth/callback/credentials`.
-
-### 2.10 Logs (✅)
-
-- `log: ["error", "warn"]` (dev) / `["error"]` (prod) côté Prisma.
-- Les `console.error` dans les routes logguent des messages non-sensibles (erreurs DB structurées, sans valeur de secret ni token plaintext).
+Sur les réponses HTML, [middleware.ts](../middleware.ts) génère un **nonce** par
+requête et pose une CSP stricte : `script-src` avec `'nonce-…'` et
+`'strict-dynamic'` — aucun script inline non-noncé n'est exécuté.
+`'unsafe-inline'` ne subsiste que sur `style-src`, les attributs de style HTML ne
+supportant pas les nonces. `frame-ancestors 'none'`, `object-src 'none'`,
+`base-uri 'self'`, `form-action 'self'`.
 
 ---
 
-## 3. Lacunes identifiées
+## 8. Rate limiting
 
-### 3.1 Rate limiting (⚠️ partiel)
+[lib/rate-limit.ts](../lib/rate-limit.ts) — fenêtre fixe, **en mémoire du
+processus**.
 
-**Implémenté** : [lib/rate-limit.ts](../lib/rate-limit.ts) — fenêtre fixe in-memory.
-
-| Bucket | Limite | Scope |
+| Portée | Limite | Clé |
 |---|---|---|
-| `login` | 5 / 15 min | IP |
-| `register` | 3 / h | IP (avant toggle ALLOW_REGISTRATION) |
+| `login` | 30 / 15 min | IP |
+| `login` (par compte) | 5 / 15 min | email |
+| `register`, `signup` | 5 / h | IP |
+| `forgot-password`, `reset-password` | 5 / h | IP |
+| `invitation-register` | limité | IP |
+| `deploy` | 30 / min | IP |
 | `plugin-auth` | 5 / 15 min | IP |
-| `plugin-vault-write` | 30 / min | user |
-| `gateway-verify` | 1 000 / min | IP |
-
-Endpoints cron (`/api/cron/*`) : gardés par `CRON_SECRET_ADMIN` (tier admin, header `Authorization: Bearer`, `timingSafeEqual` via `requireCronAuth` — `lib/cron-auth.ts`), pas de rate-limit IP (accès opérateur uniquement). Le tier bas-privilège `CRON_SECRET_REPORT` ne garde que `POST /api/admin/infra/backup`.
-
-**Limite in-memory** : les buckets sont module-level — ils se réinitialisent à chaque redéploiement. Un attaquant peut temporiser une attaque autour d'un deploy. Phase 2 : migration vers Redis pour persistance inter-instance. Cf. [todo_v2.md](todo_v2.md).
-
-**Non couvert** (backlog [todo_v2.md](todo_v2.md)) :
-- `/api/secrets/[slug]/[env]` (Bearer machine token) — l'espace de tokens (256 bits) rend le brute-force inutile ; utile pour détecter un token compromis utilisé en boucle.
-- `/api/gateway/verify` — pas de per-key rate-limit. Un attaquant avec IP unique pourrait tenter d'énumérer des clés valides. Mitigé par l'entropie des clés (`ph_live_sk_*` = 128+ bits). À surveiller si la feature devient populaire.
-
-### 3.2 CSP (✅)
-
-[middleware.ts](../middleware.ts) — nonce 16 bytes hex par requête :
-
-```
-default-src 'self'
-script-src 'self' 'nonce-X' 'strict-dynamic'
-style-src 'self' 'unsafe-inline'       ← compromis (React style={{ }})
-img-src 'self' data: blob:
-connect-src 'self'
-frame-ancestors 'none'
-form-action 'self'
-base-uri 'self'
-object-src 'none'
-upgrade-insecure-requests
-```
-
-### 3.3 Audit log (✅)
-
-Table `AccessLog` + helper `logAction()` non-bloquant ([lib/audit.ts](../lib/audit.ts)). FK SetNull : les logs survivent à la suppression des entités. Export CSV (`?format=csv`, RFC 4180, max 5 000 lignes).
-
-Actions tracées : secrets, tokens machine, comptes/services, déploiement (DEPLOY_AUTHORIZED/DENIED), plugin, 2FA, coffres (VAULT_ENTRY_REVEAL / MOVE / etc.), intégrations (INTEGRATION_CREDENTIALS_FETCH), rotation (SECRET_VERSION_REVEAL / SECRET_ROLLBACK), org/projet/membre.
-
-**Lacune documentée** : `DEPLOY_DENIED` sur JWT cryptographiquement invalide (avant résolution du tenant) n'est pas persisté en DB — le tenant n'est pas encore connu à ce stade. Traçage dans les logs console uniquement. Backlog : table `admin.deploy_denied` (clientId nullable). Cf. [todo_v2.md](todo_v2.md).
-
-### 3.4 Tests automatisés (✅)
-
-- **Unit** ([tests/lib/](../tests/lib/)) : **283 tests** (25 fichiers), ~11s. Couvre : crypto roundtrip + tampering, tokens (format/hash/TTL), rate-limit, validation, TOTP, OIDC, catégories, plugin-token, generate-password, otpauth-parse, password-reset, env-parser, audit-immutability (statique), secrets-no-leak (statique), next-public-audit, org-token-rbac (13 tests).
-- **Intégration** ([tests/integ/](../tests/integ/)) : **26 fichiers**. Couvre : bearer-auth, RBAC, DB encryption, security headers, rate-limit HTTP réel, 2FA bout-en-bout, servers/policies/deploy, plugin, vault personnel + équipe + collections, password-reset, audit-immutability/isolation, IDOR, rbac-horizontal, access-revocation, cors-strict, search-isolation, cookie-attrs, session-forge, account-enumeration, api-gateway, secret-versioning. Tous en green sur `docker compose up -d` local.
-- **E2E** ([tests/e2e/](../tests/e2e/)) : 5 specs Playwright (Chromium, 1 worker). Flows : login/logout, project CRUD, secrets CRUD, rotation (skip conditionnel si feature désactivée), API Gateway bout-en-bout. **11 ✓ / 2 skipped** (rotation désactivée pour l'org de test) en ~24s. Guide anti-pièges : [tests/e2e/SPEC_GUIDE.md](../tests/e2e/SPEC_GUIDE.md).
-- **CI** : `.github/workflows/security.yml` — jobs `trufflehog` (scan git history) + `http-methods` (405 sur ~80 routes) + `test` (unit + integ, nécessite Postgres). E2E conditionnel sur `vars.E2E_ENABLED=true`.
-
-### 3.5 Rotation automatique des secrets (✅)
-
-Phase 12 livrée (2026-05-13). Stratégies :
-
-| Stratégie | Mécanisme |
-|---|---|
-| `DATABASE` | N8n change le mdp DB (alternating user pattern), callback HMAC vers Physalis, redeploy |
-| `JWT_SECRET` | Génération locale `crypto.randomBytes(64)`, écriture en DB, redeploy GitHub Actions |
-| `REMINDER` | Notification sans changement automatique |
-| `API_KEY` | Révocation ancienne clé + génération nouvelle, redeploy GitHub Actions |
-| `WEBHOOK` | Dispatch vers URL webhook externe |
-
-Auth cron : `POST /api/cron/rotation` gardé par `CRON_SECRET_ADMIN` (tier admin, `Authorization: Bearer`, `timingSafeEqual` via `requireCronAuth`). Callback N8n : HMAC-SHA256 avec `ROTATION_HMAC_KEY`, fenêtre ±1h, token à usage unique (stocké `rotationToken` sur Secret, effacé après validation).
-
-**Robustesse V2 en backlog** : retries N8n, pattern write-ahead. Cf. [todo_v2.md](todo_v2.md).
-
-### 3.6 OIDC `/api/deploy` (✅)
-
-- `jose v6` `createRemoteJWKSet` (cache JWKS in-process) + `jwtVerify`.
-- Issuer `https://token.actions.githubusercontent.com` (constante, jamais override en prod).
-- Audience `OIDC_AUDIENCE` (défaut `vault.physalis.cloud`).
-- Match `Policy` strict : (repo, workflow, branch, project, environment) — aucune wildcard.
-- Registry credentials séparés de `secrets` dans le bundle (ne touchent jamais le `.env` du conteneur).
-- Audit `DEPLOY_AUTHORIZED` / `DEPLOY_DENIED` sur tous les chemins traçables.
-
-### 3.7 2FA TOTP (✅)
-
-Secret TOTP chiffré AES-256-GCM. 8 backup codes 64 bits bcrypt one-shot. Single-step UX (pas de session intermédiaire). Machine tokens non affectés. Tolérance horloge ±30s.
-
-### 3.8 Plugin navigateur (✅)
-
-2FA obligatoire (403 explicite si non activée). CORS `PLUGIN_ALLOWED_ORIGIN` (défaut : endpoints retournent 403 si non définie). Match domaine strict `URL().hostname`. Scope : credentials uniquement (jamais `Secret`, jamais `OrgSecret`, jamais `sshKey`). `chrome.storage.session` côté extension (effacé à fermeture). Rate-limit 5/15min/IP.
-
-### 3.9 Endpoint admin rotation `/api/rotation/admin/secret-value` (✅)
-
-Endpoint consommé par N8n pour lire/écrire la valeur d'un secret DB avant/après rotation.
-
-- **Auth** : `Authorization: Bearer <CRON_SECRET_ADMIN>` (tier admin) — comparaison `timingSafeEqual` via le helper partagé `requireCronAuth(req, "admin")` (`lib/cron-auth.ts`, Phase 1 cron-secret-hardening). Header standardisé pour tous les endpoints opérateur.
-- **Origine privée tailnet** (`requirePrivateOrigin`, actif si `CRON_PRIVATE_ONLY=1`) : rejette une requête arrivée par l'edge Cloudflare public sauf IP Tailscale. **GET *et* PATCH** l'exigent désormais (fix 2026-07-18) — auparavant seul le GET l'appliquait, laissant l'**écriture destructive cross-tenant** (`PATCH`, écrase la valeur d'un secret) joignable depuis l'edge public avec le seul bearer. Une écriture doit être au moins aussi gardée que la lecture.
-- **Pas de rate-limit IP** — accès opérateur uniquement (N8n interne). `CRON_SECRET_ADMIN` doit être ≥ 32 bytes hex aléatoires.
-- **Réponses d'erreur génériques** (fix 2026-05-15) : les blocs catch (Prisma et déchiffrement) retournent `{ error: "Internal server error" }` sans `err.message`. L'erreur brute reste dans `console.error` (opérateur uniquement).
-- **ROTATION_HMAC_KEY** : clé critique — si elle fuite, un attaquant peut forger des callbacks N8n et écrire n'importe quelle valeur dans un secret DB via `PATCH`. À traiter avec la même rigueur que `ENCRYPTION_KEY`. Voir §3.14.
-
-### 3.10 Tokens d'intégration — UserToken / OrgToken (✅)
-
-- **UserToken** (`sv_user_<hex>`) : scopé user, multi-projets via membership (PAT — agit AU NOM de l'user). Expiration OPTIONNELLE (1-365j, `null` = jamais), max 20 actifs/user. RBAC : vérification `ProjectMember` (non masqué) pour chaque accès. ⚠️ PAS de quota DEV (contrairement à OrgToken) : un UserToken n'a pas de niveau d'émission. Survit au reset de mot de passe (sémantique PAT, cf. failles §2.20a) ; le vecteur « session volée → token permanent » se ferme par ré-auth à l'émission (à faire).
-- **OrgToken** (`sv_org_<hex>`) : scopé org, scopes `SECRETS_READ / SERVICES_READ / ACCOUNTS_READ / PROJECTS_LIST`. `allProjects: Boolean` + `allowedProjectIds: String[]`. Max 50 actifs/org. Scope enforced sur chaque appel `/api/integrations/credentials`.
-- Tous deux indexés dans `admin.token_index` pour résolution cross-tenant. Audit `INTEGRATION_CREDENTIALS_FETCH` par appel.
-- **OrgToken RBAC DEV** : gardé dans [lib/org-token-rbac.ts](../lib/org-token-rbac.ts) — pas de `allProjects`, projets ⊆ ses memberships, expiration ≤ 90j, quota 10/user. 13 tests unit dédiés.
-
-### 3.11 API Gateway keys (✅)
-
-- Format `ph_live_sk_<hex>` / `ph_test_sk_<hex>`. Hash SHA-256, préfixe tronqué affiché en UI.
-- Affichage one-shot à la création (bandeau, jamais re-affiché).
-- Vérification publique via `POST /api/gateway/verify` (rate-limit 1000/min/IP, log `ApiLog`).
-- Rotation stratégie `API_KEY` : révoque l'ancienne clé + génère une nouvelle + redeploy GitHub Actions.
-- **Pas de per-key rate-limit** sur `verify` : un attaquant avec IP unique pourrait tenter de deviner des clés. Entropie suffisante (128+ bits) rend le brute-force computationnellement impossible. À surveiller si usage public intensif.
-
-### 3.12 Backup chiffré (✅)
-
-Pull-based, GPG RSA 4096, escrow externe, vérification d'intégrité à chaque pull, restore-test mensuel automatisé. Voir [security.md §2.9 original] et [doc-install-backup.md](steps-docs/doc-install-backup.md).
-
-### 3.13 Non couvert (backlog)
-
-- **Rate-limit Bearer machine** (`/api/secrets/[slug]/[env]`) — faible priorité (brute-force sur 256 bits impraticable). Cf. [todo_v2.md](todo_v2.md).
-- **DEPLOY_DENIED hors tenant** — JWT invalide avant résolution du tenant → pas d'audit DB. Table `admin.deploy_denied` envisagée en V2.
-- **Monitoring infrastructure** — état serveurs / replica / backups sur `/admin`. Cf. [todo_v2.md](todo_v2.md).
-
-> Note : les **scans DAST automatiques** (OWASP ZAP + Nuclei), initialement listés ici comme différés, sont en fait **livrés** et tournent à chaque push `staging` — voir §3.16.
-
-### 3.14 Nouvelles lacunes identifiées (2026-05-15)
-
-#### 3.14.1 ROTATION_HMAC_KEY — criticité (⚠️)
-
-`ROTATION_HMAC_KEY` est utilisée pour signer les callbacks N8n vers `POST /api/cron/rotation` (HMAC-SHA256, fenêtre ±1h, token à usage unique). Si cette clé fuite :
-
-1. Un attaquant peut forger un callback N8n valide pour n'importe quel secret.
-2. `PATCH /api/rotation/admin/secret-value` (protégé par `CRON_SECRET_ADMIN` / `timingSafeEqual`) peut être appelé directement si `CRON_SECRET_ADMIN` est aussi compromis.
-3. Résultat : écriture arbitraire de valeur chiffrée dans un `Secret` tenant.
-
-**Traitement requis** : `ROTATION_HMAC_KEY` doit être traitée avec la même rigueur que `ENCRYPTION_KEY` — jamais en repo, uniquement dans les secrets opérateur (`.env` VPS / GitHub Secrets). Renouvellement manuel en cas de suspicion de compromission (réécrire la valeur dans l'env + redéployer).
-
-#### 3.14.2 npm audit / CVE scanning (✅ — livré 2026-05-30)
-
-Scan SCA des dépendances en CI. Les packages suivants sont critiques pour la sécurité :
-
-| Package | Rôle |
-|---|---|
-| `next` | Framework — vulnérabilités régulières (XSS, path traversal, SSRF) |
-| `@prisma/client` | ORM — injection SQL si mal utilisé |
-| `jose` | Validation JWT OIDC — CVE sur `jwtVerify` historiquement |
-| `bcryptjs` | Hash mots de passe |
-| `otplib` | TOTP 2FA |
-
-**Livré** : job `npm-audit` dans [.github/workflows/security.yml](../.github/workflows/security.yml) — `npm audit --omit=dev --audit-level=high` sur chaque push (`main`/`staging`) et PR, **bloque sur high/critical**. Cible les dépendances de production (runtime) pour rester actionnable ; les advisories dev-only ne bloquent pas. Complémentaire des scans DAST (§3.16) : SCA = vulnérabilités des packages, DAST = app en exécution.
-
-#### 3.14.3 Invalidation des sessions après changement de mot de passe / révocation 2FA (✅ — livré ; trou PluginToken fermé 2026-07-18)
-
-NextAuth v5 émet des JWT sessionToken stateless — pas de révocation JWT intrinsèque. Le mécanisme livré : chaque JWT porte son instant d'émission (`loginAt`, ms epoch) et l'utilisateur porte une borne `User.sessionsValidFrom` ; un token émis **avant** cette borne est périmé (`isSessionInvalidated`, [lib/session-validity.ts](../lib/session-validity.ts)). Le reset de mot de passe et le 2FA-disable posent `sessionsValidFrom = now` → toutes les sessions web antérieures sont coupées.
-
-**Trou identifié et corrigé (2026-07-18)** : les **PluginTokens** (extension navigateur, `sv_plugin_*`) — une session au même titre qu'un JWT web — n'étaient **pas** soumis à cette borne. `validatePluginToken` vérifiait format/hash/`revokedAt`/`expiresAt`, jamais `sessionsValidFrom`. Un token volé survivait au reset censé l'évincer (jusqu'à 8h de TTL) — **pire**, le provider Credentials `pluginToken` ([lib/auth.ts](../lib/auth.ts)) l'échangeait contre une **session web fraîche** (`loginAt = now > sessionsValidFrom` → non invalidée). Le reset offrait une session au lieu de l'expulser. Il n'existait **aucune** révocation en masse des PluginTokens.
-
-**Fix** : `validatePluginToken` rejette le token si `createdAt < user.sessionsValidFrom` (même borne que les JWT web ; `createdAt` = instant d'émission du token, équivalent du `loginAt`). Le provider Credentials appelant `validatePluginToken` en premier, **les deux vecteurs** (API plugin directe + échange NextAuth) tombent d'un coup. Test rouge→vert dans `tests/integ/plugin.test.ts`.
-
-#### 3.14.4 ENCRYPTION_KEY re-keying (✅ — script + procédure livrés 2026-06-24)
-
-Procédure de rotation de la clé maître `ENCRYPTION_KEY` (rotation planifiée **ou** récupération après compromission). Tous les secrets serveur (`Secret`/`SecretVersion`, `OrgSecret`/`OrgSecretVersion`, `Service` (2 triplets), `AppAccount`, `Server`, `VaultEntry`/`TeamVaultEntry` (2 triplets), `User.twoFactor*`, `Api.jwtSecret*`, `CiConnectionSecret`, `ProjectEmailConfig`, `ProjectBackupConfig.agentToken*`) sont chiffrés AES-256-GCM avec cette clé unique, **sans versioning dans le payload** → faire tourner la clé EXIGE un re-keying (déchiffrer sous l'ancienne, re-chiffrer sous la nouvelle).
-
-**Mécanisme dual-key** ([lib/crypto.ts](../../lib/crypto.ts)) : si `ENCRYPTION_KEY_OLD` est définie, `decrypt()` y retombe quand la clé courante échoue. Pendant la migration, les lignes encore sous l'ancienne clé ET les nouvelles restent lisibles → **zéro downtime**. Absente, le comportement est strictement inchangé.
-
-**Script** : [scripts/rekey-encryption.mjs](../../scripts/rekey-encryption.mjs). Idempotent/reprenable (saute ce qui est déjà sous la nouvelle clé), transaction par lot, **dry-run par défaut**, robuste au drift de schéma (table/colonne absente sautée), parcourt tous les schémas `client_*` (+`public` via `--include-public`).
-
-> **Exclus du re-keying** (zero-knowledge — le serveur ne peut pas déchiffrer) : `OneTimeShare` (chiffré navigateur) et `SecretRequest` (hybride ECDH/ML-KEM, déchiffré par le destinataire). Invariant : un champ re-keyable côté serveur possède une colonne `tag` GCM.
-
-**Procédure ops** (à lancer **en conteneur** — `node` direct, l'image runtime n'a ni npm ni npx) :
-1. **Backup DB** (le script réécrit des données ; il ne touche PAS au schéma).
-2. Générer la nouvelle clé : `openssl rand -hex 32` → `K2`.
-3. Déployer avec `ENCRYPTION_KEY=K2` **et** `ENCRYPTION_KEY_OLD=K1` (ancienne). L'app reste pleinement fonctionnelle (fallback dual-key).
-4. **Dry-run** (lecture seule, compte les lignes à migrer) :
-   `docker compose exec app node scripts/rekey-encryption.mjs --include-public`
-5. **Appliquer** : ajouter `--apply` (confirmation interactive, ou `--yes` en non-interactif).
-6. **Vérifier** : relancer le dry-run → doit afficher `0 à migrer | … déjà K2 | 0 erreurs`.
-7. **Retirer `ENCRYPTION_KEY_OLD`** du déploiement et redéployer (une fois le « 0 à migrer » confirmé). `K1` est alors révoquée.
-
-> ⚠️ Ne PAS retirer `ENCRYPTION_KEY_OLD` avant que le dry-run ne confirme `0 à migrer` : toute ligne restée sous K1 deviendrait illisible. Une ligne illisible sous K1 ET K2 est loguée et laissée **intacte** (jamais d'écrasement aveugle).
-
-Garde-fous tests : [tests/lib/rekey-script-interop.test.ts](../../tests/lib/rekey-script-interop.test.ts) (interop crypto script↔lib) + [tests/lib/rekey-registry.test.ts](../../tests/lib/rekey-registry.test.ts) (le registre couvre exactement les triplets GCM des schémas → détecte tout nouveau champ chiffré oublié). Cf. [todo_v2.md](todo_v2.md). Migration future de ce socle vers OpenBao Transit : gated par la HA OpenBao ([ha-openbao.md](steps-docs/todo/ha-openbao.md)).
-
-#### 3.14.5 Middleware locale routing — cross-domain caveat (⚠️ mitigation applicative)
-
-Le middleware `routing locale` ([middleware.ts](../middleware.ts), cf. `physalis.md §6.4`) redirige toute requête HTML sans préfixe `/{locale}/` vers `/{locale}/{path}`. L'URL absolue du redirect est construite à partir de `req.url`. Derrière Cloudflare avec rewrite du Host header (cas de l'infra prod où les sous-domaines tenants `<slug>.physalis.cloud` partagent un même origin), `req.url` peut perdre le host original — le `Location` du 307 pointe alors vers `vault.physalis.cloud` au lieu de `<slug>.physalis.cloud`.
-
-**Impact** : un utilisateur connecté sur son sous-domaine tenant qui clique sur un `<Link href="/projects">` ou `router.push("/projects")` (path sans préfixe locale) est éjecté vers le portail partagé. Le tenant-guard l'envoie alors vers `/{locale}/login?callbackUrl=...`, et selon les cookies, peut boucler.
-
-**Pas un risque de fuite d'info** : aucun secret n'est révélé, la session NextAuth (cookie domain `.physalis.cloud`) reste valide. Le risque est purement UX (rupture de flow, boucle de login) et de **confusion sur l'origine d'auth** : un utilisateur formé à reconnaître `<slug>.physalis.cloud` comme son contexte légitime se retrouve déstabilisé sur `vault.physalis.cloud`.
-
-**Mitigation actuelle** (livrée 2026-05-29, commits `64fb653`, `6e031ab`, `c6dadfa`) :
-- Helper `@/i18n/navigation` (next-intl) qui préfixe automatiquement la locale active dans tous les `<Link>` / `useRouter().push` côté client — 36 composants migrés (dashboard + auth)
-- `getTenantLoginUrl(plan, slug, { ..., locale? })` accepte la locale en option, passée par les callers user-facing (login-resolve API, dashboard logout, signup action)
-- Fix client-side dans `login-form.tsx` qui préfixe `data.url` retourné par `/api/login-resolve` avant `window.location.href`, defense-in-depth
-
-**Limite du mitigant** : un futur `<Link>` ou `router.push("/foo")` ajouté par erreur (oubli de l'import depuis `@/i18n/navigation`) recrée le bug silencieusement. Pas de garde-fou compilation/lint — la convention est documentée mais reposée sur la discipline. Cf. `todo_v2.md → i18n — root cause cross-domain` pour le fix à la source (utiliser `x-forwarded-host` côté middleware).
-
-#### 3.14.6 Audit RBAC — famille « barrière `ProjectMember.hidden` contournée » (✅ — livré 2026-07-18)
-
-Audit d'une **classe de failles d'autorisation** : le prédicat d'accès projet re-dérivé à la main depuis la table `ProjectMember` **sans lire la barrière `hidden`** (cf. l'invariant en §2.6). Une dizaine de surfaces le violaient ; plusieurs permettaient de **lire des secrets déchiffrés** ou d'**écrire dans un projet interdit** (élévation de privilège, pas simple divulgation).
-
-Surfaces corrigées :
-- **`/api/me/export`** (RGPD) — le seul endpoint qui déchiffre par conception : un membre masqué recevait tous les secrets du projet **en clair** en un GET.
-- **`/api/plugin/match`** — l'extension autofillait les credentials déchiffrés d'un projet masqué sur match de domaine (deux chemins : requête directe + `getAccessibleCollectionIds`).
-- **Coffres d'équipe** (`lib/vault-access.ts` : `requireProjectCollectionAccess`, `requireProjectScope`) + vecteurs d'écriture (`plugin/vault` auto-save, `vault/entries/[id]/move` cas `team_project`/`project_account`, `vault-entry-handlers`) → injection de credentials dans un projet barré. Énumération : `vault/destinations`.
-- **`/api/secret-requests/[id]/import`** — écrivait un secret dans le projet cible en ne vérifiant que l'org-role ; corrigé en passant par `requireEnvironment(EDITOR)` (garde d'écriture standard).
-- **Tokens d'intégration / listings** (lot initial : `org-tokens`, `integrations/*`, `orgs/[slug]/projects`) + création de `accessibleProjectsWhere`.
-- **Page d'audit projet** (défense en profondeur — l'API refusait déjà la donnée).
-
-Durcissements connexes du même cycle : invalidation PluginToken au reset (§3.14.3), garde tailnet PATCH `secret-value` (§3.9), **type-confusion `expiresInDays` → token DEV éternel** (une valeur non numérique passait la garde `> 90` puis laissait `expiresAt` null ; corrigé par normalisation + durcissement de `validateDevTokenCreation`), rôle **`ADMIN_DEV` rendu assignable** (absent des `VALID_ROLES` → rôle mort).
-
-**0 migration** (code-only). Chaque faille exploitable est verrouillée par un test **rouge→vert** doublé d'un test anti sur-restriction. Faux positifs écartés : `OrgMember`/`TeamVaultMember` n'ont pas de colonne `hidden`.
-
-### 3.15 Module Email (Physalis Email) (✅ — revu 2026-05-30)
-
-Module permettant à chaque projet d'envoyer ses emails via Physalis Email (serveur d'envoi auto-hébergé, repo séparé). Physalis dialogue avec Physalis Email via la **management API** (header `X-Service-Key`, hors chemin runtime) ; l'app cliente envoie via `POST /v1/send` avec la **clé API du projet** (`ph_live_sk_…`).
-
-**Architecture & stockage**
-- Config **par projet** dans `ProjectEmailConfig` (tenant schema) : domaine, IDs PF, **clé API chiffrée AES-256-GCM** (`encryptedKey/iv/tag`), DNS en JSON. Activation **par org** dans `OrgEmailConfig` (`enabled`, `accountId` PF partagé).
-- Variables runtime (`PHYSALIS_EMAIL_API_KEY`, `PHYSALIS_EMAIL_DOMAIN`, `PHYSALIS_EMAIL_URL`) injectées dans le `.env` de chaque environnement **au déploiement** ([app/api/deploy/route.ts](../app/api/deploy/route.ts)) — jamais stockées en `Secret` éditable.
-- Rotation auto **blue/green** de la clé API ([lib/rotators/physalis-email.ts](../lib/rotators/physalis-email.ts)) : nouvelle clé + redeploy, révocation de l'ancienne différée d'un cycle (fenêtre de grâce). Branchée sur le cron de rotation existant, gated `org.rotationFeatureEnabled`.
-
-**Contrôles d'accès**
-- **Gating fail-closed** : `isEmailModuleEnabled(email)` = `PHYSALIS_EMAIL_ENABLED === "true"` **ou** email ∈ `PHYSALIS_EMAIL_ALLOWED_EMAILS`. Routes → **404** si non autorisé (masque l'existence). Le rôle SUPERADMIN n'est pas porté par la session tenant — d'où le choix de l'allowlist par email.
-- **RBAC** : lecture VIEWER, mutations EDITOR, activation org ADMIN, rotation EDITOR + feature org. Toutes les routes passent par `requireProjectMember`/`requireOrgMember` (→ 401 sans session).
-- **Pas d'IDOR** : `accountId` (org) et `domainId` (projet) sont dérivés côté serveur depuis la config du projet autorisé, jamais pris du client.
-- **Révélation de la clé** (`POST /email/reveal`) : EDITOR + **auditée** (`SECRET_REVEAL`) + rate-limitée (30/min/user). Bouton masqué aux non-EDITOR côté UI.
-
-**Audit 2026-05-30 — findings traités**
-- **#1 (moyen)** Mutation d'expéditeur scopée au **domaine** et non plus seulement au compte (Physalis Email `getSender` + check `domainId`) — empêchait un projet de muter l'expéditeur d'un autre projet du même compte.
-- **#2 (faible)** Rate-limit par utilisateur sur `/email/send` (20/min) et `/email/reveal` (30/min).
-- **#3** Historique des envois indexé **par compte** (liste Redis `accounts:<id>:emails` écrite best-effort par le worker, bornée à 500) → scoping natif par compte, découplé de la rétention globale de la queue. L'endpoint **admin** Physalis Email a aussi été re-scopé sur le compte du JWT (corrige une exposition cross-compte du filtre par domaine seul).
-- **#4 / #5** Bouton Révéler masqué aux non-EDITOR ; renommage d'expéditeur audité.
-
-**Isolation** : client `prisma` strict (search_path par tenant), rotator cron via `withTenantSchema`/`getTenantPrisma`. Pas de SSRF (URL construite sur `PHYSALIS_EMAIL_SERVICE_URL` de confiance + `encodeURIComponent`). `X-Service-Key` jamais loggée ni renvoyée.
-
-**Résidus / à surveiller avant ouverture large (au-delà de l'allowlist)**
-- La revue des findings ci-dessus est **manuelle** ; la surface déployée est par ailleurs scannée à chaque push `staging` par **OWASP ZAP + Nuclei** (§3.16).
-- Les `details` d'erreur renvoient le texte d'erreur upstream Physalis Email (pas de secret ; acceptable pour outil admin).
-- CSRF : routes mutantes via `fetch` + cookie SameSite, modèle identique au reste de l'app (§2.9).
-
-### 3.16 Scans dynamiques (DAST) — OWASP ZAP + Nuclei (✅)
-
-Exécutés automatiquement à chaque push sur `staging`, après le déploiement, dans [.github/workflows/deploy-staging.yml](../.github/workflows/deploy-staging.yml) (jobs `zap`, `nuclei`, `e2e` — tous `needs: deploy-staging`, ciblant `E2E_BASE_URL` = l'environnement staging réel).
-
-- **OWASP ZAP** — `zaproxy/action-baseline@v0.14.0`, scan **passif** (baseline) de la surface staging. Règles ajustées via [.zap/rules.tsv](../.zap/rules.tsv) ; rapport en artefact (`zap-report`), `allow_issue_writing: false`.
-- **Nuclei** — `projectdiscovery/nuclei-action@v3`, `-severity medium,high,critical`, `-tags cve,misconfig,exposure,headers`, `-exclude-tags dos,fuzz`. Couvre CVE connues, misconfigs, expositions et headers sur l'app déployée.
-- **Playwright E2E** (`e2e`) — valide les flows UI critiques post-déploiement.
-
-**Portée** : DAST = test de l'app **en cours d'exécution** (boîte noire). Complète mais ne remplace **pas** le scan **SCA des dépendances** (`npm audit` / CVE des packages), qui reste ❌ en CI (§3.14.2) — les deux couvrent des surfaces différentes.
+| `share-consume` | 30 / min | IP |
+| `secret-request-submit` | 5 / h | IP |
+| `signup-check-slug` | 30 / min | IP |
+
+### `TRUST_PROXY_HOPS` — le réglage qui décide de tout
+
+Toutes ces limites sont clefées sur l'IP client, extraite de la chaîne
+`X-Forwarded-For`. Cette chaîne se lit **par la droite** : les segments de
+gauche viennent de l'appelant et sont donc forgeables ; seuls les N derniers
+sont posés par votre infrastructure. `TRUST_PROXY_HOPS` déclare ce N.
+
+- Application exposée en direct, ou un seul reverse proxy → `1` (défaut)
+- Reverse proxy + CDN qui ajoute aussi l'IP (Cloudflare…) → `2`
+
+Mal réglée, cette valeur rend **tous** les rate-limits contournables (valeur trop
+haute : l'appelant contrôle le segment lu) ou trop agressifs (valeur trop basse :
+tous vos utilisateurs partagent la même clé).
+
+> ⚠️ Le comptage n'est sain que si l'application n'est **pas** joignable en
+> direct. Sinon un appelant qui court-circuite le proxy raccourcit la chaîne d'un
+> cran, et le segment lu redevient une valeur qu'il contrôle. Bindez le conteneur
+> sur la boucle locale, ou filtrez au pare-feu.
 
 ---
 
-## 4. Procédure de revue
+## 9. Surfaces réseau et entrées non authentifiées
 
-Avant chaque livraison touchant à l'auth, au chiffrement, ou aux routes API :
+- **Base de données** : à garder sur le réseau Docker interne. N'exposez le port
+  5432 sur l'hôte que si vous en avez un besoin explicite, et filtrez-le.
+- **SSRF** ([lib/safe-fetch.ts](../lib/safe-fetch.ts)) : toute URL fournie par un
+  utilisateur — webhook de rotation, cible de synchronisation, connexion CI —
+  passe par un fetch qui refuse les adresses privées, de bouclage et de
+  métadonnées cloud.
+- **Extension navigateur** ([lib/plugin-cors.ts](../lib/plugin-cors.ts)) : les
+  routes `/api/plugin/*` n'acceptent que l'origine déclarée dans
+  `PLUGIN_ALLOWED_ORIGIN`. Variable absente ⇒ **403 sur tous ces endpoints**,
+  fail-closed.
+- **Routes publiques intentionnelles** : `/api/public/secret-requests/[token]/…`
+  (soumission d'un secret par un tiers) et la consommation d'un partage à usage
+  unique. Elles sont sans session par conception — l'autorisation est portée par
+  le token du lien, à entropie élevée, à durée de vie courte et à usage unique.
+- **Inscription publique** : `ALLOW_REGISTRATION="false"` par défaut. Ne
+  l'activez que si votre instance est destinée à accueillir des inscriptions
+  libres.
 
-1. Vérifier qu'aucune valeur de secret ne transite par les logs (`grep "console" lib/ app/api/`).
-2. Confirmer que les nouvelles routes appellent `requireUser` / `requireOrgMember` / `requireProjectMember` avec le bon rôle — ou `validateIntegrationToken` pour les endpoints intégration. **Toute dérivation d'accès projet faite à la main (query `ProjectMember` : `members[0]?.role`, `members: { some }`) doit lire la barrière `hidden` — préférer `requireProjectMember`/`requireEnvironment` ou le prédicat `accessibleProjectsWhere` (cf. §2.6, §3.14.6).**
-3. Vérifier que les nouveaux endpoints opérateur appellent bien le helper partagé `requireCronAuth(req, tier)` (`lib/cron-auth.ts`) avec le bon tier (`"report"` pour le bas-privilège, `"admin"` sinon) — jamais de vérif inline copiée-collée.
-4. Lancer `npm test && npm run test:integ` (docker compose up -d au préalable). Tout vert avant merge.
-5. Lancer `npm audit --audit-level=high` — zéro high/critical avant merge. (En attendant l'intégration CI, cf. §3.14.2.)
-6. Tests manuels critiques :
-   - Token machine sur mauvais env → 403.
-   - Token machine révoqué → 401.
-   - Lecture SQL directe d'un `Secret` → uniquement base64.
-   - `/api/deploy` sans Bearer → 401 ; Bearer invalide → 401 + audit `DEPLOY_DENIED`.
-   - OrgToken avec scope insuffisant → 403 (Forbidden scope).
-7. Vérifier headers HTTP : `curl -I https://vault.physalis.cloud/`.
-8. Pour toute route publique intentionnelle (ex. `/api/public/secret-requests/*`) : documenter dans ce fichier pourquoi elle est sans auth.
+---
 
-Avant chaque livraison touchant au backup :
+## 10. Journal d'audit
 
-1. `bash -n` sur tous les scripts modifiés.
-2. Vérifier qu'aucun secret sensible n'est ajouté à un fichier qui transite (logs, HTTP responses, `.env`).
-3. Confirmer que la rétention ne supprime jamais le backup le plus récent.
+Table `AccessLog`, append-only. Chaque action sensible y est écrite avec
+l'acteur (utilisateur **ou** token, dénormalisé pour survivre à la suppression
+de la ligne d'origine), les identifiants d'organisation / projet /
+environnement, la clé de secret concernée, l'IP, le user-agent et un blob
+`metadata`. Les refus sont journalisés au même titre que les succès. Export CSV
+depuis l'interface.
+
+Côté journaux applicatifs : aucune valeur de secret, de mot de passe ou de token
+en clair n'est écrite sur la sortie standard. Prisma est configuré en
+`["error"]` en production.
+
+---
+
+## 11. Limites connues
+
+Autant les énoncer que les laisser découvrir.
+
+- **Le rate limiting est en mémoire du processus.** Les compteurs repartent de
+  zéro à chaque redémarrage du conteneur, et ne sont pas partagés entre
+  plusieurs instances. Un attaquant patient peut temporiser autour d'un
+  redéploiement. Suffisant pour une instance unique ; à compléter par une
+  limitation au niveau du reverse proxy si vous exposez l'instance largement.
+- **Pas de liaison cryptographique entre un ciphertext et sa ligne** (absence
+  d'AAD, cf. §2). Aucun chemin applicatif ne l'exploite aujourd'hui, mais
+  l'invariant repose sur une règle de revue, pas sur le système de types.
+- **Pas de rate limit sur `/api/secrets/[slug]/[env]`** (Bearer machine). Le
+  brute-force est impraticable — 256 bits d'entropie — mais un token compromis
+  utilisé en boucle ne déclenche aucun seuil ; c'est l'audit log qui doit le
+  révéler.
+- **Aucune sauvegarde, réplication ni bascule n'est fournie** (cf. §12).
+- **Emails optionnels** : sans configuration Mailgun, l'application démarre mais
+  les invitations et les réinitialisations de mot de passe ne partent pas. Le
+  premier administrateur est créé par variables d'environnement, donc l'instance
+  reste utilisable.
+
+---
+
+## 12. Sauvegarde et continuité
+
+Ce dépôt ne fournit **ni backup, ni réplication, ni mécanisme de bascule** —
+aucun script, aucun cron. C'est votre infrastructure. Au minimum :
+
+1. un dump régulier de PostgreSQL (`pg_dump`), chiffré, stocké **hors** du
+   serveur qui l'a produit ;
+2. une copie de `ENCRYPTION_KEY` en escrow, séparée des dumps — un dump sans la
+   clé est irrécupérable, et la clé sans dump ne vaut rien ;
+3. un test de restauration périodique, sinon vous n'avez pas une sauvegarde,
+   vous avez des fichiers.
+
+Stocker la clé au même endroit que les archives annule l'essentiel du bénéfice :
+qui obtient les unes obtient l'autre.
+
+---
+
+## 13. Procédure de revue
+
+Avant toute livraison touchant à l'authentification, au chiffrement ou aux
+routes d'API :
+
+1. Vérifier qu'aucune valeur de secret ne transite par les journaux.
+2. Confirmer que les nouvelles routes appellent `requireUser` /
+   `requireOrgMember` / `requireProjectMember` / `requireEnvironment` avec le bon
+   rôle. **Toute dérivation d'accès projet écrite à la main doit lire la barrière
+   `hidden`** — préférer les helpers ou `accessibleProjectsWhere` (§6).
+3. Lancer `npm test && npm run test:integ` (stack Docker démarrée). Tout vert
+   avant merge.
+4. Lancer `npm audit --audit-level=high` — zéro vulnérabilité haute ou critique.
+5. Contrôles manuels utiles :
+   - token machine sur un mauvais environnement → 403 ;
+   - token machine révoqué → 401 ;
+   - lecture SQL directe d'un `Secret` → uniquement du base64 ;
+   - `/api/deploy` sans Bearer → 401 ; Bearer invalide → 401 + entrée d'audit ;
+   - `OrgToken` avec un scope insuffisant → 403.
+6. Vérifier les en-têtes HTTP servis par votre instance : `curl -I https://<votre-domaine>/`.
+7. Pour toute nouvelle route publique intentionnelle, documenter ici pourquoi
+   elle est sans authentification.
+
+---
+
+## 14. Signaler une vulnérabilité
+
+Ouvrez un ticket sur
+[github.com/physalis-cloud/physalis/issues](https://github.com/physalis-cloud/physalis/issues)
+**sans détail exploitable** et demandez un canal privé pour la suite.

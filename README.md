@@ -1,26 +1,26 @@
-> **Version 1.3.2**
->
-> Repo self-host de Physalis. L'API, le schéma de base de données et le flux
-> d'installation suivent le versioning sémantique : les changements cassants
-> passeront par une version majeure. Une mise à jour peut apporter de nouvelles
-> migrations — elles s'appliquent au démarrage du conteneur.
->
-> Pour la version hébergée et gérée : [physalis.cloud](https://physalis.cloud).
-> Bugs / feedback bienvenus : [github.com/physalis-cloud/physalis/issues](https://github.com/physalis-cloud/physalis/issues).
+# Physalis
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
+**Français** · [English](README.en.md) · [Español](README.es.md)
+
+> **Version 1.3.3** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 
-# Physalis
-
 Gestionnaire de secrets self-hosted (Next.js + Postgres + AES-256-GCM) pour
 centraliser les variables d'environnement, clés SSH et credentials de plusieurs
-projets, avec authentification GitHub OIDC pour les workflows de déploiement.
+projets, avec authentification OIDC (GitHub, GitLab, Bitbucket) pour les
+workflows de déploiement.
 
 Multi-organisation, audit log, services & comptes chiffrés, docker-compose
-servable par env, redeploy GitHub Actions intégré, backup chiffré GPG avec
-warm-standby sur VPS secondaire.
-
-# Physalis — Résumé
+servable par env, redeploy CI intégré, échange de clés hybride post-quantique
+(ECDH P-256 + ML-KEM-768) pour les demandes de secrets externes.
 
 **Physalis** est un gestionnaire de secrets self-hosted conçu pour centraliser toutes les variables d'environnement d'une agence web sur ses propres serveurs, sans dépendre d'un service cloud tiers.
 
@@ -46,19 +46,17 @@ L'application supporte plusieurs organisations isolées, chacune avec ses propre
 
 **Pour les humains** — une interface web sécurisée par mot de passe et optionnellement par double authentification TOTP. Les valeurs des secrets ne sont jamais affichées en masse : chaque révélation est une action explicite, unitaire, tracée dans l'audit log.
 
-**Pour les machines** — authentification OIDC GitHub Actions. Au moment du déploiement, le workflow GitHub obtient un token signé par GitHub (sans aucun secret stocké dans GitHub Secrets) et le présente à Physalis. Le vault vérifie la signature cryptographiquement, contrôle que le repo, le workflow et la branche correspondent exactement à une règle autorisée, puis retourne en une seule requête l'ensemble du bundle de déploiement : variables d'environnement déchiffrées, clé SSH du serveur cible, chemin de déploiement, docker-compose, et credentials du registry Docker.
+**Pour les machines** — authentification OIDC GitHub Actions. Au moment du déploiement, le workflow obtient un token signé par le fournisseur CI (sans aucun secret stocké dans GitHub Secrets) et le présente à Physalis. Le vault vérifie la signature cryptographiquement, contrôle que le repo, le workflow et la branche correspondent exactement à une règle autorisée, puis retourne en une seule requête l'ensemble du bundle de déploiement : variables d'environnement déchiffrées, clé SSH du serveur cible, chemin de déploiement, docker-compose, et credentials du registry Docker.
 
-### Envoi d'emails par projet (Physalis Email)
+### Cryptographie résistante au post-quantique
 
-Chaque projet peut être relié à **Physalis Email**, un serveur d'envoi d'emails auto-hébergé, pour envoyer ses emails depuis son propre domaine. L'organisation active le service une fois (compte partagé), puis chaque projet connecte son domaine, configure les DNS (SPF/DKIM/DMARC) et gère ses expéditeurs autorisés depuis l'interface — onglet **Email** avec sous-sections Détails, Envoi, Expéditeurs, Historique. La clé API est chiffrée au repos et injectée automatiquement dans le `.env` de chaque environnement au déploiement, avec **rotation automatique** optionnelle (blue/green). Physalis n'est jamais dans le chemin runtime d'envoi.
+Les secrets sont chiffrés au repos en **AES-256-GCM** — un chiffrement symétrique déjà résistant aux ordinateurs quantiques (l'algorithme de Grover ne fait que ramener une clé de 256 bits à une sécurité effective de 128 bits).
+
+L'échange de clés des **demandes de secrets externes** — le seul endroit où de la cryptographie asymétrique protège une valeur, et donc le seul point réellement exposé à un futur ordinateur quantique — est **hybride** : ECDH P-256 **et** ML-KEM-768 (FIPS 203), combinés par HKDF-SHA256 avec binding du transcript. Casser la clé dérivée exige de casser les deux. Les demandes créées avant cette bascule (ECDH seul) restent déchiffrables. Implémentation : [lib/hybrid-kem.ts](lib/hybrid-kem.ts) et [lib/pqc.ts](lib/pqc.ts).
 
 ### Traçabilité complète
 
 Chaque action — lecture d'un secret, modification, connexion, déploiement, invitation — est enregistrée dans un audit log persistant avec l'acteur, l'IP, et l'horodatage. Exportable en CSV, consultable par projet ou par organisation.
-
-### Résilience
-
-Un VPS secondaire reçoit chaque nuit une copie chiffrée de la base de données via un mécanisme pull-based — le serveur secondaire tire les données depuis le primaire, jamais l'inverse. Les backups sont chiffrés avec une clé GPG dont seul le secondaire possède la partie privée : un attaquant qui compromettrait le serveur principal ne pourrait pas déchiffrer les sauvegardes historiques. En cas de panne, le basculement prend moins de 20 minutes.
 
 ---
 
@@ -73,10 +71,9 @@ Un VPS secondaire reçoit chaque nuit une copie chiffrée de la base de données
 | Déploiements manuels ou semi-automatisés | Déploiements entièrement automatisés sans intervention humaine |
 
 
-📖 **Documentation technique complète** : [docs/physalis.md](docs/physalis.md)
-🔒 **Audit sécurité** : [docs/security.md](docs/security.md)
-🗺️ **Roadmap** : [docs/todo.md](docs/todo.md)
-💾 **Backup & Failover** : [docs/todo-backup-failover.md](docs/todo-backup-failover.md) · [docs/doc-install-backup.md](docs/doc-install-backup.md)
+📖 **Documentation technique** : [docs/physalis.md](docs/physalis.md)
+📚 **Documentation utilisateur** : [docs/documentation/fr/](docs/documentation/fr/) (aussi en `en` / `es`)
+🔒 **Modèle de sécurité** : [docs/security.md](docs/security.md)
 
 ---
 
@@ -108,14 +105,14 @@ npm run bootstrap-admin
 npm run dev                                       # http://localhost:3000
 ```
 
-### 3. Production (VPS derrière Nginx Proxy Manager)
+### 3. Production (VPS derrière un reverse proxy)
 
-Déploiement automatique sur push `main` via [.github/workflows/deploy.yml](.github/workflows/deploy.yml) :
-test → build/push GHCR → SSH deploy + health check.
+Workflow type : test → build/push registry → SSH deploy + health check. Modèle
+prêt à coller : [docs/deploy.modele.yml](docs/deploy.modele.yml).
 
-Voir [docs/physalis.md §10.3](docs/physalis.md) pour le setup VPS initial
-(création du dossier, génération de la clé SSH dédiée au workflow, contenu de
-`.env`, secrets GitHub à créer).
+Voir [docs/physalis.md §9](docs/physalis.md) pour l'installation complète
+(dossier de déploiement, clé SSH dédiée au workflow, contenu du `.env`, reverse
+proxy et TLS).
 
 ---
 
@@ -123,25 +120,27 @@ Voir [docs/physalis.md §10.3](docs/physalis.md) pour le setup VPS initial
 
 Trois modes d'accès, du plus moderne au plus legacy :
 
-### Mode 1 — OIDC (recommandé, post-Megalodon)
+### Mode 1 — OIDC (recommandé)
 
-Le runner GitHub Actions s'authentifie avec un JWT OIDC signé par GitHub. Le
-vault valide le claim contre une `Policy` stricte `(repo, workflow, branch)
-→ (project, env)` et retourne un bundle complet.
+Le runner CI s'authentifie avec un JWT OIDC signé par le fournisseur (GitHub
+Actions, GitLab CI, Bitbucket Pipelines). Le vault valide le claim contre une
+`Policy` stricte `(repo, workflow, branch) → (project, env)` et retourne un
+bundle complet.
 
 | Endpoint | Auth | Réponse |
 |---|---|---|
-| `POST /api/deploy` | Bearer JWT OIDC GitHub | `{ serverIp, serverUser, sshKey, deployPath, secrets, dockerCompose, registry }` |
+| `POST /api/deploy` | Bearer JWT OIDC | `{ serverIp, serverUser, sshKey, deployPath, secrets, dockerCompose, registry }` |
 
-Aucun secret GitHub n'est consommé. Clé SSH et registry creds vivent chiffrés
-dans le vault. Template prêt à coller : [docs/deploy-oidc.yml](docs/deploy-oidc.yml)
-(deploy avec rebuild) ou [docs/redeploy-oidc.yml](docs/redeploy-oidc.yml)
-(redeploy sans rebuild). Migration détaillée en
-[docs/physalis.md §10.6](docs/physalis.md).
+Aucun secret CI n'est consommé. Clé SSH et registry creds vivent chiffrés
+dans le vault. Templates prêts à coller :
+[docs/deploy.modele.yml](docs/deploy.modele.yml) (deploy avec rebuild),
+[docs/redeploy.modele.yml](docs/redeploy.modele.yml) (redeploy sans rebuild),
+[docs/deploy.gitlab-ci.modele.yml](docs/deploy.gitlab-ci.modele.yml) et
+[docs/deploy.bitbucket-pipelines.modele.yml](docs/deploy.bitbucket-pipelines.modele.yml).
 
-### Mode 2 — Bearer machine token (fallback hors GitHub)
+### Mode 2 — Bearer machine token (fallback hors CI OIDC)
 
-Pour les contextes qui ne peuvent pas obtenir un OIDC GitHub (cron sur VPS,
+Pour les contextes qui ne peuvent pas obtenir un token OIDC (cron sur VPS,
 autre CI, scripts manuels) :
 
 | Endpoint | Auth | Réponse |
@@ -173,24 +172,22 @@ openssl rand -base64 32     # AUTH_SECRET / NEXTAUTH_SECRET
 
 ---
 
-## Backup & Failover
+## Sauvegarder votre instance
 
-Backup quotidien chiffré GPG, **pull-based** (le secondaire tire depuis le
-primaire), rotation 7 daily + 12 monthly, restore-test mensuel automatisé.
-Monitoring externe via healthchecks.io.
+**Ce dépôt ne fournit ni backup, ni réplication, ni failover** — aucun script,
+aucun cron, aucun mécanisme de bascule. La sauvegarde de votre instance est
+votre infrastructure, donc votre responsabilité. Au minimum :
 
-```
-PRIMARY (vault.argoweb.fr)  ←── ssh forced-cmd ──  SECONDARY (vault-backup.argoweb.fr)
-                              dump | gzip | gpg
-                                                   /srv/backups/secretvault/<date>.db.gz.gpg
-```
+- un **dump régulier** de la base PostgreSQL (`pg_dump`), chiffré et stocké
+  hors du serveur qui l'a produit ;
+- une **copie de `ENCRYPTION_KEY`** en escrow (cf. l'avertissement ci-dessus) —
+  un dump sans la clé est irrécupérable, et la clé sans dump ne vaut rien ;
+- un **test de restauration** périodique, sinon vous n'avez pas une sauvegarde,
+  vous avez des fichiers.
 
-Scripts ready-to-deploy : [scripts/backup/](scripts/backup/) avec
-[README d'install](scripts/backup/README.md).
-
-RPO 24h, RTO 5-20 min (restore DB) + propagation DNS. Failover manuel
-(DNS-flip chez le registrar) — runbook complet en
-[docs/todo-backup-failover.md](docs/todo-backup-failover.md).
+L'offre hébergée [physalis.cloud](https://physalis.cloud) opère sa propre
+infrastructure de résilience (réplication et sauvegardes chiffrées gérées) ;
+rien de tout cela n'est inclus ni orchestré par ce dépôt.
 
 ---
 
@@ -198,12 +195,11 @@ RPO 24h, RTO 5-20 min (restore DB) + propagation DNS. Failover manuel
 
 Next.js 15 (App Router) · TypeScript · Prisma 6 + PostgreSQL 16 ·
 NextAuth v5 (Credentials, JWT) · bcryptjs (salt 12) · AES-256-GCM ·
-jose 6 (OIDC JWKS) · 2FA TOTP (otplib) · Tailwind 3 · Mailgun · Docker
-multi-stage (node:22-alpine) · intégration Physalis Email (emails par projet).
+ECDH P-256 + ML-KEM-768 hybride (`@noble/post-quantum`) ·
+jose 6 (OIDC JWKS) · 2FA TOTP (otplib) · Tailwind 3 · Mailgun (emails
+transactionnels) · Docker multi-stage (node:22-alpine).
 
 ## Tests
-
-121 unit tests (~8s) + 70+ integration tests (~35s, stack docker requise).
 
 ```bash
 npm test               # unit (crypto, token, rate-limit, validation, totp,
@@ -212,4 +208,4 @@ npm run test:integ     # integ (bearer-auth, RBAC, DB encryption, headers,
                        #        rate-limit, 2FA, servers, policies, plugin)
 ```
 
-Voir [docs/physalis.md §11](docs/physalis.md) pour le détail.
+Voir [docs/physalis.md §12](docs/physalis.md) pour le détail.
