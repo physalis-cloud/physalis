@@ -2,11 +2,19 @@
 //
 // Token format : `sv_extreq_<32 hex>` (= 8 chars prefix + 64 hex = 72 chars).
 // Hashé SHA-256 en base. Le brut n'est jamais persisté.
-// Indexé dans `admin.token_index` (kind=SECRET_REQUEST) pour permettre la
-// résolution cross-tenant depuis l'URL publique `vault.physalis.cloud/request/<token>`.
+//
+// Jumeau SELF-HOST : `resolveSecretRequestTenantSlug` et
+// `indexSecretRequestToken` sont RETIRÉS. Ils servent, côté SaaS, à résoudre
+// depuis le portail partagé `vault.physalis.cloud/request/<token>` quel tenant
+// possède un token — problème qui n'existe pas ici : il n'y a qu'une base et
+// qu'un schéma, le `tokenHash` est unique, on lit la ligne directement.
+//
+// Ce n'était pas seulement inutile, c'était CASSANT : `indexSecretRequestToken`
+// n'avait aucun appelant dans le build, donc `TokenIndex` restait vide et la
+// résolution renvoyait toujours null → toute demande de secret externe créée
+// depuis une instance auto-hébergée produisait un lien en 404 permanent.
 
 import { createHash, randomBytes } from "node:crypto";
-import { adminPrisma } from "./prisma";
 
 const TOKEN_PREFIX = "sv_extreq_";
 export const SECRET_REQUEST_TTL_MS = 48 * 60 * 60 * 1000; // 48h (défaut)
@@ -40,34 +48,6 @@ export function hashSecretRequestToken(token: string): string {
 
 export function isSecretRequestTokenFormat(value: string): boolean {
   return /^sv_extreq_[0-9a-f]{64}$/.test(value);
-}
-
-/**
- * Résout un token brut vers le tenant qui le possède via admin.token_index.
- * Retourne le slug ou null si le token est inconnu.
- */
-export async function resolveSecretRequestTenantSlug(
-  token: string,
-): Promise<string | null> {
-  if (!isSecretRequestTokenFormat(token)) return null;
-  const tokenHash = hashSecretRequestToken(token);
-  const row = await adminPrisma.tokenIndex.findUnique({
-    where: { tokenHash },
-    select: { tenantSlug: true, kind: true },
-  });
-  if (!row || row.kind !== "SECRET_REQUEST") return null;
-  return row.tenantSlug;
-}
-
-/** Insère l'entrée dans admin.token_index. À appeler juste après création
- *  de la SecretRequest. */
-export async function indexSecretRequestToken(
-  tokenHash: string,
-  tenantSlug: string,
-): Promise<void> {
-  await adminPrisma.tokenIndex.create({
-    data: { tokenHash, tenantSlug, kind: "SECRET_REQUEST" },
-  });
 }
 
 /** Statut UI dérivé d'un SecretRequest. */

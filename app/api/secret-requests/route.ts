@@ -27,9 +27,18 @@ import {
   type SecretRequestStatus,
 } from "@/lib/secret-request";
 import { sendSecretRequestEmail } from "@/lib/email";
+import { physalisBaseUrl } from "@/lib/app-url";
 
-const SHARED_PORTAL =
-  process.env.PHYSALIS_SHARED_PORTAL ?? "vault.physalis.cloud";
+// Jumeau SELF-HOST : le lien envoyé au tiers pointe sur l'URL canonique de
+// CETTE instance, pas sur le portail partagé du SaaS.
+//
+// La source retombe sur `vault.physalis.cloud` quand `PHYSALIS_SHARED_PORTAL`
+// n'est pas posée — variable qui n'est ni documentée ni présente dans le
+// `.env.example` self-host. Toute demande de secret externe créée depuis une
+// instance auto-hébergée envoyait donc au destinataire un lien vers le SaaS,
+// où le token est inconnu : le tiers tombait sur un 404, et le secret ne
+// pouvait jamais être déposé. `PHYSALIS_URL` reste prioritaire (cf.
+// lib/app-url.ts), ce qui laisse la valeur configurable.
 
 const VALID_STATUSES: SecretRequestStatus[] = [
   "pending",
@@ -294,7 +303,7 @@ export async function POST(req: Request) {
     select: { id: true, expiresAt: true },
   });
 
-  const requestUrl = `https://${SHARED_PORTAL}/request/${token}`;
+  const requestUrl = `${physalisBaseUrl()}/request/${token}`;
 
   // Envoi email automatique si destinataire fourni (best-effort).
   if (recipientEmail) {

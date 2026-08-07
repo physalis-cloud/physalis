@@ -5,10 +5,14 @@ import RequestForm from "./request-form";
 import {
   hashSecretRequestToken,
   isSecretRequestTokenFormat,
-  resolveSecretRequestTenantSlug,
 } from "@/lib/secret-request";
-import { basePrisma } from "@/lib/prisma";
-import { isValidClientSlug } from "@/lib/validation";
+import { prisma } from "@/lib/prisma";
+
+// Jumeau SELF-HOST : la version SaaS résout d'abord le tenant propriétaire du
+// token via `admin.token_index`, puis lit `"client_<slug>"."SecretRequest"` en
+// SQL brut. Rien n'alimente cette table dans le build → la page renvoyait un
+// 404 pour TOUTE demande externe. En mono-tenant, `tokenHash` est unique et il
+// n'y a qu'un schéma : on lit la ligne directement.
 
 export async function generateMetadata() {
   const t = await getTranslations("secretRequest");
@@ -25,21 +29,22 @@ type RequestData = {
 
 async function loadRequest(token: string): Promise<RequestData | null> {
   if (!isSecretRequestTokenFormat(token)) return null;
-  const tenantSlug = await resolveSecretRequestTenantSlug(token);
-  if (!tenantSlug || !isValidClientSlug(tenantSlug)) return null;
 
-  const tokenHash = hashSecretRequestToken(token);
-  const rows = await basePrisma.$queryRawUnsafe<RequestData[]>(
-    `SELECT label, description, "requestedByEmail", "publicKeyJwk", "expiresAt"
-     FROM "client_${tenantSlug}"."SecretRequest"
-     WHERE "tokenHash" = $1
-       AND "revokedAt" IS NULL
-       AND "submittedAt" IS NULL
-       AND "expiresAt" > NOW()
-     LIMIT 1`,
-    tokenHash,
-  );
-  return rows[0] ?? null;
+  return prisma.secretRequest.findFirst({
+    where: {
+      tokenHash: hashSecretRequestToken(token),
+      revokedAt: null,
+      submittedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: {
+      label: true,
+      description: true,
+      requestedByEmail: true,
+      publicKeyJwk: true,
+      expiresAt: true,
+    },
+  });
 }
 
 export default async function RequestPage({
