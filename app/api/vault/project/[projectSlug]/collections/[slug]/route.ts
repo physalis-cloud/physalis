@@ -15,7 +15,7 @@ type Params = {
 
 export async function PATCH(req: Request, { params }: Params) {
   const { projectSlug, slug } = await params;
-  const access = await requireProjectCollectionAccess(projectSlug, slug, "OWNER");
+  const access = await requireProjectCollectionAccess(projectSlug, slug, "OWNER", { feature: "team_vault" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as { name?: string } | null;

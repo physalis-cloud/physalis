@@ -15,7 +15,7 @@ const VALID_ROLES = new Set<VaultRole>(["OWNER", "EDITOR", "VIEWER"]);
 
 export async function PATCH(req: Request, { params }: Params) {
   const { orgSlug, slug, userId } = await params;
-  const access = await requireOrgCollectionAccess(orgSlug, slug, "OWNER");
+  const access = await requireOrgCollectionAccess(orgSlug, slug, "OWNER", { feature: "team_vault" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as { role?: string } | null;

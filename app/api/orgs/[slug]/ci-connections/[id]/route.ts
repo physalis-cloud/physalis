@@ -22,7 +22,7 @@ const SECRET_FIELDS = [
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, id } = await params;
-  const access = await requireOrgMember(slug, "ADMIN_DEV");
+  const access = await requireOrgMember(slug, "ADMIN_DEV", { feature: "ci_cd" });
   if ("error" in access) return access.error;
 
   const existing = await prisma.ciConnection.findFirst({

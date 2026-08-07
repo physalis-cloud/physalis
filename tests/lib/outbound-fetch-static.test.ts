@@ -62,6 +62,11 @@ const LIB_ALLOWED: Record<string, string> = {
   "lib/sync/vercel.ts": "API Vercel, hôte constant",
   "lib/sync/render.ts": "API Render, hôte constant",
   "lib/sync/railway.ts": "API Railway, hôte constant",
+  // Seule entrée qui ne soit PAS une sortie serveur : ce module est marqué
+  // client (importé par components/LogoutButton.tsx) et son `fetch` vise une
+  // URL relative same-origin depuis le navigateur. Il ne traverse jamais le
+  // réseau interne — aucune surface SSRF à garder.
+  "lib/extension-bridge.ts": "appel navigateur same-origin (URL relative constante)",
 };
 
 /** Fichiers appelant `fetch(` en dehors de `safeFetchHook`. */

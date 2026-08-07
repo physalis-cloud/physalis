@@ -50,7 +50,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const { projectSlug } = await params;
-  const scope = await requireProjectScope(projectSlug, "EDITOR");
+  const scope = await requireProjectScope(projectSlug, "EDITOR", { feature: "team_vault" });
   if ("error" in scope) return scope.error;
 
   const body = (await readJson(req)) as { name?: string } | null;

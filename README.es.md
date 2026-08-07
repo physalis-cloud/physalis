@@ -9,7 +9,7 @@
 
 [Français](README.md) · [English](README.en.md) · **Español**
 
-> **Versión 1.3.3** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
+> **Versión 1.4.0** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 
@@ -25,6 +25,8 @@ secretos externas.
 **Physalis** es un gestor de secretos autoalojado, pensado para centralizar
 todas las variables de entorno de una agencia web en sus propios servidores, sin
 depender de un servicio en la nube de terceros.
+
+**Documentación**: [guías](https://physalis.cloud/es/docs) · [tutoriales paso a paso](https://physalis.cloud/es/tutos) · [autoalojamiento](https://physalis.cloud/es/self-host)
 
 ---
 

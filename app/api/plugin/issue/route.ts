@@ -1,7 +1,29 @@
+// Jumeau SELF-HOST de app/api/plugin/issue/route.ts. Deux différences.
+//
+// 1. La garde `if (!tenantSlug) → 400` est retirée. Elle vise le SUPERADMIN
+//    platform-level du SaaS, qui n'a pas de schéma tenant. En mono-tenant,
+//    `requireUser()` renvoie TOUJOURS `tenantSlug: null` (cf. lib/api.ts : le
+//    champ n'existe que pour que le code SaaS coulé verbatim compile) — la
+//    garde était donc vraie pour TOUT LE MONDE, et le hand-off web → extension
+//    répondait « Contexte client requis pour l'extension. » sur toute instance
+//    auto-hébergée. La sécurité de la route est ailleurs, et elle est intacte :
+//    session web cookie httpOnly/SameSite=Lax + refus des sessions dérivées
+//    d'un PluginToken (§2.18).
+//
+// 2. L'appel à `createTokenIndex` est retiré avec son import. `lib/token-index`
+//    est un stub no-op en self-host (il n'y a pas d'`admin.token_index` à
+//    alimenter : les tokens se résolvent directement dans la table tenant), et
+//    sa signature exige un `string` — l'appeler avec un slug nul ou vide ne
+//    serait qu'un bruit sans effet.
+//
+// ⚠️ Cela ne suffit PAS à faire marcher l'extension publiée sur une instance
+// auto-hébergée : elle a `VAULT_BASE_URL` en dur et des `host_permissions`
+// signés par les stores. Cf. le chantier « Extension navigateur — support
+// self-host » dans docs/versions/todo_v2.md.
+
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api";
 import { withTenantSchema } from "@/lib/tenant";
-import { createTokenIndex } from "@/lib/token-index";
 import { logAction } from "@/lib/audit";
 import {
   generatePluginToken,
@@ -42,15 +64,6 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!tenantSlug) {
-    // SUPERADMIN platform-level : pas de schéma tenant → l'extension ne le sert
-    // pas (elle autofill des credentials de projet, qui vivent dans un tenant).
-    return NextResponse.json(
-      { error: "Contexte client requis pour l'extension." },
-      { status: 400 },
-    );
-  }
-
   const body = (await req.json().catch(() => null)) as { ttl?: number } | null;
   let ttlSeconds = getPluginSessionTtl();
   if (body?.ttl !== undefined) {
@@ -74,11 +87,6 @@ export async function POST(req: Request) {
       select: { id: true },
     }),
   );
-
-  // Index admin pour la validation tenant-aware au prochain /api/plugin/match.
-  await createTokenIndex(tokenHash, tenantSlug, "PLUGIN").catch((err) => {
-    console.error("[plugin-issue] failed to create token_index entry:", err);
-  });
 
   logAction({
     action: "PLUGIN_AUTH_SUCCESS",

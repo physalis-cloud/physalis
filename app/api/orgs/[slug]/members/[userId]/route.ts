@@ -14,7 +14,7 @@ const VALID_ROLES: OrgRole[] = ["OWNER", "ADMIN", "ADMIN_DEV", "DEV", "MEMBER"];
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, userId } = await params;
-  const access = await requireOrgMember(slug, "ADMIN");
+  const access = await requireOrgMember(slug, "ADMIN", { feature: "multi_users" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as { role?: string } | null;

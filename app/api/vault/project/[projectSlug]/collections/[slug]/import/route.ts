@@ -23,6 +23,7 @@ export async function POST(req: Request, { params }: Params) {
     projectSlug,
     slug,
     "EDITOR",
+    { feature: "team_vault" },
   );
   if ("error" in accessRes) return accessRes.error;
   const { access } = accessRes;

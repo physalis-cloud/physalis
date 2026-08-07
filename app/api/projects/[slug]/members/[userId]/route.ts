@@ -31,7 +31,7 @@ const ROLES: ProjectRole[] = ["VIEWER", "EDITOR", "OWNER"];
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, userId } = await params;
-  const access = await requireProjectMember(slug, "OWNER");
+  const access = await requireProjectMember(slug, "OWNER", { feature: "multi_users" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as Body | null;

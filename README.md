@@ -9,7 +9,7 @@
 
 **Français** · [English](README.en.md) · [Español](README.es.md)
 
-> **Version 1.3.3** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
+> **Version 1.4.0** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 
@@ -23,6 +23,8 @@ servable par env, redeploy CI intégré, échange de clés hybride post-quantiqu
 (ECDH P-256 + ML-KEM-768) pour les demandes de secrets externes.
 
 **Physalis** est un gestionnaire de secrets self-hosted conçu pour centraliser toutes les variables d'environnement d'une agence web sur ses propres serveurs, sans dépendre d'un service cloud tiers.
+
+**Documentation** : [guides](https://physalis.cloud/fr/docs) · [tutoriels pas à pas](https://physalis.cloud/fr/tutos) · [auto-hébergement](https://physalis.cloud/fr/self-host)
 
 ---
 

@@ -19,7 +19,7 @@ type Params = { params: Promise<{ slug: string }> };
 
 export async function GET(_req: Request, { params }: Params) {
   const { slug } = await params;
-  const access = await requireOrgMember(slug, "ADMIN");
+  const access = await requireOrgMember(slug, "ADMIN", { feature: "multi_users" });
   if ("error" in access) return access.error;
 
   // Mes orgs (autres que l'org cible).

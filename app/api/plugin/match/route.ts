@@ -3,10 +3,15 @@
 // Retourne les credentials Service + AppAccount accessibles a l'user
 // (via PluginToken Bearer) dont le hostname matche strictement la query.
 //
-// Logique d'acces (cf. requireProjectMember dans lib/api.ts) :
-//   - User.role = ADMIN → access global
-//   - OrgMember.role ∈ {OWNER, ADMIN} sur l'org du projet → access OWNER implicite
-//   - ProjectMember explicite (n'importe quel role) → access
+// ─── Logique d'acces : les 6 regles, partout dans le bundle ─────────────
+// Services + AppAccounts via `accessibleProjectsWhere`, coffres d'equipe via
+// `getAccessibleCollectionIds` — meme source unique (lib/project-access.ts, §4).
+//
+// Ce route ecartait la regle 4 (OrgDEV/ADMIN_DEV → EDITOR implicite) au titre
+// d'une restriction deliberee. LEVEE le 2026-08-06 : sa premisse (« autofill
+// sans action de l'utilisateur ») etait fausse, elle ne couvrait deja pas les
+// coffres d'equipe rendus dans la meme reponse, et elle contredisait en silence
+// le modele produit. `hidden` (regle 2) reste applique.
 //
 // Logique de match :
 //   - Service : Service.url hostname === query.domain
@@ -37,6 +42,11 @@ import {
   withCors,
 } from "@/lib/plugin-cors";
 import { getAccessibleCollectionIds } from "@/lib/vault-access";
+import {
+  accessibleProjectsWhere,
+  effectiveProjectRole,
+  hasProjectRole,
+} from "@/lib/project-access";
 import { isPlatformAdmin } from "@/lib/roles";
 import { logAction } from "@/lib/audit";
 
@@ -109,39 +119,56 @@ export async function GET(req: Request) {
   const userId = session.userId;
   const isGlobalAdmin = isPlatformAdmin(session.user.role);
 
+  // Le rôle EFFECTIF par projet porte le `canWrite` des comptes : l'extension
+  // ne doit pas proposer une mise à jour que le serveur refusera.
   let accessibleProjectIds: string[];
+  const writableProjectIds = new Set<string>();
   if (isGlobalAdmin) {
     const all = await prisma.project.findMany({ select: { id: true } });
     accessibleProjectIds = all.map((p) => p.id);
+    for (const p of all) writableProjectIds.add(p.id);
   } else {
+    // §4 — SOURCE UNIQUE, les 6 règles (cf. l'en-tête pour la restriction
+    // levée le 2026-08-06). Itérer sur les seules orgs de l'user est exhaustif :
+    // la règle 6 garantit qu'aucune ligne ProjectMember ne subsiste hors d'une
+    // org dont il est membre. `hidden` reste appliqué par
+    // accessibleProjectsWhere (règle 2).
     const orgMemberships = await prisma.orgMember.findMany({
-      where: { userId, role: { in: ["OWNER", "ADMIN"] } },
-      select: { organizationId: true },
+      where: { userId },
+      select: { organizationId: true, role: true },
     });
-    const projectMemberships = await prisma.projectMember.findMany({
-      // `hidden: true` = projet masqué pour cet user → requireProjectMember
-      // lui répond 403 (règle 2). Sans ce filtre, l'extension autofillait les
-      // credentials DÉCHIFFRÉS (Service.user/password, AppAccount) d'un projet
-      // que l'UI lui ferme — sur simple match de domaine, sans action de sa part.
-      // La branche org ci-dessus reste OWNER/ADMIN seulement : eux ignorent
-      // `hidden` à raison (règle 1).
-      where: { userId, hidden: false },
-      select: { projectId: true },
-    });
-    const orgProjects = orgMemberships.length
-      ? await prisma.project.findMany({
-          where: {
-            organizationId: { in: orgMemberships.map((m) => m.organizationId) },
-          },
-          select: { id: true },
-        })
-      : [];
-    accessibleProjectIds = Array.from(
-      new Set([
-        ...orgProjects.map((p) => p.id),
-        ...projectMemberships.map((m) => m.projectId),
-      ]),
+    const projects =
+      orgMemberships.length === 0
+        ? []
+        : await prisma.project.findMany({
+            where: {
+              OR: orgMemberships.map((m) =>
+                accessibleProjectsWhere(m.organizationId, userId, m.role),
+              ),
+            },
+            select: {
+              id: true,
+              organizationId: true,
+              members: {
+                where: { userId },
+                select: { role: true, hidden: true },
+              },
+            },
+          });
+    accessibleProjectIds = projects.map((p) => p.id);
+
+    // Même source unique que la lecture — `effectiveProjectRole` (§4).
+    const orgRoleById = new Map(
+      orgMemberships.map((m) => [m.organizationId, m.role]),
     );
+    for (const p of projects) {
+      const role = effectiveProjectRole({
+        orgRole: orgRoleById.get(p.organizationId),
+        membership: p.members[0] ?? null,
+        platformRole: session.user.role,
+      });
+      if (hasProjectRole(role, "EDITOR")) writableProjectIds.add(p.id);
+    }
   }
 
   // 2. Services dont l'URL matche le hostname (skip si aucun projet accessible).
@@ -207,6 +234,10 @@ export async function GET(req: Request) {
               encryptedData: true,
               iv: true,
               tag: true,
+              // Le lien « Lié à » porte l'URL réelle du compte : sans elle,
+              // l'extension ne peut pas décider quoi mettre à jour.
+              environment: { select: { url: true } },
+              service: { select: { url: true } },
             },
           },
         },
@@ -217,12 +248,18 @@ export async function GET(req: Request) {
     name: string;
     user: string;
     password: string;
+    url: string;
+    canWrite: boolean;
   }> = [];
   for (const p of projectsWithEnvAndAccounts) {
     const projectMatches = p.environments.some(
       (e) => safeHostname(e.url) === queryDomain,
     );
     if (!projectMatches) continue;
+    const matchedEnvUrl =
+      p.environments.find((e) => safeHostname(e.url) === queryDomain)?.url ??
+      null;
+    const canWrite = writableProjectIds.has(p.id);
     for (const acc of p.appAccounts) {
       const creds = decryptCreds(acc);
       matchedAccounts.push({
@@ -231,6 +268,8 @@ export async function GET(req: Request) {
         name: acc.name,
         user: creds.user,
         password: creds.password,
+        url: acc.environment?.url ?? acc.service?.url ?? matchedEnvUrl ?? "",
+        canWrite,
       });
     }
   }
@@ -400,6 +439,7 @@ export async function GET(req: Request) {
       domain: queryDomain,
       services_count: matchedServices.length,
       accounts_count: matchedAccounts.length,
+      accounts_writable: matchedAccounts.filter((a) => a.canWrite).length,
       vault_count: matchedVault.length,
       vault_personal: matchedVault.filter((v) => v.target === "personal").length,
       vault_org: matchedVault.filter((v) => v.target === "team_org").length,

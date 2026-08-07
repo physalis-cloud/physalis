@@ -76,7 +76,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const { orgSlug } = await params;
-  const scope = await requireOrgScope(orgSlug, "DEV");
+  const scope = await requireOrgScope(orgSlug, "DEV", { feature: "team_vault" });
   if ("error" in scope) return scope.error;
 
   const body = (await readJson(req)) as { name?: string } | null;

@@ -5,6 +5,8 @@
 // L'env var `PLUGIN_ALLOWED_ORIGIN` definit l'origin autorise. Format
 // attendu : `chrome-extension://abcdefghijklmnopqrstuvwxyz123456`.
 // Plusieurs origins separes par virgule autorises (ex. dev + prod IDs).
+// Le token special `moz-extension://*` couvre Firefox, dont l'uuid n'est pas
+// epinglable (voir la note dediee plus bas).
 //
 // Si la variable n'est PAS definie, les endpoints plugin renvoient 403
 // (kill switch — refus de fonctionner sans whitelist explicite).
@@ -30,13 +32,55 @@ export type CorsResult =
   | { ok: true; allowOrigin: string | null }
   | { ok: false; reason: "no_origin_configured" | "origin_not_allowed" };
 
-function parseAllowed(): string[] | null {
+// ─── Note sur le comportement Firefox ────────────────────────────────────
+// L'origin d'une extension Firefox est `moz-extension://<uuid>`, ou l'uuid
+// est regenere a CHAQUE installation, sur chaque profil. Il est donc
+// impossible de l'epingler a l'avance, contrairement a Chrome dont l'ID est
+// fige par le `key` du manifest.
+//
+// Et Firefox envoie bien cet Origin : le bug Mozilla 1405971 (« Webextension
+// UUID leak to servers via Fetch request headers ») est toujours ouvert, les
+// deux mitigations tentees — suppression de l'en-tete (FF 71-72) puis
+// `Origin: null` (FF 73) — ayant ete backoutees.
+//
+// Sans le motif ci-dessous, tout client Firefox prend donc un 403
+// `origin_not_allowed`. Contrairement a ce qu'affirmait
+// `physalis-extension/docs/send-to-store.md` §4, un Origin PRESENT mais non
+// whiteliste ne « retombe » pas dans la branche « Origin absent » : les deux
+// branches sont disjointes.
+//
+// L'accepter n'affaiblit pas le controle : l'auth reelle est le Bearer token,
+// et la branche « Origin absent » fait deja confiance au Bearer seul (ce qui
+// laisse deja passer tout client non-navigateur). La valeur anti-CSRF du
+// helper est portee par le rejet des origins `https://` — une page web tierce
+// ne peut pas forger un Origin, c'est le navigateur qui le pose.
+//
+// Reste opt-in : il faut inscrire explicitement `moz-extension://*` dans
+// PLUGIN_ALLOWED_ORIGIN (coherent avec le kill switch — rien d'implicite).
+const FIREFOX_WILDCARD = "moz-extension://*";
+
+// Strict a dessein : un origin n'a pas de chemin, et l'uuid interne Firefox
+// est toujours un UUID v4 en minuscules.
+const MOZ_EXTENSION_ORIGIN =
+  /^moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+type Allowed = { exact: string[]; firefox: boolean };
+
+function parseAllowed(): Allowed | null {
   const raw = process.env.PLUGIN_ALLOWED_ORIGIN;
   if (!raw) return null;
-  return raw
+  const entries = raw
     .split(",")
     .map((o) => o.trim())
     .filter((o) => o.length > 0);
+  if (entries.length === 0) return null;
+  return {
+    // Le token wildcard est retire de la liste exacte : sinon un client
+    // envoyant litteralement `Origin: moz-extension://*` matcherait, et on
+    // lui renverrait cette valeur en `Access-Control-Allow-Origin`.
+    exact: entries.filter((o) => o !== FIREFOX_WILDCARD),
+    firefox: entries.includes(FIREFOX_WILDCARD),
+  };
 }
 
 /**
@@ -49,7 +93,7 @@ function parseAllowed(): string[] | null {
  */
 export function checkPluginOrigin(req: Request): CorsResult {
   const allowed = parseAllowed();
-  if (!allowed || allowed.length === 0) {
+  if (!allowed) {
     return { ok: false, reason: "no_origin_configured" };
   }
   const origin = req.headers.get("origin");
@@ -58,7 +102,11 @@ export function checkPluginOrigin(req: Request): CorsResult {
   if (!origin) {
     return { ok: true, allowOrigin: null };
   }
-  if (!allowed.includes(origin)) {
+  // Extension Firefox : uuid imprevisible, cf. note en tete de fichier.
+  if (allowed.firefox && MOZ_EXTENSION_ORIGIN.test(origin)) {
+    return { ok: true, allowOrigin: origin };
+  }
+  if (!allowed.exact.includes(origin)) {
     return { ok: false, reason: "origin_not_allowed" };
   }
   return { ok: true, allowOrigin: origin };

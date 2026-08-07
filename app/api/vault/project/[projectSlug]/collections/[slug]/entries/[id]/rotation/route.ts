@@ -19,14 +19,14 @@ export async function GET(req: Request, { params }: Params) {
 
 export async function PATCH(req: Request, { params }: Params) {
   const { projectSlug, slug, id } = await params;
-  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR");
+  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR", { feature: "team_vault" });
   if ("error" in access) return access.error;
   return patchEntryRotation(access.access, id, req);
 }
 
 export async function POST(req: Request, { params }: Params) {
   const { projectSlug, slug, id } = await params;
-  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR");
+  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR", { feature: "team_vault" });
   if ("error" in access) return access.error;
   return rotateEntry(access.access, id, req);
 }

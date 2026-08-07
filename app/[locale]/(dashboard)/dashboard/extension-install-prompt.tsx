@@ -13,7 +13,12 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { RiDownload2Line, RiPuzzle2Line } from "@remixicon/react";
+import {
+  RiChromeFill,
+  RiExternalLinkLine,
+  RiFirefoxFill,
+  RiPuzzle2Line,
+} from "@remixicon/react";
 
 type Status = "checking" | "installed" | "not_installed";
 
@@ -71,7 +76,13 @@ export default function ExtensionInstallPrompt() {
   }, []);
 
   if (status === "installed") {
-    const hasUpdate = version != null && isVersionLower(version, EXTENSION_VERSION);
+    // Ce bloc ne rend qu'apres le mount (status passe a "installed" dans un
+    // effet), donc `navigator` est disponible : pas de risque d'hydratation.
+    const storeVersion = STORE_VERSION[detectBrowser()];
+    const hasUpdate =
+      version != null &&
+      storeVersion != null &&
+      isVersionLower(version, storeVersion);
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -93,7 +104,7 @@ export default function ExtensionInstallPrompt() {
               cursor: "pointer",
             }}
           >
-            {t("updateAvailable", { version: EXTENSION_VERSION })}
+            {t("updateAvailable", { version: storeVersion })}
           </button>
         )}
       </span>
@@ -118,9 +129,23 @@ export default function ExtensionInstallPrompt() {
 
 type Browser = "chrome" | "firefox" | "other";
 
-// Version courante de l'extension. A bumper en meme temps que les zips dans
-// public/ : `physalis-extension-<version>-chrome.zip` et `-firefox.zip`.
-const EXTENSION_VERSION = "0.5.0";
+// Version REELLEMENT disponible sur chaque store — surtout pas celle du
+// manifest. Les deux stores ne validant pas au meme rythme, une soumission en
+// attente de revue ne doit pas etre annoncee : l'utilisateur verrait
+// « v0.8.0 disponible » sans aucun moyen de l'installer.
+//
+// A bumper store par store, au moment ou la revue PASSE, pas a la soumission.
+const STORE_VERSION: Record<Browser, string | null> = {
+  chrome: "0.7.0", // 0.8.0 soumise, en attente de revue Chrome Web Store
+  firefox: "0.8.0", // publiee sur AMO le 2026-08-06
+  other: null, // navigateur non supporte → aucune mise a jour a annoncer
+};
+
+// L'extension est distribuee exclusivement par les stores officiels.
+const CHROME_STORE_URL =
+  "https://chromewebstore.google.com/detail/physalis/nkbdijmefoleebhonbfadecclaieolea";
+const FIREFOX_STORE_URL =
+  "https://addons.mozilla.org/firefox/addon/physalis-vault/";
 
 function isVersionLower(a: string, b: string): boolean {
   const parse = (v: string) => v.split(".").map(Number);
@@ -131,22 +156,36 @@ function isVersionLower(a: string, b: string): boolean {
   return aPatch < bPatch;
 }
 
-function downloadUrl(browser: Browser): string | null {
-  if (browser === "chrome")
-    return `/physalis-extension-${EXTENSION_VERSION}-chrome.zip`;
-  if (browser === "firefox")
-    return `/physalis-extension-${EXTENSION_VERSION}-firefox.zip`;
-  return null;
-}
-
 function detectBrowser(): Browser {
   if (typeof navigator === "undefined") return "other";
   const ua = navigator.userAgent;
   if (/Firefox\//.test(ua)) return "firefox";
-  // Edge, Brave, Opera, Chrome — tous compatibles avec le format Chrome
-  // (chargement non empaquete via chrome://extensions).
+  // Edge, Brave, Opera, Chrome — tous installent depuis le Chrome Web Store.
   if (/Chrome\//.test(ua)) return "chrome";
   return "other";
+}
+
+function StoreLink({
+  browser,
+  label,
+  primary,
+}: {
+  browser: "chrome" | "firefox";
+  label: string;
+  primary: boolean;
+}) {
+  const Icon = browser === "chrome" ? RiChromeFill : RiFirefoxFill;
+  return (
+    <a
+      href={browser === "chrome" ? CHROME_STORE_URL : FIREFOX_STORE_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={primary ? "btn btn-primary" : "btn btn-ghost"}
+    >
+      <Icon size={14} aria-hidden /> {label}{" "}
+      <RiExternalLinkLine size={12} aria-hidden />
+    </a>
+  );
 }
 
 function InstallModal({ onClose }: { onClose: () => void }) {
@@ -154,7 +193,6 @@ function InstallModal({ onClose }: { onClose: () => void }) {
   const browser = detectBrowser();
   const isChrome = browser === "chrome";
   const isFirefox = browser === "firefox";
-  const zipUrl = downloadUrl(browser);
 
   const title = isChrome
     ? t("chromeTitle")
@@ -214,54 +252,47 @@ function InstallModal({ onClose }: { onClose: () => void }) {
                 lineHeight: 1.9,
               }}
             >
-              <li>{t("step1Download")}</li>
               {isChrome && (
-                <>
-                  <li>
-                    {t.rich("stepChromeDevMode", {
-                      bold: (c) => <strong>{c}</strong>,
-                    })}
-                  </li>
-                  <li>
-                    {t.rich("stepChromeLoad", {
-                      bold: (c) => <strong>{c}</strong>,
-                    })}
-                  </li>
-                </>
+                <li>
+                  {t.rich("stepChromeStore", {
+                    bold: (c) => <strong>{c}</strong>,
+                  })}
+                </li>
               )}
               {isFirefox && (
-                <>
-                  <li>{t("stepFirefoxOpen")}</li>
-                  <li>
-                    {t.rich("stepFirefoxLoad", {
-                      bold: (c) => <strong>{c}</strong>,
-                      code: (c) => <code className="code-mono">{c}</code>,
-                    })}
-                  </li>
-                  <li className="text-muted" style={{ fontSize: 12 }}>
-                    {t("stepFirefoxNote")}
-                  </li>
-                </>
+                <li>
+                  {t.rich("stepFirefoxStore", {
+                    bold: (c) => <strong>{c}</strong>,
+                  })}
+                </li>
               )}
-              {!isChrome && !isFirefox && (
-                <li>{t("stepOther")}</li>
-              )}
+              {!isChrome && !isFirefox && <li>{t("stepOther")}</li>}
+              <li>{t("stepSignIn")}</li>
             </ol>
 
-            {zipUrl && (
-              <a
-                href={zipUrl}
-                download
-                className="btn btn-primary"
-                style={{ marginTop: 16, alignSelf: "flex-start" }}
-              >
-                <RiDownload2Line size={14} aria-hidden />{" "}
-                {t("downloadBtn", {
-                  version: EXTENSION_VERSION,
-                  browser: isChrome ? "Chrome" : "Firefox",
-                })}
-              </a>
-            )}
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                marginTop: 16,
+              }}
+            >
+              {!isFirefox && (
+                <StoreLink
+                  browser="chrome"
+                  label={t("storeBtnChrome")}
+                  primary={isChrome || browser === "other"}
+                />
+              )}
+              {!isChrome && (
+                <StoreLink
+                  browser="firefox"
+                  label={t("storeBtnFirefox")}
+                  primary={isFirefox}
+                />
+              )}
+            </div>
           </section>
 
           <section style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { signOut } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
+import { clearExtensionSession } from "@/lib/extension-bridge";
 
 // Zone dangereuse : suppression DÉFINITIVE du compte (tout le tenant) +
 // annulation de l'abonnement. Réservée à l'OWNER de l'org principale (le
@@ -44,6 +45,13 @@ export default function DeleteAccountPanel({
       }
       // Tenant détruit : on déconnecte et on renvoie vers le login générique
       // (le sous-domaine/portail du tenant n'existe plus).
+      //
+      // Pas de révocation serveur ici, contrairement à LogoutButton : le tenant
+      // part avec ses PluginToken, et l'appel se ferait de toute façon sur une
+      // session dont le compte vient de basculer en suppression. On se contente
+      // de l'oubli local pour que l'extension n'affiche pas une session
+      // fantôme.
+      clearExtensionSession();
       await signOut({ redirectTo: `/${locale}/login` });
     });
   }

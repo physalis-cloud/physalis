@@ -1,5 +1,12 @@
 // POST /api/me/delete/cancel — annule sa propre demande de suppression.
 //
+// Jumeau SELF-HOST : la garde `if (!tenantSlug) → 401` est retirée. En
+// mono-tenant `requireUser()` renvoie TOUJOURS `tenantSlug: null` (cf.
+// lib/api.ts : le champ n'existe que pour que le code SaaS coulé verbatim
+// compile), donc elle était vraie à chaque appel — l'annulation, c'est-à-dire
+// la porte de sortie de la suppression de compte, répondait 401 sur toute
+// instance auto-hébergée.
+//
 // AUCUN contrôle, délibérément : ni phrase, ni ré-auth. L'action est
 // entièrement bénigne (elle ne fait que RESTAURER l'état antérieur) et c'est la
 // porte de sortie de quelqu'un qui a changé d'avis. Y mettre le moindre
@@ -16,9 +23,6 @@ export async function POST(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
   const { user, tenantSlug } = userRes;
-  if (!tenantSlug) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   const me = await prisma.user.findUnique({
     where: { id: user.id },

@@ -18,7 +18,7 @@ export async function GET(req: Request, { params }: Params) {
 
 export async function PATCH(req: Request, { params }: Params) {
   const { projectSlug, slug, id } = await params;
-  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR");
+  const access = await requireProjectCollectionAccess(projectSlug, slug, "EDITOR", { feature: "team_vault" });
   if ("error" in access) return access.error;
   return patchEntry(access.access, id, req);
 }

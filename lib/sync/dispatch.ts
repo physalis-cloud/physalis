@@ -9,6 +9,14 @@
 // seul appelant, app/api/cron/sync-reconcile, est exclu). `withTenantSchema`
 // dégénère en transaction prisma (shim). Garder aligné sur la source à la main.
 //
+// MOINS, aussi, la sortie anticipée `if (!tenantSlug) return`. Tous les
+// appelants passent le `tenantSlug` de `requireUser`/`requireEnvironment`, qui
+// vaut TOUJOURS `null` en mono-tenant (cf. lib/api.ts) : la garde était donc
+// vraie à chaque appel et la sync sortante ne partait JAMAIS, en silence — le
+// propre d'un fire-and-forget étant de ne rien remonter. Le paramètre est
+// conservé (signature alignée sur la source) et transmis tel quel au shim, qui
+// l'ignore.
+//
 // Garde-fous sécurité (cf. roadmap intégration-cicd) : token jamais relu en
 // clair hors de ce module ; messages d'erreur sanitizés ; host de la plateforme
 // codé en dur côté connecteur (pas de SSRF) ; audit SECRET_SYNC_PUSH systématique.
@@ -75,9 +83,11 @@ export async function triggerSync(
   reason: string,
   actor?: SyncActor,
 ): Promise<void> {
-  if (!tenantSlug) return; // hors contexte tenant → rien à synchroniser
+  // `undefined` (appelants qui ne passent rien) et `null` (mono-tenant) sont le
+  // même cas ici : aucun schéma à cibler, le shim s'en charge.
+  const slug = tenantSlug ?? null;
   try {
-    const targets = (await withTenantSchema(tenantSlug, (tx) =>
+    const targets = (await withTenantSchema(slug, (tx) =>
       tx.environmentSyncTarget.findMany({
         where: { environmentId },
         select: {
@@ -109,7 +119,7 @@ export async function triggerSync(
 
     // Secrets de l'env chargés une seule fois (chiffrés ; déchiffrés par cible
     // après filtrage par tag pour limiter le déchiffrement au strict besoin).
-    const rawSecrets = (await withTenantSchema(tenantSlug, (tx) =>
+    const rawSecrets = (await withTenantSchema(slug, (tx) =>
       tx.secret.findMany({
         where: { environmentId },
         select: { key: true, encryptedValue: true, iv: true, tag: true, tags: true },
@@ -117,7 +127,7 @@ export async function triggerSync(
     )) as RawSecretRow[];
 
     for (const target of targets) {
-      await pushOne(tenantSlug, environmentId, target, rawSecrets, reason, actor);
+      await pushOne(slug, environmentId, target, rawSecrets, reason, actor);
     }
   } catch (err) {
     console.error(
@@ -128,7 +138,11 @@ export async function triggerSync(
 }
 
 async function pushOne(
-  tenantSlug: string,
+  // `string | null` (et non `string` comme dans la source) : sans la sortie
+  // anticipée sur `!tenantSlug`, le null du mono-tenant arrive jusqu'ici. Il
+  // n'est que transmis au shim `withTenantSchema` et à `logAction`, qui
+  // l'acceptent tous les deux.
+  tenantSlug: string | null,
   environmentId: string,
   target: TargetRow,
   rawSecrets: RawSecretRow[],

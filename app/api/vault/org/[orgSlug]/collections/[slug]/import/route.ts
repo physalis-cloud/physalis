@@ -16,7 +16,7 @@ type Params = { params: Promise<{ orgSlug: string; slug: string }> };
 
 export async function POST(req: Request, { params }: Params) {
   const { orgSlug, slug } = await params;
-  const accessRes = await requireOrgCollectionAccess(orgSlug, slug, "EDITOR");
+  const accessRes = await requireOrgCollectionAccess(orgSlug, slug, "EDITOR", { feature: "team_vault" });
   if ("error" in accessRes) return accessRes.error;
   const { access } = accessRes;
   // Defense en profondeur : `requireOrgCollectionAccess` deja garanti

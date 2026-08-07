@@ -6,6 +6,7 @@ import { auth, signOut } from "@/lib/auth";
 import { isSuperadmin } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { isSessionInvalidated } from "@/lib/session-validity";
+import LogoutButton from "@/components/LogoutButton";
 
 export default async function AdminLayout({
   children,
@@ -49,14 +50,13 @@ export default async function AdminLayout({
         </div>
         <div className="flex items-center gap-3">
           <Link href={`/${locale}/dashboard`} className="btn btn-ghost btn-sm">{t("backToDashboard")}</Link>
-          <form
+          <LogoutButton
+            label={t("signOut")}
             action={async () => {
               "use server";
               await signOut({ redirectTo: `/${locale}/login` });
             }}
-          >
-            <button type="submit" className="btn btn-ghost btn-sm">{t("signOut")}</button>
-          </form>
+          />
         </div>
       </header>
       <main className="flex-1">{children}</main>

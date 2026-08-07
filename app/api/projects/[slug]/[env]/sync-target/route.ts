@@ -45,7 +45,7 @@ export async function GET(_req: Request, { params }: Params) {
 export async function POST(req: Request, { params }: Params) {
   const { slug, env } = await params;
   // OWNER projet : décider où partent les secrets est une config sensible.
-  const access = await requireEnvironment(slug, env, "OWNER");
+  const access = await requireEnvironment(slug, env, "OWNER", { feature: "outbound_sync" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as {

@@ -16,7 +16,7 @@ type Params = { params: Promise<{ slug: string; env: string }> };
 
 export async function GET(req: Request, { params }: Params) {
   const { slug, env } = await params;
-  const access = await requireEnvironment(slug, env, "OWNER");
+  const access = await requireEnvironment(slug, env, "OWNER", { feature: "outbound_sync" });
   if ("error" in access) return access.error;
 
   const connectionId = new URL(req.url).searchParams.get("connectionId")?.trim();

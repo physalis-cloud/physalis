@@ -18,6 +18,13 @@
 //
 // Auth : user authentifié. Disponible pour tous les rôles tenant.
 // Rate-limit : 1 export / 15 min / user (export peut être lourd).
+//
+// Jumeau SELF-HOST : `tenantSlug` est retiré de bout en bout. En mono-tenant
+// la session le porte TOUJOURS à `null` (cf. lib/api.ts), donc la garde
+// `!userId || !tenantSlug` de la version SaaS était vraie à chaque appel :
+// l'export RGPD répondait 401 sur toute instance auto-hébergée. Le slug ne
+// servait par ailleurs qu'à nommer le fichier — il n'y a qu'une instance ici,
+// le nom reste sans ambiguïté sans lui.
 
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -117,13 +124,9 @@ async function loadPersonalVaultEntries(userId: string) {
 }
 
 /** Construit la réponse JSON downloadable (Content-Disposition attachment). */
-function buildDownload(
-  payload: unknown,
-  tenantSlug: string,
-  email: string,
-): Response {
+function buildDownload(payload: unknown, email: string): Response {
   const json = JSON.stringify(payload, null, 2);
-  const filename = `physalis-export-${tenantSlug}-${email.replace(/[^a-z0-9]/gi, "_")}-${new Date().toISOString().slice(0, 10)}.json`;
+  const filename = `physalis-export-${email.replace(/[^a-z0-9]/gi, "_")}-${new Date().toISOString().slice(0, 10)}.json`;
   return new Response(json, {
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -157,8 +160,7 @@ async function markDataExported(userId: string): Promise<void> {
 export async function GET(req: Request) {
   const session = await auth();
   const userId = session?.user?.id;
-  const tenantSlug = session?.user?.tenantSlug ?? null;
-  if (!userId || !tenantSlug) {
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -201,7 +203,7 @@ export async function GET(req: Request) {
       vaultEntries: vaultEntriesExported,
     };
     await markDataExported(userId);
-    return buildDownload(personalPayload, tenantSlug, user.email);
+    return buildDownload(personalPayload, user.email);
   }
 
   // ─── 2. Memberships d'org (les orgs où l'user est membre) ───────────
@@ -421,5 +423,5 @@ export async function GET(req: Request) {
   };
 
   await markDataExported(userId);
-  return buildDownload(exportPayload, tenantSlug, user.email);
+  return buildDownload(exportPayload, user.email);
 }

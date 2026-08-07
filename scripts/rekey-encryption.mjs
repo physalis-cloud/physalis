@@ -167,8 +167,27 @@ export const REGISTRY = [
     schema: "admin",
     table: "sso_configs",
     triplets: [["clientSecret", "clientSecretIv", "clientSecretTag"]],
+    // ⚠️ SEULE entrée dont les colonnes SQL diffèrent des champs Prisma
+    // (`@map` snake_case). Sans cette correspondance, le SQL brut ci-dessous
+    // vise `"clientSecret"`, qui n'existe pas — et la garde « drift »
+    // SAUTAIT LA TABLE EN SILENCE. C'est ce qui a fait que la rotation du
+    // 2026-08-01 n'a jamais touché admin.sso_configs tout en annonçant
+    // « 0 erreur », jusqu'à rendre la connexion impossible sur un tenant le
+    // 02/08. Le garde-fou de tests/lib/rekey-registry.test.ts ne l'a pas vu
+    // parce qu'il compare le registre aux CHAMPS du schéma Prisma, pas aux
+    // COLONNES de la base — les deux ne divergent que sur `@map`.
+    columns: {
+      clientSecret: "client_secret",
+      clientSecretIv: "client_secret_iv",
+      clientSecretTag: "client_secret_tag",
+    },
   },
 ];
+
+/** Colonne SQL d'un champ du registre (identité sauf `@map`, cf. SsoConfig). */
+export function sqlColumn(entry, field) {
+  return entry.columns?.[field] ?? field;
+}
 
 // Tables chiffrées volontairement NON re-keyées (documenté pour l'audit).
 export const EXCLUDED = ["OneTimeShare", "SecretRequest"];
@@ -372,14 +391,30 @@ async function main() {
         const table = tableOverride ?? model;
         if (!(await tableExists(prisma, schema, table))) continue;
         const cols = await presentColumns(prisma, schema, table);
+        const entry = REGISTRY.find((e) => e.model === model);
         for (const triplet of triplets) {
-          if (!triplet.every((c) => cols.has(c))) continue; // drift : colonnes absentes
+          const sqlTriplet = triplet.map((f) => sqlColumn(entry, f));
+          const absent = sqlTriplet.filter((c) => !cols.has(c));
+          if (absent.length > 0) {
+            // ÉCHEC BRUYANT, et non plus un `continue` silencieux. Une colonne
+            // déclarée mais absente signifie l'une de deux choses : une dérive
+            // de schéma, ou une correspondance `@map` oubliée. Dans les deux
+            // cas la conséquence est la même — des données chiffrées restent
+            // sous l'ancienne clé pendant que le script annonce « 0 erreur ».
+            // On préfère arrêter la rotation que la déclarer réussie à tort.
+            console.error(
+              `\n✖ ${schema}.${table} : colonnes déclarées mais ABSENTES → ${absent.join(", ")}\n` +
+                `  Le triplet [${triplet.join(", ")}] ne serait PAS migré.\n` +
+                `  Vérifier un \`@map\` manquant dans REGISTRY.columns, ou une dérive de schéma.`,
+            );
+            process.exit(3);
+          }
           const s = await rekeyTriplet(
             prisma,
             { ...cli, newKey, oldKey },
             schema,
             table,
-            triplet,
+            sqlTriplet,
           );
           if (s.scanned > 0) {
             const verb = cli.apply ? "migré" : "à migrer";

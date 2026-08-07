@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import { defaultDeployPath } from "@/lib/validation";
+import { useFeature } from "@/components/PlanFeatures";
 import { isSyncProvider } from "@/lib/sync/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 
@@ -45,6 +46,7 @@ export default function SettingsDialog({
   onClose: () => void;
 }) {
   const t = useTranslations("projects.settings");
+  const hasCiCd = useFeature("ci_cd");
   const [servers, setServers] = useState<ServerOption[] | null>(null);
   const [serversError, setServersError] = useState<string | null>(null);
 
@@ -85,14 +87,16 @@ export default function SettingsDialog({
 
         <div className="dialog-body">
           <ProjectNameSection slug={slug} initialName={projectName} />
-          <CiSection
-            slug={slug}
-            orgSlug={orgSlug}
-            initialConnectionId={ciConnectionId}
-            initialGithubRepo={githubRepo}
-            initialGithubWorkflow={githubWorkflow}
-            initialCiRepo={ciRepo}
-          />
+          {hasCiCd && (
+            <CiSection
+              slug={slug}
+              orgSlug={orgSlug}
+              initialConnectionId={ciConnectionId}
+              initialGithubRepo={githubRepo}
+              initialGithubWorkflow={githubWorkflow}
+              initialCiRepo={ciRepo}
+            />
+          )}
           <EnvironmentsSection
             slug={slug}
             environments={environments}
@@ -600,6 +604,7 @@ function AddEnvForm({
   onCreated: () => void;
 }) {
   const t = useTranslations("projects.settings");
+  const hasServers = useFeature("server_management");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [serverId, setServerId] = useState("");
@@ -658,6 +663,11 @@ function AddEnvForm({
           />
         </div>
       </div>
+      {/* Chemin de déploiement + serveur : dépendent de la gestion de serveurs,
+          absente du plan gratuit (quota 0). Les masquer évite de proposer une
+          destination que l'utilisateur ne peut pas créer. */}
+      {hasServers && (
+        <>
       <div className="field">
         <label>{t("envDeployPathLabel")}</label>
         <input
@@ -675,6 +685,8 @@ function AddEnvForm({
           onChange={setServerId}
         />
       </div>
+        </>
+      )}
       {error && <p className="error-text">{error}</p>}
       <div className="flex items-center gap-2">
         <button
@@ -734,6 +746,7 @@ function EnvRow({
   onChanged: () => void;
 }) {
   const t = useTranslations("projects.settings");
+  const hasServers = useFeature("server_management");
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(env.name);
@@ -883,23 +896,28 @@ function EnvRow({
             />
           </div>
         </div>
-        <div className="field">
-          <label>{t("envDeployPathLabel")}</label>
-          <input
-            value={deployPath}
-            onChange={(e) => setDeployPath(e.target.value)}
-            placeholder={deployPathPlaceholder}
-            className="input input-mono"
-          />
-        </div>
-        <div className="field">
-          <label>{t("envServerLabel")}</label>
-          <ServerSelect
-            servers={servers}
-            value={serverId}
-            onChange={setServerId}
-          />
-        </div>
+        {/* Cf. note du formulaire de création : mêmes champs, second endroit. */}
+        {hasServers && (
+          <>
+            <div className="field">
+              <label>{t("envDeployPathLabel")}</label>
+              <input
+                value={deployPath}
+                onChange={(e) => setDeployPath(e.target.value)}
+                placeholder={deployPathPlaceholder}
+                className="input input-mono"
+              />
+            </div>
+            <div className="field">
+              <label>{t("envServerLabel")}</label>
+              <ServerSelect
+                servers={servers}
+                value={serverId}
+                onChange={setServerId}
+              />
+            </div>
+          </>
+        )}
         {name !== env.name && (
           <p className="help text-accent">
             {t("slugWarning")}

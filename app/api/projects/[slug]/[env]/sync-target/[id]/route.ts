@@ -24,7 +24,7 @@ async function loadTarget(environmentId: string, id: string) {
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, env, id } = await params;
-  const access = await requireEnvironment(slug, env, "OWNER");
+  const access = await requireEnvironment(slug, env, "OWNER", { feature: "outbound_sync" });
   if ("error" in access) return access.error;
 
   const existing = await loadTarget(access.environment.id, id);

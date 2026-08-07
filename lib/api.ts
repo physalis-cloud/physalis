@@ -91,9 +91,23 @@ export async function getCurrentOrgSlug(userId: string): Promise<string | null> 
   return fallback?.organization.slug ?? null;
 }
 
+/**
+ * Options communes à `requireOrgMember` / `requireProjectMember`.
+ *
+ * `feature` — dans la version SaaS, nom de la fonctionnalité que la route
+ * consomme ; le helper y refuse l'accès si le plan du tenant ne la couvre pas.
+ * En self-host il n'y a **ni plans ni tenants** : l'option est acceptée pour
+ * que les routes coulées verbatim compilent, et volontairement IGNORÉE.
+ *
+ * Typée `string` (et non l'union `PlanFeature`) parce que `lib/plans.ts` est
+ * denylisté du build public : l'union n'existe pas ici.
+ */
+export type AccessOptions = { feature?: string };
+
 export async function requireOrgMember(
   slug: string,
   requiredRole: OrgRole = "MEMBER",
+  _opts?: AccessOptions,
 ) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes;
@@ -136,6 +150,7 @@ export async function requireOrgMember(
 export async function requireProjectMember(
   slug: string,
   requiredRole: ProjectRole = "VIEWER",
+  _opts?: AccessOptions,
 ) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes;
@@ -185,8 +200,9 @@ export async function requireEnvironment(
   slug: string,
   envName: string,
   requiredRole: ProjectRole = "VIEWER",
+  opts?: AccessOptions,
 ) {
-  const access = await requireProjectMember(slug, requiredRole);
+  const access = await requireProjectMember(slug, requiredRole, opts);
   if ("error" in access) return access;
 
   const environment = await prisma.environment.findUnique({

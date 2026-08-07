@@ -58,7 +58,8 @@ type Gesture =
   | "role_downgrade" // rétrogradation de rôle (org ou projet)
   | "client_suspended" // Client.status → SUSPENDED / CANCELLED / PENDING_DELETION
   | "rotation_pause" // Project.rotationPaused = true (kill-switch rotation)
-  | "explicit_revoke"; // révocation explicite du porteur (DELETE dédié)
+  | "explicit_revoke" // révocation explicite du porteur (DELETE dédié)
+  | "web_logout"; // clic « Déconnexion » dans le dashboard (signOut NextAuth)
 
 type Expectation =
   | "dies" // le geste invalide le porteur (ou l'accès qu'il porte)
@@ -114,6 +115,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       why: "révocable via `sessionsValidFrom` (posé au reset mdp / 2FA off), désormais appliqué à TOUTES les sessions — Y COMPRIS le SUPERADMIN plateforme (tenantSlug=null), auparavant irrévocable car le check était enfermé dans `if(slug)` et le layout /admin bypasse requireUser (§2.9-corollaire). Note : pas de révocation d'UNE session isolée (JWT stateless — sessionsValidFrom coupe toutes les sessions du user), limitation produit assumée, pas un trou.",
       verifiedBy: "integ/superadmin-revocation",
     },
+    web_logout: {
+      expect: "dies",
+      why: "le geste EST la destruction du cookie de session (signOut NextAuth) ; events.signOut trace le LOGOUT à l'audit.",
+    },
   },
 
   plugin_token: {
@@ -143,6 +148,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "revokedAt rejette l'usage direct (validatePluginToken) ; la boucle de renouvellement est fermée (§2.18) : une session DÉRIVÉE d'un token (origin=plugin_token) ne peut plus re-frapper de token via /api/plugin/issue. Résidu assumé : une session déjà dérivée survit jusqu'à l'expiration de son JWT (≤8h), sans pouvoir se renouveler.",
       verifiedBy: "integ/plugin-token-renewal",
+    },
+    web_logout: {
+      expect: "dies",
+      why: "SYMÉTRIE DU HAND-OFF : charger le dashboard émet un PluginToken et le pousse dans l'extension sans que l'user l'ait demandé (sso-extension-handoff.tsx) ; la déconnexion doit donc propager dans l'autre sens. components/LogoutButton.tsx redemande à l'extension le token de CE navigateur via le pont postMessage (PHYSALIS_GET_SESSION) et le fait révoquer (POST /api/plugin/revoke) AVANT de laisser partir le signOut — la page se décharge à la soumission, il n'y aurait plus personne pour l'émettre après. PORTÉE VOLONTAIREMENT LIMITÉE au navigateur qui se déconnecte : le token présenté EST la désignation de ce navigateur, donc aucune colonne de liaison session web ↔ token n'est nécessaire, et une déconnexion depuis le téléphone ne tue pas l'extension du poste fixe. Les sessions plugin des AUTRES navigateurs survivent — révocables à la main depuis /account (§ « Sessions plugin »). Best-effort par construction : extension absente ou pont muet → la déconnexion web part quand même.",
     },
   },
 
@@ -177,6 +186,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "DELETE /api/tokens/[id] pose revokedAt ; validateToken le teste.",
     },
+    web_logout: {
+      expect: "survives",
+      why: "ARBITRAGE : credential non interactif — une déconnexion humaine ne doit pas casser la CI (même raison que password_reset).",
+    },
   },
 
   user_token: {
@@ -208,6 +221,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "DELETE /api/user-tokens/[id] pose revokedAt.",
     },
+    web_logout: {
+      expect: "survives",
+      why: "ARBITRAGE (§2.20a) : un PAT (sémantique GitHub) survit à la déconnexion comme au reset — sinon toute intégration N8n tomberait dès que son auteur ferme son onglet.",
+    },
   },
 
   org_token: {
@@ -236,6 +253,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "DELETE /api/orgs/[slug]/org-tokens/[id] pose revokedAt.",
     },
+    web_logout: {
+      expect: "survives",
+      why: "institutionnel : non lié à la session d'un user (idem password_reset).",
+    },
   },
 
   agent_token: {
@@ -263,6 +284,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "révocation du token agent (rotate/regénération du ProjectBackupConfig).",
     },
+    web_logout: {
+      expect: "survives",
+      why: "credential d'infra projet, aucune dimension utilisateur (pas de createdById) — rien à quoi rattacher une déconnexion.",
+    },
   },
 
   gateway_apikey: {
@@ -283,6 +308,10 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
       expect: "dies",
       why: "DELETE /api/gateway/keys/[id] pose revokedAt ; verifyApiKey le teste.",
     },
+    web_logout: {
+      expect: "survives",
+      why: "clé API tiers, non liée à une session Physalis.",
+    },
   },
 };
 
@@ -296,6 +325,7 @@ const GESTURES: Gesture[] = [
   "client_suspended",
   "rotation_pause",
   "explicit_revoke",
+  "web_logout",
 ];
 
 describe("Matrice de révocation (§4bis) — mécanisme", () => {

@@ -42,7 +42,7 @@ function validateScopes(input: unknown): OrgTokenScope[] | null {
 
 export async function PATCH(req: Request, { params }: Params) {
   const { slug, id } = await params;
-  const access = await requireOrgMember(slug, "DEV");
+  const access = await requireOrgMember(slug, "DEV", { feature: "org_tokens" });
   if ("error" in access) return access.error;
 
   const level = orgTokenAccessLevel(access.role);

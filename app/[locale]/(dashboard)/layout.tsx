@@ -14,6 +14,7 @@ import HeaderNav from "./header-nav";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import OfflineBanner from "@/components/OfflineBanner";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import LogoutButton from "@/components/LogoutButton";
 import AccountLockScreen from "./account-lock-screen";
 import { accountLockState, daysUntilPurge } from "@/lib/deletion-window";
 import { reauthMethodFor } from "@/lib/reauth";
@@ -82,16 +83,13 @@ export default async function DashboardLayout({
             <LocaleSwitcher />
             {/* Verrouiller quelqu'un sans porte de sortie serait un piège :
                 la déconnexion reste offerte. */}
-            <form
+            <LogoutButton
+              label={t("logout")}
               action={async () => {
                 "use server";
                 await signOut({ redirectTo: `/${locale}/login` });
               }}
-            >
-              <button type="submit" className="btn btn-ghost btn-sm">
-                {t("logout")}
-              </button>
-            </form>
+            />
           </div>
         </header>
         <AccountLockScreen
@@ -154,16 +152,13 @@ export default async function DashboardLayout({
             </Link>
           )}
           <LocaleSwitcher />
-          <form
+          <LogoutButton
+            label={t("logout")}
             action={async () => {
               "use server";
               await signOut({ redirectTo: `/${locale}/login` });
             }}
-          >
-            <button type="submit" className="btn btn-ghost btn-sm">
-              {t("logout")}
-            </button>
-          </form>
+          />
           <Link
             href={`/${locale}/account`}
             className="user-link"

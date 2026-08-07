@@ -50,12 +50,12 @@ export async function GET(_req: Request, { params }: Params) {
     // §4 — accès effectif canonique (ne PAS re-dériver côté client). Distingue
     // le DEV « default » (accès EDITOR implicite → hasAccess) du MEMBER
     // « default » (aucune ligne = aucun accès, règle 5 → !hasAccess).
-    const hasAccess =
-      effectiveProjectRole({
-        orgRole: m.role,
-        membership: pm ? { role: pm.role, hidden: pm.hidden } : null,
-        platformRole: m.user.role,
-      }) !== null;
+    const effective = effectiveProjectRole({
+      orgRole: m.role,
+      membership: pm ? { role: pm.role, hidden: pm.hidden } : null,
+      platformRole: m.user.role,
+    });
+    const hasAccess = effective !== null;
     if (isOrgAdmin) {
       return {
         userId: m.user.id,
@@ -84,7 +84,16 @@ export async function GET(_req: Request, { params }: Params) {
       userId: m.user.id,
       email: m.user.email,
       orgRole: m.role,
-      role: "VIEWER" as const,
+      // Rôle IMPLICITE réel, pas une constante. `hasAccess` était déjà calculé
+      // par effectiveProjectRole, mais le rôle rendu était « VIEWER » en dur :
+      // un OrgDEV s'affichait donc VIEWER alors que la règle 4 lui donne
+      // EDITOR. Le badge contredisait le droit effectif — et faisait croire à
+      // une ligne ProjectMember explicite là où il n'y en a aucune (c'est ce
+      // qui a égaré le diagnostic de l'incident du 2026-08-06).
+      // `effective` est null pour un OrgMEMBER (règle 5, aucun accès) : la
+      // ligne bascule alors dans « N'ont pas accès », et VIEWER n'est plus
+      // qu'une valeur de départ pour le sélecteur au moment d'accorder l'accès.
+      role: effective ?? ("VIEWER" as const),
       hidden: false,
       source: "default" as const,
       editable: true,

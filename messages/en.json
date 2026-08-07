@@ -327,14 +327,12 @@
       "feature2": "<bold>Automatically save</bold> a new credential to your vault when you sign in to a site",
       "feature3": "Access your personal vault and team vault credentials filtered by domain with one click",
       "installTitle": "Installation",
-      "step1Download": "Download the archive below.",
-      "stepChromeDevMode": "Open chrome://extensions/ and enable <bold>Developer mode</bold> (toggle at the top right).",
-      "stepChromeLoad": "Click <bold>Load unpacked</bold> and select the unzipped folder, or drag the zip onto the window.",
-      "stepFirefoxOpen": "Open about:debugging#/runtime/this-firefox.",
-      "stepFirefoxLoad": "Click <bold>Load Temporary Add-on</bold> and select the <code>manifest.json</code> file from the unzipped folder.",
-      "stepFirefoxNote": "Note: on Firefox, the temporary installation is reset on next restart. For a permanent installation, wait for publication on addons.mozilla.org.",
-      "stepOther": "The extension is only available for Chrome (and Chromium-based browsers) and Firefox at the moment.",
-      "downloadBtn": "Download extension v{version} ({browser}, .zip)",
+      "stepChromeStore": "Open the Physalis listing on the <bold>Chrome Web Store</bold> and click <bold>Add to Chrome</bold>.",
+      "stepFirefoxStore": "Open the Physalis listing on <bold>Firefox Add-ons</bold> and click <bold>Add to Firefox</bold>.",
+      "stepOther": "The extension is available for Chrome (and Chromium-based browsers: Edge, Brave, Opera) and Firefox. Open this dashboard in one of those browsers to install it.",
+      "stepSignIn": "Click the Physalis icon in the browser toolbar and sign in with your Physalis account (TOTP 2FA required).",
+      "storeBtnChrome": "Install from the Chrome Web Store",
+      "storeBtnFirefox": "Install from Firefox Add-ons",
       "tipTitle": "Tip",
       "tipContent": "To pin the extension to the toolbar: click the <bold>🧩 Extensions</bold> icon in the browser toolbar, then click the <bold>📌 pin</bold> icon next to Physalis. The Physalis icon will then always be visible.",
       "closeBtn": "Close"
@@ -634,6 +632,7 @@
       "clientIdLabel": "Client ID",
       "clientSecretLabel": "Client secret",
       "secretKeepPlaceholder": "•••••• (leave blank to keep current)",
+      "secretUnreadable": "This secret can no longer be decrypted (likely encrypted under a previous key): this configuration is ignored at sign-in despite showing as enabled. Re-enter the client secret to restore it.",
       "issuerLabel": "Issuer URL",
       "msTenantLabel": "Microsoft Tenant ID",
       "domainsLabel": "Allowed domains",
@@ -2267,6 +2266,13 @@
     "purgingBtn": "Deleting…",
     "purgeError": "The deletion failed. Please try again."
   },
+  "seatFrozen": {
+    "title": "Your access is suspended",
+    "body": "This account was moved to the free plan, which includes a single user seat. After the seven-day grace period, only the account owner keeps access.",
+    "preserved": "Nothing has been deleted. Your account, your memberships and your personal vault are kept intact — they become available again as soon as a paid plan is subscribed.",
+    "whatToDo": "Get in touch with the account owner: subscribing to a plan immediately restores access for the whole team.",
+    "signedInAs": "Signed in as {email}."
+  },
   "docs": {
     "title": "Documentation",
     "subtitle": "Physalis usage guides.",
@@ -2350,7 +2356,8 @@
       "noOverage": "Your usage fits within the FREE quotas. No restrictions.",
       "overageTitle": "Your account is in overage",
       "overageItem1": "Creation of new organisations / users blocked.",
-      "overageItem2": "Automatic deployments disabled on excess organisations (main organisation remains allowed).",
+      "overageItem2": "Automatic deployments, rotation, CI/CD and outbound sync are disabled.",
+      "overageItem3": "In 7 days, only your own access is kept: other members are paused (no data is deleted).",
       "overageNote": "Your data is preserved. Re-subscribe at any time to reactivate everything.",
       "btn": "Manage my subscription"
     },
@@ -2364,9 +2371,10 @@
       "users": "{count} user{plural}",
       "plural_s": "s",
       "plural_none": "",
-      "preserved": "All your data is preserved and accessible. However:",
+      "preserved": "All your data is kept. However:",
       "item1": "You cannot create new resources.",
-      "item2": "Automatic deployments are disabled on excess organisations.",
+      "item2": "Automatic deployments, rotation, CI/CD and outbound sync are disabled.",
+      "item3": "Members beyond the included seat no longer have access. Their accounts and personal vaults are intact and reopen as soon as a plan is subscribed.",
       "btn": "Re-subscribe to a plan"
     },
     "accountDeletion": {

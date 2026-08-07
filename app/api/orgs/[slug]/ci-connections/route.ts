@@ -57,9 +57,13 @@ export async function GET(_req: Request, { params }: Params) {
   });
 }
 
+// Feature payante `ci_cd`. Les GET restent ouverts : après un downgrade, la
+// connexion existante doit rester consultable (et son secret récupérable) pour
+// que le client puisse migrer ailleurs. Seules la création et la modification
+// sont fermées — cf. `docs/steps-docs/todo/gating-plans.md` §5.
 export async function POST(req: Request, { params }: Params) {
   const { slug } = await params;
-  const access = await requireOrgMember(slug, "ADMIN_DEV");
+  const access = await requireOrgMember(slug, "ADMIN_DEV", { feature: "ci_cd" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as

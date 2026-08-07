@@ -327,14 +327,12 @@
       "feature2": "<bold>Sauvegarder automatiquement</bold> un nouveau credential dans ton coffre quand tu te connectes à un site",
       "feature3": "Accéder en un clic à tes credentials du coffre personnel et des coffres d'équipe filtrés par domaine",
       "installTitle": "Installation",
-      "step1Download": "Télécharge l'archive ci-dessous.",
-      "stepChromeDevMode": "Ouvre chrome://extensions/ et active le <bold>Mode développeur</bold> (interrupteur en haut à droite).",
-      "stepChromeLoad": "Clique sur <bold>Charger l'extension non empaquetée</bold> et sélectionne le dossier décompressé, ou glisse le zip sur la fenêtre.",
-      "stepFirefoxOpen": "Ouvre about:debugging#/runtime/this-firefox.",
-      "stepFirefoxLoad": "Clique sur <bold>Charger un module complémentaire temporaire</bold> et sélectionne le fichier <code>manifest.json</code> du dossier décompressé.",
-      "stepFirefoxNote": "Note : sur Firefox, l'installation temporaire est réinitialisée au prochain redémarrage. Pour une installation permanente, attendre la publication sur addons.mozilla.org.",
-      "stepOther": "L'extension n'est disponible que pour Chrome (et navigateurs basés sur Chromium) et Firefox pour le moment.",
-      "downloadBtn": "Télécharger l'extension v{version} ({browser}, .zip)",
+      "stepChromeStore": "Ouvre la fiche Physalis sur le <bold>Chrome Web Store</bold> et clique sur <bold>Ajouter à Chrome</bold>.",
+      "stepFirefoxStore": "Ouvre la fiche Physalis sur <bold>Firefox Add-ons</bold> et clique sur <bold>Ajouter à Firefox</bold>.",
+      "stepOther": "L'extension est disponible pour Chrome (et les navigateurs Chromium : Edge, Brave, Opera) et pour Firefox. Ouvre ce dashboard depuis l'un de ces navigateurs pour l'installer.",
+      "stepSignIn": "Clique sur l'icône Physalis dans la barre d'outils du navigateur et connecte-toi avec ton compte Physalis (2FA TOTP requise).",
+      "storeBtnChrome": "Installer depuis le Chrome Web Store",
+      "storeBtnFirefox": "Installer depuis Firefox Add-ons",
       "tipTitle": "Astuce",
       "tipContent": "Pour épingler l'extension à la barre d'outils : clique sur l'icône <bold>🧩 Extensions</bold> dans la barre d'outils du navigateur, puis sur l'icône <bold>📌 épingle</bold> à côté de Physalis. L'icône Physalis sera alors toujours visible.",
       "closeBtn": "Fermer"
@@ -489,6 +487,7 @@
       "clientIdLabel": "Client ID",
       "clientSecretLabel": "Client secret",
       "secretKeepPlaceholder": "•••••• (laisser vide pour conserver)",
+      "secretUnreadable": "Ce secret ne peut plus être déchiffré (probablement chiffré sous une clé antérieure) : cette configuration est ignorée à la connexion, malgré son état « activé ». Ressaisissez le client secret pour la rétablir.",
       "issuerLabel": "Issuer URL",
       "msTenantLabel": "Microsoft Tenant ID",
       "domainsLabel": "Domaines autorisés",
@@ -2267,6 +2266,13 @@
     "purgingBtn": "Suppression…",
     "purgeError": "La suppression a échoué. Réessayez."
   },
+  "seatFrozen": {
+    "title": "Votre accès est suspendu",
+    "body": "Le compte a été basculé sur le plan gratuit, qui n'inclut qu'un seul siège utilisateur. Passé le délai de sept jours, seul le propriétaire du compte conserve l'accès.",
+    "preserved": "Rien n'a été supprimé. Votre compte, vos accès et votre coffre-fort personnel sont conservés intacts : ils redeviendront accessibles dès qu'un plan payant sera souscrit.",
+    "whatToDo": "Rapprochez-vous du propriétaire du compte : souscrire un plan rouvre immédiatement les accès de toute l'équipe.",
+    "signedInAs": "Connecté en tant que {email}."
+  },
   "emails": {
     "common": {
       "greeting": "Bonjour,",
@@ -2344,7 +2350,8 @@
       "noOverage": "Votre usage rentre dans les quotas FREE. Aucune restriction.",
       "overageTitle": "Votre compte est en overage",
       "overageItem1": "Création de nouvelles organisations / utilisateurs bloquée.",
-      "overageItem2": "Déploiements automatiques désactivés sur les organisations excédentaires (l'organisation principale reste autorisée).",
+      "overageItem2": "Déploiements automatiques, rotation, CI/CD et synchronisation sortante désactivés.",
+      "overageItem3": "Dans 7 jours, seul votre accès sera conservé : les autres membres seront mis en pause (aucune donnée supprimée).",
       "overageNote": "Vos données sont conservées. Re-souscrivez à tout moment pour tout réactiver.",
       "btn": "Gérer mon abonnement"
     },
@@ -2358,9 +2365,10 @@
       "users": "{count} utilisateur{plural}",
       "plural_s": "s",
       "plural_none": "",
-      "preserved": "Toutes vos données sont conservées et restent accessibles. Cependant :",
+      "preserved": "Toutes vos données sont conservées. En revanche :",
       "item1": "Vous ne pouvez pas créer de nouvelles ressources.",
-      "item2": "Les déploiements automatiques sont désactivés sur les organisations excédentaires.",
+      "item2": "Déploiements automatiques, rotation, CI/CD et synchronisation sortante sont désactivés.",
+      "item3": "Les membres au-delà du siège inclus n'ont plus accès à l'espace. Leurs comptes et leurs coffres personnels sont intacts et rouvrent dès la souscription d'un plan.",
       "btn": "Re-souscrire un plan"
     },
     "accountDeletion": {

@@ -46,7 +46,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const { orgSlug, slug } = await params;
-  const access = await requireOrgCollectionAccess(orgSlug, slug, "OWNER");
+  const access = await requireOrgCollectionAccess(orgSlug, slug, "OWNER", { feature: "team_vault" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as

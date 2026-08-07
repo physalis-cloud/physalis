@@ -430,7 +430,7 @@ Le fichier [.env.example](../.env.example) fait référence. Points d'attention 
 | `ALLOW_REGISTRATION` | Inscription publique. `false` par défaut |
 | `TRUST_PROXY_HOPS` | Reverse proxies de confiance (cf. §8) |
 | `OIDC_AUDIENCE` | Requis seulement si vous utilisez `/api/deploy` |
-| `PLUGIN_ALLOWED_ORIGIN` | `chrome-extension://…` ou `moz-extension://…`. Sans elle, l'extension est désactivée |
+| `PLUGIN_ALLOWED_ORIGIN` | `chrome-extension://<id>`, séparées par virgule. Sans elle, l'extension est désactivée. Ajouter le token `moz-extension://*` pour accepter Firefox (uuid non épinglable) |
 | `EMAIL_MAILGUN_*`, `EMAIL_FROM` | Emails transactionnels (invitations, reset). Facultatif : sans ces variables, l'app démarre, les emails sont simplement désactivés |
 
 ### 9.3 Reverse proxy

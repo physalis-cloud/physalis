@@ -20,9 +20,10 @@ import { NextResponse } from "next/server";
 import type { ProjectRole, Role, VaultRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClient } from "@prisma/client";
-import { encrypt } from "@/lib/crypto";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { readJson } from "@/lib/api";
-import { isPlatformAdmin } from "@/lib/roles";
+import { hasDevPrivileges, isPlatformAdmin } from "@/lib/roles";
+import { effectiveProjectRole, hasProjectRole } from "@/lib/project-access";
 import {
   extractPluginBearer,
   validatePluginToken,
@@ -82,10 +83,32 @@ function normalizeTags(input: unknown): string[] | null {
   return out;
 }
 
+/** Le blob d'un AppAccount comme celui d'un Service porte le COUPLE
+ *  {user,password} en un seul chiffré — contrairement à VaultEntry, qui n'y
+ *  met que le mot de passe. */
+function decryptProjectCreds(payload: {
+  encryptedData: string;
+  iv: string;
+  tag: string;
+}): { user: string; password: string } {
+  const json = decrypt({
+    encryptedValue: payload.encryptedData,
+    iv: payload.iv,
+    tag: payload.tag,
+  });
+  const parsed = JSON.parse(json) as { user?: string; password?: string };
+  return { user: parsed.user ?? "", password: parsed.password ?? "" };
+}
+
 type Body = {
   action?: "create" | "update";
   id?: string;
-  target?: "personal" | "team_org" | "team_project";
+  target?:
+    | "personal"
+    | "team_org"
+    | "team_project"
+    | "project_account"
+    | "project_service";
   orgSlug?: string;
   projectSlug?: string;
   collectionSlug?: string;
@@ -99,7 +122,12 @@ type Body = {
 type Validated = {
   action: "create" | "update";
   id: string | null;
-  target: "personal" | "team_org" | "team_project";
+  target:
+    | "personal"
+    | "team_org"
+    | "team_project"
+    | "project_account"
+    | "project_service";
   orgSlug: string | null;
   projectSlug: string | null;
   collectionSlug: string | null;
@@ -150,12 +178,34 @@ function validate(
   if (
     body.target !== "personal" &&
     body.target !== "team_org" &&
-    body.target !== "team_project"
+    body.target !== "team_project" &&
+    body.target !== "project_account" &&
+    body.target !== "project_service"
   ) {
     return {
       ok: false,
       error: NextResponse.json(
-        { error: "target must be 'personal' | 'team_org' | 'team_project'" },
+        {
+          error:
+            "target must be 'personal' | 'team_org' | 'team_project' | 'project_account' | 'project_service'",
+        },
+        { status: 400 },
+      ),
+    };
+  }
+
+  // Ni un compte ni un service de projet ne se CRÉENT depuis une page web :
+  // l'extension ne sait ni à quel projet les rattacher, ni à quel
+  // environnement les lier. Seule la mise à jour d'une entrée que la lecture a
+  // déjà désignée est autorisée.
+  if (
+    (body.target === "project_account" || body.target === "project_service") &&
+    body.action !== "update"
+  ) {
+    return {
+      ok: false,
+      error: NextResponse.json(
+        { error: `${body.target} only supports action=update` },
         { status: 400 },
       ),
     };
@@ -324,13 +374,25 @@ async function resolveTeamOrgAccess(
   });
   if (!collection) return null;
 
+  // Miroir de requireOrgCollectionAccess : role implicite derive de l'OrgRole
+  // (ADMIN/OWNER → OWNER, DEV/ADMIN_DEV → EDITOR) combine au TeamVaultMember
+  // explicite, en gardant le PLUS FORT des deux. Sans l'implicite DEV, un
+  // OrgDEV pouvait lire la collection depuis l'extension mais pas y ecrire ;
+  // sans le max, un DEV membre VIEWER perdait son EDITOR implicite.
   const orgRole = org.members[0]?.role;
-  let role: VaultRole | null = null;
-  if (isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN") {
-    role = "OWNER";
-  } else {
-    role = collection.members[0]?.role ?? null;
-  }
+  const implicit: VaultRole | null =
+    isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN"
+      ? "OWNER"
+      : hasDevPrivileges(orgRole)
+        ? "EDITOR"
+        : null;
+  const memberRole = collection.members[0]?.role ?? null;
+  const role: VaultRole | null =
+    implicit && memberRole
+      ? hasVaultRole(implicit, memberRole)
+        ? implicit
+        : memberRole
+      : (implicit ?? memberRole);
   if (!role) return null;
 
   return {
@@ -379,17 +441,18 @@ async function resolveTeamProjectAccess(
   });
   if (!collection) return null;
 
-  const membership = project.members[0];
-  const orgRole = project.organization.members[0]?.role;
-  let role: VaultRole | null = null;
-  if (isPlatformAdmin(userRole) || orgRole === "OWNER" || orgRole === "ADMIN") {
-    // Regle 1 : OrgADMIN/OWNER (et admin plateforme) ignorent hidden.
-    role = "OWNER";
-  } else if (membership && !membership.hidden) {
-    // Regle 2 : une ligne masquee = 403 ailleurs → aucun acces coffre ici.
-    role = PROJECT_TO_VAULT[membership.role];
-  }
-  if (!role) return null;
+  // Les 6 regles vivent dans lib/project-access.ts (§4) — miroir exact de
+  // requireProjectCollectionAccess. Ne PAS re-deriver : la version manuscrite
+  // ici omettait la regle 4 (pas de ligne + OrgDEV/ADMIN_DEV → EDITOR
+  // implicite), donc l'autosave repondait 404 sur une collection projet que la
+  // LECTURE (getAccessibleCollectionIds, via /api/plugin/match) lui ouvrait.
+  const projectRole = effectiveProjectRole({
+    orgRole: project.organization.members[0]?.role,
+    membership: project.members[0] ?? null,
+    platformRole: userRole,
+  });
+  if (!projectRole) return null;
+  const role = PROJECT_TO_VAULT[projectRole];
 
   return {
     collectionId: collection.id,
@@ -441,6 +504,121 @@ export async function POST(req: Request) {
   const userId = session.userId;
   const userRole = session.user.role;
   const userEmail = session.user.email;
+
+  // ─── Comptes et Services de projet ──────────────────────────────────
+  // Versant ECRITURE de ce que /api/plugin/match ouvre en lecture. Les deux
+  // surfaces sont traitees par UNE branche : c'est precisement la duplication
+  // de branches qui laisse une surface derriere l'autre — le defaut qu'on
+  // repare ici. Deux garde-fous, tous deux cote serveur (`canWrite` du payload
+  // de lecture n'est qu'un confort d'UI, jamais une autorisation) :
+  //   1. role projet EDITOR+ via `effectiveProjectRole` — miroir exact du
+  //      `requireProjectMember(slug, "EDITOR")` des PATCH canoniques ;
+  //   2. le `username` soumis doit etre celui de l'entree visee. La decision de
+  //      mise a jour a ete prise cote extension SUR l'egalite des identifiants ;
+  //      si elle ne tient plus, la vue du client est perimee et on refuse
+  //      plutot que d'ecrire sur une entree voisine.
+  //
+  // ⚠️ Ne touche PAS `rotationLastAt` : les PATCH canoniques ne le font pas non
+  // plus (l'horloge de rotation vit dans ses routes dediees). Changer un mot de
+  // passe ici ne compte donc pas comme une rotation — comme depuis l'UI web.
+  if (data.target === "project_account" || data.target === "project_service") {
+    const isService = data.target === "project_service";
+    const select = {
+      id: true,
+      name: true,
+      encryptedData: true,
+      iv: true,
+      tag: true,
+      project: {
+        select: {
+          id: true,
+          organizationId: true,
+          members: {
+            where: { userId },
+            select: { role: true, hidden: true },
+          },
+          organization: {
+            select: {
+              members: { where: { userId }, select: { role: true } },
+            },
+          },
+        },
+      },
+    } as const;
+    const row = isService
+      ? await prisma.service.findUnique({ where: { id: data.id! }, select })
+      : await prisma.appAccount.findUnique({ where: { id: data.id! }, select });
+    if (!row) {
+      return withCors(
+        NextResponse.json({ error: "Not found" }, { status: 404 }),
+        allowOrigin,
+      );
+    }
+
+    const projectRole = effectiveProjectRole({
+      orgRole: row.project.organization.members[0]?.role,
+      membership: row.project.members[0] ?? null,
+      platformRole: userRole,
+    });
+    if (!hasProjectRole(projectRole, "EDITOR")) {
+      return withCors(
+        NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+        allowOrigin,
+      );
+    }
+
+    const current = decryptProjectCreds(row);
+    if (data.username && data.username !== current.user) {
+      return withCors(
+        NextResponse.json(
+          { error: "username does not match this entry" },
+          { status: 409 },
+        ),
+        allowOrigin,
+      );
+    }
+    // Rien a ecrire : on ne journalise pas une modification qui n'existe pas.
+    if (current.password === data.password) {
+      return withCors(
+        NextResponse.json({ id: row.id, created: false }),
+        allowOrigin,
+      );
+    }
+
+    // Le blob porte le COUPLE : le re-encoder a partir du seul mot de passe
+    // effacerait l'identifiant. On repart du dechiffre.
+    const payload = encrypt(
+      JSON.stringify({ user: current.user, password: data.password }),
+    );
+    const blob = {
+      encryptedData: payload.encryptedValue,
+      iv: payload.iv,
+      tag: payload.tag,
+    };
+    if (isService) {
+      await prisma.service.update({ where: { id: row.id }, data: blob });
+    } else {
+      await prisma.appAccount.update({ where: { id: row.id }, data: blob });
+    }
+    logAction({
+      action: isService ? "SERVICE_UPDATE" : "ACCOUNT_UPDATE",
+      actor: { kind: "user", userId, email: userEmail },
+      organizationId: row.project.organizationId,
+      projectId: row.project.id,
+      targetType: isService ? "Service" : "AppAccount",
+      targetId: row.id,
+      metadata: {
+        changedFields: ["password"],
+        origin: "plugin_autosave",
+        domain,
+      },
+      req,
+    });
+    return withCors(
+      NextResponse.json({ id: row.id, created: false }),
+      allowOrigin,
+    );
+  }
 
   // ─── Personal vault ─────────────────────────────────────────────────
   if (data.target === "personal") {

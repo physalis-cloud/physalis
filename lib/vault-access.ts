@@ -26,7 +26,10 @@
 import { NextResponse } from "next/server";
 import type { ProjectRole, Role, VaultRole } from "@prisma/client";
 import { prisma } from "./prisma";
-import { requireUser, type AuthedUser } from "./api";
+import { requireUser, type AuthedUser, type AccessOptions } from "./api";
+// `AccessOptions.feature` porte le gate de plan côté SaaS. Self-host =
+// mono-tenant sans plans : l'option est acceptée pour que les routes
+// coulées verbatim compilent, et volontairement IGNORÉE.
 import { isPlatformAdmin } from "./roles";
 import {
   effectiveProjectRole,
@@ -103,7 +106,11 @@ export async function getAccessibleCollectionIds(
       select: { collectionId: true },
     }),
     prisma.orgMember.findMany({
-      where: { userId, role: { in: ["DEV", "ADMIN", "OWNER"] } },
+      // ADMIN_DEV manquait ici : un OrgADMIN_DEV n'obtenait AUCUNE collection
+      // alors que requireOrgCollectionAccess lui accorde EDITOR (liste et
+      // detail divergeaient). Cf. §4 — c'est le bug qui a motive
+      // lib/project-access.ts et ses Record<OrgRole,…> exhaustifs.
+      where: { userId, role: { in: ["DEV", "ADMIN_DEV", "ADMIN", "OWNER"] } },
       select: { organizationId: true, role: true },
     }),
     prisma.projectMember.findMany({
@@ -167,6 +174,7 @@ export async function requireOrgCollectionAccess(
   orgSlug: string,
   collectionSlug: string,
   requiredRole: VaultRole = "VIEWER",
+  _opts?: AccessOptions,
 ): Promise<{ access: CollectionAccess } | { error: NextResponse }> {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes;
@@ -266,6 +274,7 @@ export async function requireProjectCollectionAccess(
   projectSlug: string,
   collectionSlug: string,
   requiredRole: VaultRole = "VIEWER",
+  _opts?: AccessOptions,
 ): Promise<{ access: CollectionAccess } | { error: NextResponse }> {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes;
@@ -367,6 +376,7 @@ export async function requireProjectCollectionAccess(
 export async function requireOrgScope(
   orgSlug: string,
   requiredOrgRole: "MEMBER" | "DEV" | "ADMIN" | "OWNER" = "MEMBER",
+  _opts?: AccessOptions,
 ): Promise<
   | {
       user: AuthedUser;
@@ -414,6 +424,7 @@ export async function requireOrgScope(
 export async function requireProjectScope(
   projectSlug: string,
   requiredRole: ProjectRole = "VIEWER",
+  _opts?: AccessOptions,
 ): Promise<
   | {
       user: AuthedUser;

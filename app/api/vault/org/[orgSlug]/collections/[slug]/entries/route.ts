@@ -12,7 +12,7 @@ export async function GET(req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const { orgSlug, slug } = await params;
-  const access = await requireOrgCollectionAccess(orgSlug, slug, "EDITOR");
+  const access = await requireOrgCollectionAccess(orgSlug, slug, "EDITOR", { feature: "team_vault" });
   if ("error" in access) return access.error;
   return createEntry(access.access, req);
 }

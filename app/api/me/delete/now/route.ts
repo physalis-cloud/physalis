@@ -1,5 +1,13 @@
 // POST /api/me/delete/now — suppression DÉFINITIVE et immédiate de son compte.
 //
+// Jumeau SELF-HOST : la garde `if (!tenantSlug) → 401` est retirée. En
+// mono-tenant `requireUser()` renvoie TOUJOURS `tenantSlug: null` (cf.
+// lib/api.ts : le champ n'existe que pour que le code SaaS coulé verbatim
+// compile), donc elle était vraie à chaque appel — la suppression immédiate
+// répondait 401 sur toute instance auto-hébergée. Les DEUX contrôles réels
+// ci-dessous (phrase + ré-auth) sont intacts : c'est eux qui protègent
+// l'action, pas cette garde qui ne parlait que du contexte tenant.
+//
 // Seule action de ce parcours qui soit irréversible : elle exige donc les DEUX
 // contrôles (cf. docs/steps-docs/todo/suppression-compte.md) —
 //   • la phrase à recopier    → prouve l'INTENTION (défend contre l'accident) ;
@@ -27,9 +35,6 @@ export async function POST(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
   const { user, tenantSlug } = userRes;
-  if (!tenantSlug) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   // Borne PAR USER : la vérification coûte un bcrypt (~2 s CPU) et un essai de
   // backup code, donc la route est un amplificateur DoS si on la laisse nue.

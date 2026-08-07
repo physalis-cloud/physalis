@@ -95,7 +95,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 export async function PUT(req: Request, { params }: Params) {
   const { slug, userId } = await params;
-  const access = await requireOrgMember(slug, "ADMIN");
+  const access = await requireOrgMember(slug, "ADMIN", { feature: "multi_users" });
   if ("error" in access) return access.error;
 
   const body = (await readJson(req)) as { projectAccess?: unknown } | null;

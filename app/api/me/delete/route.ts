@@ -1,10 +1,19 @@
 // Jumeau SELF-HOST de app/api/me/delete/route.ts.
 //
-// Différence unique avec la version SaaS : la règle B.5 (« la suppression du
-// compte CLIENT absorbe les suppressions individuelles ») est retirée. Elle
-// s'appuie sur `adminPrisma.client`, or le modèle `Client` n'existe pas en
-// mono-tenant — il n'y a pas de tenant à résilier. Conserver ce code casserait
-// la compilation du build public.
+// Deux différences avec la version SaaS.
+//
+// 1. La règle B.5 (« la suppression du compte CLIENT absorbe les suppressions
+//    individuelles ») est retirée. Elle s'appuie sur `adminPrisma.client`, or
+//    le modèle `Client` n'existe pas en mono-tenant — il n'y a pas de tenant à
+//    résilier. Conserver ce code casserait la compilation du build public.
+//
+// 2. La garde `if (!tenantSlug) → 401` est retirée des deux handlers. En
+//    mono-tenant `requireUser()` renvoie TOUJOURS `tenantSlug: null` (cf.
+//    lib/api.ts : le champ n'existe que pour que le code SaaS coulé verbatim
+//    compile), donc la garde était vraie à chaque appel : l'écran de
+//    suppression de compte répondait 401 sur toute instance auto-hébergée,
+//    sans erreur visible côté serveur. Même classe de piège que la garde
+//    retirée de `rotation/force`.
 //
 // Tout le reste est identique, et notamment la garde du DERNIER OWNER, qui
 // prend ici une importance particulière : sur une instance à utilisateur
@@ -73,10 +82,7 @@ async function blockingOrgs(userId: string) {
 export async function GET() {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
-  const { user, tenantSlug } = userRes;
-  if (!tenantSlug) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { user } = userRes;
 
   const me = await prisma.user.findUnique({
     where: { id: user.id },
@@ -119,10 +125,10 @@ export async function GET() {
 export async function POST(req: Request) {
   const userRes = await requireUser();
   if ("error" in userRes) return userRes.error;
+  // `tenantSlug` reste destructuré : il vaut toujours `null` ici, mais
+  // `logAction` l'accepte tel quel — garder la ligne identique à la source
+  // réduit la divergence à forward-porter.
   const { user, tenantSlug } = userRes;
-  if (!tenantSlug) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   const limited = rateLimit(
     req,

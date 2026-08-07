@@ -93,9 +93,21 @@ const ALLOWED_TABLE_READS: Record<string, string> = {
   "app/api/me/export/route.ts":
     "RESTRICTION DÉLIBÉRÉE — export RGPD, seul endpoint qui déchiffre par " +
     "conception. Limité aux memberships explicites.",
-  "app/api/plugin/match/route.ts":
-    "RESTRICTION DÉLIBÉRÉE — l'extension autofille des credentials déchiffrés " +
-    "sur simple match de domaine, sans action de l'utilisateur.",
+  // `app/api/plugin/match/route.ts` était ici. RESTRICTION LEVÉE le 2026-08-06,
+  // sur pièces, après un incident support (un OrgDEV ne voyait aucun compte de
+  // projet dans l'extension alors que l'UI web les lui ouvre) :
+  //   1. Sa justification — « autofill sans action de l'utilisateur » — était
+  //      fausse : `fetchMatch` n'est appelé qu'à l'ouverture du popup et au
+  //      submit d'un formulaire (résultat consommé dans le service worker), et
+  //      le remplissage exige un clic.
+  //   2. Elle était à moitié appliquée : les coffres d'équipe du même projet
+  //      partaient déjà déchiffrés dans la MÊME réponse, via
+  //      getAccessibleCollectionIds qui applique les 6 règles.
+  //   3. Elle contredisait le modèle produit (OrgDEV = EDITOR implicite
+  //      partout), en silence et sur une seule surface.
+  // Le route passe désormais par `accessibleProjectsWhere` : `hidden` (règle 2)
+  // reste appliqué, c'est la seule part de la restriction qui fermait vraiment
+  // quelque chose. NE PAS ré-ajouter d'entrée ici sans rejouer ces 3 points.
   "app/api/orgs/[slug]/org-tokens/route.ts":
     "RESTRICTION DÉLIBÉRÉE — empêche un DEV d'émettre un token vers un projet " +
     "que l'UI lui ferme, puis d'en lire les secrets via integrations/credentials.",

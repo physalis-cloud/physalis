@@ -9,7 +9,7 @@
 
 [Français](README.md) · **English** · [Español](README.es.md)
 
-> **Version 1.3.3** · Hosted, managed version: [physalis.cloud](https://physalis.cloud) · Bugs and feedback: [open an issue](https://github.com/physalis-cloud/physalis/issues)
+> **Version 1.4.0** · Hosted, managed version: [physalis.cloud](https://physalis.cloud) · Bugs and feedback: [open an issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 
@@ -24,6 +24,8 @@ docker-compose serving, built-in CI redeploy, hybrid post-quantum key exchange
 **Physalis** is a self-hosted secrets manager built to centralise every
 environment variable of a web agency on its own servers, without depending on a
 third-party cloud service.
+
+**Documentation**: [guides](https://physalis.cloud/en/docs) · [step-by-step tutorials](https://physalis.cloud/en/tutos) · [self-hosting](https://physalis.cloud/en/self-host)
 
 ---
 

@@ -11,7 +11,7 @@ type Params = { params: Promise<{ slug: string; env: string; id: string }> };
 
 export async function POST(_req: Request, { params }: Params) {
   const { slug, env, id } = await params;
-  const access = await requireEnvironment(slug, env, "EDITOR");
+  const access = await requireEnvironment(slug, env, "EDITOR", { feature: "outbound_sync" });
   if ("error" in access) return access.error;
 
   const target = await prisma.environmentSyncTarget.findFirst({
