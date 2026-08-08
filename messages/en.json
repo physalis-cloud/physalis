@@ -412,7 +412,6 @@
     },
     "requestAllOrgs": "All orgs",
     "requestAllStatuses": "All statuses",
-    "requestLinkOnce": "For security reasons, the full link is only shown once (at creation). Recreate a request to get a new link.",
     "requestRevealBtn": "Reveal",
     "requestRevokeBtn": "Revoke",
     "requestExpiresIn": "expires in {time}",
@@ -488,7 +487,27 @@
       "saveToVaultBtn": "Save to my vault",
       "savedToVault": "✓ Saved to my vault",
       "doneBtn": "Done"
-    }
+    },
+    "detailsDialog": {
+      "closeBtn": "Close",
+      "statusLabel": "Status",
+      "requestedByLabel": "Requested by",
+      "recipientLabel": "Sent to",
+      "recipientManual": "— shared manually —",
+      "orgLabel": "Organization",
+      "projectLabel": "Project",
+      "noProject": "— none —",
+      "destinationLabel": "Import destination",
+      "destinationProjectVault": "Project vault",
+      "destinationNone": "None — read only",
+      "createdLabel": "Created on",
+      "expiresLabel": "Expires on",
+      "submittedLabel": "Secret received on",
+      "importedLabel": "Imported on",
+      "revokedLabel": "Revoked on",
+      "linkOnce": "For security reasons, the full link is shown only once (at creation). Create a new request to get a new link."
+    },
+    "requestDetailsBtn": "Request details"
   },
   "settings": {
     "email": {

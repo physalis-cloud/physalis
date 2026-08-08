@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { RiMailLine } from "@remixicon/react";
+import { RiInformationLine, RiMailLine } from "@remixicon/react";
 import { useConfirm } from "@/components/ConfirmDialog";
 import EmptyCard from "@/components/EmptyCard";
 import SecretRequestRevealDialog from "./secret-request-reveal-dialog";
+import SecretRequestDetailsDialog from "./secret-request-details-dialog";
 import SecretRequestCreateButton from "./secret-request-create-button";
 
 type Status =
@@ -88,6 +89,7 @@ export default function SecretRequestsTab({
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [revealId, setRevealId] = useState<string | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -111,9 +113,9 @@ export default function SecretRequestsTab({
     reload();
   }, [reload, refreshKey]);
 
-  async function copyLink(id: string) {
-    void id;
-    await confirm({ message: t("requestLinkOnce"), confirmLabel: "OK" });
+  /** Date absolue, même rendu que l'onglet « Mes partages ». */
+  function formatDate(iso: string): string {
+    return new Date(iso).toLocaleString();
   }
 
   async function revoke(id: string, label: string) {
@@ -124,6 +126,9 @@ export default function SecretRequestsTab({
   }
 
   const reveal = revealId ? requests?.find((r) => r.id === revealId) : null;
+  const details = detailsId
+    ? requests?.find((r) => r.id === detailsId)
+    : null;
 
   // Selects de filtre affichés seulement s'il y a des demandes — ou si un
   // filtre est actif (sinon on piégerait l'user sur un résultat filtré vide).
@@ -146,6 +151,15 @@ export default function SecretRequestsTab({
           secretKey={reveal.secretKey}
           onClose={() => setRevealId(null)}
           onChanged={() => reload()}
+        />
+      )}
+
+      {details && (
+        <SecretRequestDetailsDialog
+          request={details}
+          statusLabel={t(`requestStatus.${details.status}`)}
+          formatDate={formatDate}
+          onClose={() => setDetailsId(null)}
         />
       )}
 
@@ -252,16 +266,15 @@ export default function SecretRequestsTab({
                 </div>
               </div>
               <div className="row-actions">
-                {r.status === "pending" && (
-                  <button
-                    type="button"
-                    onClick={() => copyLink(r.id)}
-                    className="btn btn-ghost btn-xs"
-                    title={t("requestLinkOnce")}
-                  >
-                    ⓘ
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setDetailsId(r.id)}
+                  className="btn btn-ghost btn-xs"
+                  title={t("requestDetailsBtn")}
+                  aria-label={t("requestDetailsBtn")}
+                >
+                  <RiInformationLine size={14} aria-hidden />
+                </button>
                 {(r.status === "received" || r.status === "imported") && (
                   <button
                     type="button"

@@ -412,7 +412,6 @@
     },
     "requestAllOrgs": "Todas las orgs",
     "requestAllStatuses": "Todos los estados",
-    "requestLinkOnce": "Por razones de seguridad, el enlace completo solo se muestra una vez (al crearlo). Vuelva a crear una solicitud para obtener un nuevo enlace.",
     "requestRevealBtn": "Revelar",
     "requestRevokeBtn": "Revocar",
     "requestExpiresIn": "expira en {time}",
@@ -488,7 +487,27 @@
       "saveToVaultBtn": "Guardar en mi bóveda",
       "savedToVault": "✓ Guardado en mi bóveda",
       "doneBtn": "Hecho"
-    }
+    },
+    "detailsDialog": {
+      "closeBtn": "Cerrar",
+      "statusLabel": "Estado",
+      "requestedByLabel": "Solicitado por",
+      "recipientLabel": "Enviado a",
+      "recipientManual": "— entregado a mano —",
+      "orgLabel": "Organización",
+      "projectLabel": "Proyecto",
+      "noProject": "— ninguno —",
+      "destinationLabel": "Destino al importar",
+      "destinationProjectVault": "Bóveda del proyecto",
+      "destinationNone": "Ninguno — solo lectura",
+      "createdLabel": "Creada el",
+      "expiresLabel": "Caduca el",
+      "submittedLabel": "Secreto recibido el",
+      "importedLabel": "Importado el",
+      "revokedLabel": "Revocada el",
+      "linkOnce": "Por motivos de seguridad, el enlace completo solo se muestra una vez (al crearla). Cree una nueva solicitud para obtener un enlace nuevo."
+    },
+    "requestDetailsBtn": "Detalles de la solicitud"
   },
   "settings": {
     "email": {

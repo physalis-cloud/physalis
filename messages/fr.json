@@ -587,7 +587,6 @@
     },
     "requestAllOrgs": "Toutes les orgs",
     "requestAllStatuses": "Tous statuts",
-    "requestLinkOnce": "Pour des raisons de sécurité, le lien complet n'est affiché qu'une seule fois (à la création). Recréez une demande pour obtenir un nouveau lien.",
     "requestRevealBtn": "Révéler",
     "requestRevokeBtn": "Révoquer",
     "requestExpiresIn": "expire dans {time}",
@@ -663,7 +662,27 @@
       "saveToVaultBtn": "Sauvegarder dans mon coffre",
       "savedToVault": "✓ Sauvegardée dans mon coffre",
       "doneBtn": "Terminé"
-    }
+    },
+    "detailsDialog": {
+      "closeBtn": "Fermer",
+      "statusLabel": "Statut",
+      "requestedByLabel": "Demandé par",
+      "recipientLabel": "Envoyé à",
+      "recipientManual": "— transmis à la main —",
+      "orgLabel": "Organisation",
+      "projectLabel": "Projet",
+      "noProject": "— aucun —",
+      "destinationLabel": "Destination à l'import",
+      "destinationProjectVault": "Coffre du projet",
+      "destinationNone": "Aucune — lecture seule",
+      "createdLabel": "Créée le",
+      "expiresLabel": "Expire le",
+      "submittedLabel": "Secret reçu le",
+      "importedLabel": "Importé le",
+      "revokedLabel": "Révoquée le",
+      "linkOnce": "Pour des raisons de sécurité, le lien complet n'est affiché qu'une seule fois (à la création). Recréez une demande pour obtenir un nouveau lien."
+    },
+    "requestDetailsBtn": "Détails de la demande"
   },
   "projects": {
     "pageTitle": "Projets",
