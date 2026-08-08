@@ -9,7 +9,7 @@
 
 **Français** · [English](README.en.md) · [Español](README.es.md)
 
-> **Version 1.4.0** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
+> **Version 1.5.0** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 

@@ -622,7 +622,8 @@
       "error": "Déchiffrement impossible. Clé privée invalide ou mauvaise demande ?",
       "submitBtn": "Déchiffrer localement",
       "importBtn": "Importer → {env} / {key}",
-      "imported": "✓ Importé dans le projet"
+      "imported": "✓ Importé dans le projet",
+      "importToVaultBtn": "Importer → coffre du projet"
     },
     "createRequestDialog": {
       "title": "Autoriser un partage externe",
@@ -643,7 +644,13 @@
       "cancelBtn": "Annuler",
       "creatingBtn": "Création…",
       "error": "Création impossible.",
-      "submitBtn": "Créer la demande"
+      "submitBtn": "Créer la demande",
+      "targetIncomplete": "Environnement et clé .env vont ensemble : renseignez les deux, ou aucun des deux.",
+      "targetRequired": "Renseignez l'environnement et la clé .env : vous n'avez pas les droits d'écriture sur le coffre de ce projet, le secret n'aurait aucune destination.",
+      "vaultFallbackNotice": "Vous n'avez renseigné ni environnement ni clé .env. Le secret sera enregistré dans le coffre du projet, dans la collection « {collection} ». Pour l'injecter directement dans un environnement, renseignez les deux champs.",
+      "vaultFallbackCollection": "Demandes externes",
+      "vaultFallbackConfirmBtn": "Valider",
+      "vaultFallbackEditBtn": "Modifier"
     },
     "requestCreated": {
       "title": "Demande créée",

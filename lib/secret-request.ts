@@ -38,6 +38,25 @@ export function resolveSecretRequestTtlMs(hours: unknown): number | null {
   return null;
 }
 
+/**
+ * Collection de coffre de PROJET où atterrissent les secrets importés sans
+ * cible d'environnement (demande créée avec un projet mais sans environnement
+ * ni clé .env). Créée à la volée au premier import qui en a besoin.
+ *
+ * Le nom n'est PAS traduit — c'est une donnée persistée, pas de l'affichage :
+ * la localiser ferait diverger la destination selon la langue de l'importeur,
+ * donc des collections en double. Même parti pris que `DEFAULT_ENVS` à la
+ * création d'un projet. Il reprend le vocabulaire de l'onglet (« Demandes
+ * externes »).
+ *
+ * ⚠️ La recherche se fait par SLUG (c'est lui qui porte la contrainte
+ * d'unicité). Renommer la collection change son slug → l'import suivant en
+ * recrée une. C'est assumé : la collection reste une collection ordinaire,
+ * que l'utilisateur peut réorganiser comme il veut.
+ */
+export const IMPORT_COLLECTION_NAME = "Demandes externes";
+export const IMPORT_COLLECTION_SLUG = "demandes-externes";
+
 export function generateSecretRequestToken(): string {
   return TOKEN_PREFIX + randomBytes(32).toString("hex");
 }

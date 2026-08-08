@@ -243,7 +243,9 @@ export default function SecretRequestRevealDialog({
                   >
                     {pending
                       ? t("importingBtn")
-                      : t("importBtn", { env: envName ?? "", key: secretKey ?? "" })}
+                      : envName && secretKey
+                        ? t("importBtn", { env: envName, key: secretKey })
+                        : t("importToVaultBtn")}
                   </button>
                 )}
                 <button

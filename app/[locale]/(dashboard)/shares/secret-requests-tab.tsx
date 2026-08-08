@@ -137,12 +137,11 @@ export default function SecretRequestsTab({
         <SecretRequestRevealDialog
           requestId={reveal.id}
           label={reveal.label}
-          canImport={Boolean(
-            reveal.environmentName &&
-              reveal.secretKey &&
-              reveal.project &&
-              !reveal.importedAt,
-          )}
+          // Le PROJET seul suffit désormais : sans environnement ni clé, le
+          // secret part dans le coffre du projet. La destination exacte est
+          // résolue par le serveur, qui porte aussi le droit d'y écrire — une
+          // demande sans projet, elle, reste en lecture seule.
+          canImport={Boolean(reveal.project && !reveal.importedAt)}
           envName={reveal.environmentName}
           secretKey={reveal.secretKey}
           onClose={() => setRevealId(null)}

@@ -447,7 +447,8 @@
       "error": "Decryption failed. Invalid private key or wrong request?",
       "submitBtn": "Decrypt locally",
       "importBtn": "Import → {env} / {key}",
-      "imported": "✓ Imported into project"
+      "imported": "✓ Imported into project",
+      "importToVaultBtn": "Import → project vault"
     },
     "createRequestDialog": {
       "title": "Allow an external share",
@@ -468,7 +469,13 @@
       "cancelBtn": "Cancel",
       "creatingBtn": "Creating…",
       "error": "Creation failed.",
-      "submitBtn": "Create request"
+      "submitBtn": "Create request",
+      "targetIncomplete": "Environment and .env key go together: fill in both, or neither.",
+      "targetRequired": "Fill in the environment and the .env key: you do not have write access to this project's vault, so the secret would have no destination.",
+      "vaultFallbackNotice": "You filled in neither an environment nor a .env key. The secret will be stored in the project vault, in the “{collection}” collection. To inject it straight into an environment, fill in both fields.",
+      "vaultFallbackCollection": "Demandes externes",
+      "vaultFallbackConfirmBtn": "Confirm",
+      "vaultFallbackEditBtn": "Edit"
     },
     "requestCreated": {
       "title": "Request created",

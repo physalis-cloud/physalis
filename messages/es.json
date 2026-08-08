@@ -447,7 +447,8 @@
       "error": "Descifrado fallido. ¿Clave privada inválida o solicitud incorrecta?",
       "submitBtn": "Descifrar localmente",
       "importBtn": "Importar → {env} / {key}",
-      "imported": "✓ Importado en el proyecto"
+      "imported": "✓ Importado en el proyecto",
+      "importToVaultBtn": "Importar → bóveda del proyecto"
     },
     "createRequestDialog": {
       "title": "Permitir compartición externa",
@@ -468,7 +469,13 @@
       "cancelBtn": "Cancelar",
       "creatingBtn": "Creando…",
       "error": "No se puede crear.",
-      "submitBtn": "Crear solicitud"
+      "submitBtn": "Crear solicitud",
+      "targetIncomplete": "El entorno y la clave .env van juntos: rellene ambos, o ninguno.",
+      "targetRequired": "Rellene el entorno y la clave .env: no tiene permisos de escritura en la bóveda de este proyecto, por lo que el secreto no tendría destino.",
+      "vaultFallbackNotice": "No ha indicado ni entorno ni clave .env. El secreto se guardará en la bóveda del proyecto, en la colección «{collection}». Para inyectarlo directamente en un entorno, rellene ambos campos.",
+      "vaultFallbackCollection": "Demandes externes",
+      "vaultFallbackConfirmBtn": "Validar",
+      "vaultFallbackEditBtn": "Modificar"
     },
     "requestCreated": {
       "title": "Solicitud creada",

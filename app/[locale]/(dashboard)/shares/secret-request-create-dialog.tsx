@@ -35,6 +35,17 @@ export default function SecretRequestCreateDialog({
   } | null>(null);
   const [savingToVault, setSavingToVault] = useState(false);
   const [savedToVault, setSavedToVault] = useState(false);
+  // Le coffre du projet est-il une destination d'import ouverte à CET
+  // utilisateur sur CE projet ? Écrire dans un coffre d'équipe ne relève pas du
+  // même droit qu'écrire un secret d'environnement (et c'est gaté par plan
+  // côté SaaS) — on ne peut donc pas le déduire du fait qu'il voit le projet.
+  // null = pas encore su. Cf. /api/secret-requests/vault-target.
+  const [vaultTarget, setVaultTarget] = useState<{
+    available: boolean;
+    collectionName?: string;
+  } | null>(null);
+  // Étape de confirmation « pas de cible d'environnement » (Valider/Modifier).
+  const [confirmVault, setConfirmVault] = useState(false);
 
   // Charge les projets de l'org sélectionnée.
   useEffect(() => {
@@ -53,6 +64,38 @@ export default function SecretRequestCreateDialog({
       .catch(() => setProjects([]));
   }, [orgId, orgs]);
 
+  // Préflight du repli « coffre du projet » à chaque changement de projet.
+  useEffect(() => {
+    setConfirmVault(false);
+    if (!projectId) {
+      setVaultTarget(null);
+      return;
+    }
+    const slug = projects.find((p) => p.id === projectId)?.slug;
+    if (!slug) {
+      setVaultTarget(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/secret-requests/vault-target?project=${encodeURIComponent(slug)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { available?: boolean; collectionName?: string } | null) => {
+        if (cancelled) return;
+        // Réponse illisible → on traite comme « indisponible » : mieux vaut
+        // exiger une cible explicite que promettre une destination incertaine.
+        setVaultTarget({
+          available: data?.available === true,
+          collectionName: data?.collectionName,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setVaultTarget({ available: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, projects]);
+
   // Esc → fermer
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -65,6 +108,34 @@ export default function SecretRequestCreateDialog({
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+
+    // Un projet sélectionné pose la question de la destination d'import. Sans
+    // cette étape, une demande sans environnement ni clé partait en silence et
+    // n'était JAMAIS importable : le bouton d'import n'apparaissait tout
+    // simplement pas au retour du tiers, sans le moindre message.
+    if (projectId && !confirmVault) {
+      const hasEnv = environmentName.trim().length > 0;
+      const hasKey = secretKey.trim().length > 0;
+
+      // À moitié rempli : ce n'est pas une cible, et deviner l'autre moitié
+      // serait pire que demander.
+      if (hasEnv !== hasKey) {
+        setError(t("createRequestDialog.targetIncomplete"));
+        return;
+      }
+      if (!hasEnv && !hasKey) {
+        // Repli fermé (droits insuffisants sur le coffre du projet, ou plan
+        // sans coffre d'équipe) → on exige une cible explicite plutôt que de
+        // promettre une destination que le serveur refusera à l'import.
+        if (!vaultTarget?.available) {
+          setError(t("createRequestDialog.targetRequired"));
+          return;
+        }
+        setConfirmVault(true);
+        return;
+      }
+    }
+
     startTransition(async () => {
       const res = await fetch("/api/secret-requests", {
         method: "POST",
@@ -361,29 +432,75 @@ export default function SecretRequestCreateDialog({
 
               {error && <p className="error-text">{error}</p>}
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 6,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="btn btn-ghost btn-sm"
+              {confirmVault ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    marginTop: 6,
+                    padding: 12,
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                  }}
                 >
-                  {t("createRequestDialog.cancelBtn")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending || !label || !orgId}
-                  className="btn btn-primary btn-sm"
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+                    {t("createRequestDialog.vaultFallbackNotice", {
+                      collection:
+                        vaultTarget?.collectionName ??
+                        t("createRequestDialog.vaultFallbackCollection"),
+                    })}
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setConfirmVault(false)}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      {t("createRequestDialog.vaultFallbackEditBtn")}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={pending}
+                      className="btn btn-primary btn-sm"
+                    >
+                      {pending
+                        ? t("createRequestDialog.creatingBtn")
+                        : t("createRequestDialog.vaultFallbackConfirmBtn")}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 6,
+                  }}
                 >
-                  {pending ? t("createRequestDialog.creatingBtn") : t("createRequestDialog.submitBtn")}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    {t("createRequestDialog.cancelBtn")}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={pending || !label || !orgId}
+                    className="btn btn-primary btn-sm"
+                  >
+                    {pending ? t("createRequestDialog.creatingBtn") : t("createRequestDialog.submitBtn")}
+                  </button>
+                </div>
+              )}
             </form>
           )}
         </div>
