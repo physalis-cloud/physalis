@@ -3,135 +3,288 @@
     "order": 1,
     "icon": "RiRocketLine",
     "translations": {
-      "en": { "file": "01-getting-started.md",           "slug": "getting-started" },
-      "fr": { "file": "01-premiers-pas.md",              "slug": "premiers-pas" },
-      "es": { "file": "01-primeros-pasos.md",            "slug": "primeros-pasos" }
+      "en": {
+        "file": "01-getting-started.md",
+        "slug": "getting-started"
+      },
+      "fr": {
+        "file": "01-premiers-pas.md",
+        "slug": "premiers-pas"
+      },
+      "es": {
+        "file": "01-primeros-pasos.md",
+        "slug": "primeros-pasos"
+      }
     }
   },
   {
     "order": 2,
     "icon": "RiTeamLine",
     "translations": {
-      "en": { "file": "02-organisations-and-roles.md",   "slug": "organisations-and-roles" },
-      "fr": { "file": "02-organisations-et-roles.md",    "slug": "organisations-et-roles" },
-      "es": { "file": "02-organizaciones-y-roles.md",    "slug": "organizaciones-y-roles" }
+      "en": {
+        "file": "02-organisations-and-roles.md",
+        "slug": "organisations-and-roles"
+      },
+      "fr": {
+        "file": "02-organisations-et-roles.md",
+        "slug": "organisations-et-roles"
+      },
+      "es": {
+        "file": "02-organizaciones-y-roles.md",
+        "slug": "organizaciones-y-roles"
+      }
     }
   },
   {
     "order": 3,
     "icon": "RiFolderOpenLine",
     "translations": {
-      "en": { "file": "03-projects-and-environments.md", "slug": "projects-and-environments" },
-      "fr": { "file": "03-projets-et-environnements.md", "slug": "projets-et-environnements" },
-      "es": { "file": "03-proyectos-y-entornos.md",      "slug": "proyectos-y-entornos" }
+      "en": {
+        "file": "03-projects-and-environments.md",
+        "slug": "projects-and-environments"
+      },
+      "fr": {
+        "file": "03-projets-et-environnements.md",
+        "slug": "projets-et-environnements"
+      },
+      "es": {
+        "file": "03-proyectos-y-entornos.md",
+        "slug": "proyectos-y-entornos"
+      }
     }
   },
   {
     "order": 4,
     "icon": "RiKey2Line",
     "translations": {
-      "en": { "file": "04-secrets.md",                  "slug": "secrets" },
-      "fr": { "file": "04-secrets.md",                  "slug": "secrets" },
-      "es": { "file": "04-secretos.md",                 "slug": "secretos" }
+      "en": {
+        "file": "04-secrets.md",
+        "slug": "secrets"
+      },
+      "fr": {
+        "file": "04-secrets.md",
+        "slug": "secrets"
+      },
+      "es": {
+        "file": "04-secretos.md",
+        "slug": "secretos"
+      }
     }
   },
   {
     "order": 5,
     "icon": "RiSafe2Line",
     "translations": {
-      "en": { "file": "05-vaults.md",                   "slug": "vaults" },
-      "fr": { "file": "05-coffres.md",                  "slug": "coffres" },
-      "es": { "file": "05-bovedas.md",                  "slug": "bovedas" }
+      "en": {
+        "file": "05-vaults.md",
+        "slug": "vaults"
+      },
+      "fr": {
+        "file": "05-coffres.md",
+        "slug": "coffres"
+      },
+      "es": {
+        "file": "05-bovedas.md",
+        "slug": "bovedas"
+      }
     }
   },
   {
     "order": 6,
     "icon": "RiShareForward2Line",
     "translations": {
-      "en": { "file": "06-shares.md",                   "slug": "shares" },
-      "fr": { "file": "06-partages.md",                 "slug": "partages" },
-      "es": { "file": "06-comparticiones.md",           "slug": "comparticiones" }
+      "en": {
+        "file": "06-shares.md",
+        "slug": "shares"
+      },
+      "fr": {
+        "file": "06-partages.md",
+        "slug": "partages"
+      },
+      "es": {
+        "file": "06-comparticiones.md",
+        "slug": "comparticiones"
+      }
     }
   },
   {
     "order": 7,
     "icon": "RiCloudLine",
     "translations": {
-      "en": { "file": "07-oidc-deployment.md",          "slug": "oidc-deployment" },
-      "fr": { "file": "07-deploiement-oidc.md",         "slug": "deploiement-oidc" },
-      "es": { "file": "07-despliegue-oidc.md",          "slug": "despliegue-oidc" }
+      "en": {
+        "file": "07-oidc-deployment.md",
+        "slug": "oidc-deployment"
+      },
+      "fr": {
+        "file": "07-deploiement-oidc.md",
+        "slug": "deploiement-oidc"
+      },
+      "es": {
+        "file": "07-despliegue-oidc.md",
+        "slug": "despliegue-oidc"
+      }
     }
   },
   {
     "order": 8,
     "icon": "RiPuzzle2Line",
     "translations": {
-      "en": { "file": "08-browser-extension.md",        "slug": "browser-extension" },
-      "fr": { "file": "08-extension-navigateur.md",     "slug": "extension-navigateur" },
-      "es": { "file": "08-extension-navegador.md",      "slug": "extension-navegador" }
+      "en": {
+        "file": "08-browser-extension.md",
+        "slug": "browser-extension"
+      },
+      "fr": {
+        "file": "08-extension-navigateur.md",
+        "slug": "extension-navigateur"
+      },
+      "es": {
+        "file": "08-extension-navegador.md",
+        "slug": "extension-navegador"
+      }
     }
   },
   {
     "order": 9,
     "icon": "RiFlowChart",
     "translations": {
-      "en": { "file": "09-n8n-integration.md",          "slug": "n8n-integration" },
-      "fr": { "file": "09-integration-n8n.md",          "slug": "integration-n8n" },
-      "es": { "file": "09-integracion-n8n.md",          "slug": "integracion-n8n" }
+      "en": {
+        "file": "09-n8n-integration.md",
+        "slug": "n8n-integration"
+      },
+      "fr": {
+        "file": "09-integration-n8n.md",
+        "slug": "integration-n8n"
+      },
+      "es": {
+        "file": "09-integracion-n8n.md",
+        "slug": "integracion-n8n"
+      }
     }
   },
   {
     "order": 10,
     "icon": "RiRefreshLine",
     "translations": {
-      "en": { "file": "10-rotations.md",                "slug": "rotations" },
-      "fr": { "file": "10-rotations.md",                "slug": "rotations" },
-      "es": { "file": "10-rotaciones.md",               "slug": "rotaciones" }
+      "en": {
+        "file": "10-rotations.md",
+        "slug": "rotations"
+      },
+      "fr": {
+        "file": "10-rotations.md",
+        "slug": "rotations"
+      },
+      "es": {
+        "file": "10-rotaciones.md",
+        "slug": "rotaciones"
+      }
     }
   },
   {
     "order": 11,
     "icon": "RiAppsLine",
     "translations": {
-      "en": { "file": "11-api-gateway.md",              "slug": "api-gateway" },
-      "fr": { "file": "11-api-gateway.md",              "slug": "api-gateway" },
-      "es": { "file": "11-api-gateway.md",              "slug": "api-gateway" }
+      "en": {
+        "file": "11-api-gateway.md",
+        "slug": "api-gateway"
+      },
+      "fr": {
+        "file": "11-api-gateway.md",
+        "slug": "api-gateway"
+      },
+      "es": {
+        "file": "11-api-gateway.md",
+        "slug": "api-gateway"
+      }
     }
   },
   {
     "order": 12,
     "icon": "RiMailSendLine",
     "translations": {
-      "en": { "file": "12-email.md",                    "slug": "email" },
-      "fr": { "file": "12-email.md",                    "slug": "email" },
-      "es": { "file": "12-email.md",                    "slug": "email" }
+      "en": {
+        "file": "12-email.md",
+        "slug": "email"
+      },
+      "fr": {
+        "file": "12-email.md",
+        "slug": "email"
+      },
+      "es": {
+        "file": "12-email.md",
+        "slug": "email"
+      }
     }
   },
   {
     "order": 13,
     "icon": "RiUploadCloud2Line",
     "translations": {
-      "en": { "file": "13-outbound-sync.md",            "slug": "outbound-sync" },
-      "fr": { "file": "13-synchronisation-sortante.md", "slug": "synchronisation-sortante" },
-      "es": { "file": "13-sincronizacion-saliente.md",  "slug": "sincronizacion-saliente" }
+      "en": {
+        "file": "13-outbound-sync.md",
+        "slug": "outbound-sync"
+      },
+      "fr": {
+        "file": "13-synchronisation-sortante.md",
+        "slug": "synchronisation-sortante"
+      },
+      "es": {
+        "file": "13-sincronizacion-saliente.md",
+        "slug": "sincronizacion-saliente"
+      }
     }
   },
   {
     "order": 14,
     "icon": "RiDatabase2Line",
     "translations": {
-      "en": { "file": "14-backups.md",                  "slug": "backups" },
-      "fr": { "file": "14-sauvegardes.md",              "slug": "sauvegardes" },
-      "es": { "file": "14-copias-de-seguridad.md",      "slug": "copias-de-seguridad" }
-    }
-    },
-    {
-      "order": 15,
-      "icon": "RiShieldKeyholeLine",
-      "translations": {
-        "en": { "file": "15-sso.md",                      "slug": "sso" },
-        "fr": { "file": "15-sso.md",                      "slug": "sso" },
-        "es": { "file": "15-sso.md",                      "slug": "sso" }
+      "en": {
+        "file": "14-backups.md",
+        "slug": "backups"
+      },
+      "fr": {
+        "file": "14-sauvegardes.md",
+        "slug": "sauvegardes"
+      },
+      "es": {
+        "file": "14-copias-de-seguridad.md",
+        "slug": "copias-de-seguridad"
       }
+    }
+  },
+  {
+    "order": 15,
+    "icon": "RiShieldKeyholeLine",
+    "translations": {
+      "en": {
+        "file": "15-sso.md",
+        "slug": "sso"
+      },
+      "fr": {
+        "file": "15-sso.md",
+        "slug": "sso"
+      },
+      "es": {
+        "file": "15-sso.md",
+        "slug": "sso"
+      }
+    }
+  },
+  {
+    "order": 16,
+    "icon": "RiSmartphoneLine",
+    "translations": {
+      "fr": {
+        "file": "16-deploiement-mobile.md",
+        "slug": "deploiement-mobile"
+      },
+      "en": {
+        "file": "16-mobile-deployment.md",
+        "slug": "mobile-deployment"
+      },
+      "es": {
+        "file": "16-despliegue-movil.md",
+        "slug": "despliegue-movil"
+      }
+    }
   }
 ]

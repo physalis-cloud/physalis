@@ -74,5 +74,43 @@
         "slug": "configurar-servicio-email"
       }
     }
+  },
+  {
+    "order": 5,
+    "icon": "RiAndroidLine",
+    "published": true,
+    "translations": {
+      "fr": {
+        "file": "05-publier-android.md",
+        "slug": "publier-android"
+      },
+      "en": {
+        "file": "05-publish-android.md",
+        "slug": "publish-android"
+      },
+      "es": {
+        "file": "05-publicar-android.md",
+        "slug": "publicar-android"
+      }
+    }
+  },
+  {
+    "order": 6,
+    "icon": "RiAppleLine",
+    "published": true,
+    "translations": {
+      "fr": {
+        "file": "06-publier-ios.md",
+        "slug": "publier-ios"
+      },
+      "en": {
+        "file": "06-publish-ios.md",
+        "slug": "publish-ios"
+      },
+      "es": {
+        "file": "06-publicar-ios.md",
+        "slug": "publicar-ios"
+      }
+    }
   }
 ]
