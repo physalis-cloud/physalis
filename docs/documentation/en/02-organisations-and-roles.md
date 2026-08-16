@@ -36,6 +36,25 @@ Physalis uses a 4-level hierarchy: `MEMBER` < `DEV` < `ADMIN` < `OWNER`.
 > organisation: they can see everything, create/edit secrets and environments,
 > but cannot delete a project or invite ProjectMembers.
 
+### Restricting a DEV to specific projects
+
+That default access is adjustable project by project. Unchecking a project for
+a DEV **really denies it**: the project disappears from their list, access is
+refused, and their machine tokens on that project are revoked.
+
+Three places to do it, depending on when:
+
+- **At invitation time** — the "Access rights" button next to the role, in the
+  invite form. The new member arrives already scoped.
+- **When creating a project** — the "Member access rights" section of the
+  creation form. This is the one moment where forgetting is impossible: a new
+  project is otherwise visible to every DEV in the org right away.
+- **Later on** — `/orgs/<slug>` → "Members" tab → "Access rights" next to the
+  member, or the project's own "Members" tab.
+
+The checkboxes always reflect the member's **actual** access: a DEV opens with
+everything checked, because that is what they have.
+
 ### When to use which role?
 
 - **MEMBER** → a non-technical employee who only needs access to a specific

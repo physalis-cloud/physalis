@@ -56,6 +56,7 @@ export async function PATCH(req: Request, { params }: Params) {
         slug?: string;
         githubRepo?: string | null;
         githubWorkflow?: string | null;
+        mobileEnabled?: boolean;
       }
     | null;
   if (!body || typeof body !== "object") {
@@ -67,6 +68,7 @@ export async function PATCH(req: Request, { params }: Params) {
     slug?: string;
     githubRepo?: string | null;
     githubWorkflow?: string | null;
+    mobileEnabled?: boolean;
   } = {};
   const changed: string[] = [];
   let oldSlug: string | undefined;
@@ -128,6 +130,17 @@ export async function PATCH(req: Request, { params }: Params) {
     } else if (typeof body.githubWorkflow === "string") {
       data.githubWorkflow = body.githubWorkflow.trim();
       changed.push("githubWorkflow");
+    }
+  }
+
+  // Interrupteur « Mobile » du projet (defaut OFF, cf. Project.mobileEnabled).
+  // Un seul des deux verrous du SaaS survit ici : la feature de plan
+  // `mobile_deploy` n'a pas de sens en mono-tenant (pas de plans), le verrou
+  // PROJET reste. Les routes /mobile/* le verifient serveur via lib/mobile-guard.
+  if (typeof body.mobileEnabled === "boolean") {
+    if (body.mobileEnabled !== access.project.mobileEnabled) {
+      data.mobileEnabled = body.mobileEnabled;
+      changed.push("mobileEnabled");
     }
   }
 

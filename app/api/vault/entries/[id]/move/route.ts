@@ -19,6 +19,7 @@
 import { NextResponse } from "next/server";
 import type { Role, VaultRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { readJson, requireUser } from "@/lib/api";
 import { logAction } from "@/lib/audit";
@@ -270,7 +271,8 @@ export async function POST(req: Request, { params }: Params) {
     }
     const payload = encrypt(JSON.stringify({ user: source.username ?? "", password: plaintextPwd }));
 
-    const created = await prisma.$transaction(async (tx) => {
+    // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+    const created = await withTenantSchema(userRes.tenantSlug, async (tx) => {
       const acc = await tx.appAccount.create({
         data: {
           projectId: project.id,
@@ -347,7 +349,8 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   // Transaction : create TeamVaultEntry → delete source.
-  const created = await prisma.$transaction(async (tx) => {
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  const created = await withTenantSchema(userRes.tenantSlug, async (tx) => {
     const newEntry = await tx.teamVaultEntry.create({
       data: {
         collectionId: target.collectionId,

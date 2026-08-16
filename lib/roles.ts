@@ -30,7 +30,7 @@ export function hasDevPrivileges(role: OrgRole | null | undefined): boolean {
 /** Rôles d'org disposant des droits DEV+ (accès implicite aux projets de l'org).
  *  Source UNIQUE pour les filtres Prisma `role: { in: [...] }` — évite de
  *  re-dériver la liste à la main et d'oublier `ADMIN_DEV` (motif de bug
- *  récurrent, cf. docs/failles.md §4 : `hasDevPrivileges` inclut ADMIN_DEV). */
+ *  récurrent, cf. documentation/rapports/failles.md §4 : `hasDevPrivileges` inclut ADMIN_DEV). */
 export const ORG_DEV_PLUS_ROLES: OrgRole[] = [
   "OWNER",
   "ADMIN",

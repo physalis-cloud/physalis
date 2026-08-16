@@ -2,7 +2,7 @@
 //
 // Strict scoping : un user ne voit JAMAIS les collections d'un autre.
 // Pas de partage (mirror simplifié de TeamVaultCollection sans members).
-// Cf. docs/coffre-personnel-v2.md §Collections.
+// Cf. documentation/plans/done/coffre-personnel-v2.md §Collections.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";

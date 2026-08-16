@@ -290,6 +290,7 @@ export async function triggerProjectRedeploy(
   if (environment && tenantSlug) {
     const policy = await adminPrisma.oidcPolicy.findFirst({
       where: {
+        kind: "server",
         tenantSlug,
         projectId,
         environmentId: environment.id,

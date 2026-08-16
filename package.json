@@ -1,6 +1,6 @@
 {
   "name": "physalis",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20,7 +20,7 @@
     "bcryptjs": "^3.0.3",
     "form-data": "^4.0.5",
     "jose": "^6.2.3",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "mailgun.js": "^13.0.0",
     "marked": "^18.0.3",
     "next": "^15.5.15",
@@ -32,7 +32,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sanitize-html": "^2.17.0"
+    "sanitize-html": "^2.17.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
@@ -46,7 +46,7 @@
     "autoprefixer": "^10.5.0",
     "eslint": "^9",
     "eslint-config-next": "^15.5.15",
-    "postcss": "^8.5.13",
+    "postcss": "^8.5.23",
     "tailwindcss": "^3.4.19",
     "typescript": "^5",
     "vitest": "^3.2.4"
@@ -54,6 +54,7 @@
   "overrides": {
     "axios": "^1.18.1",
     "sharp": "^0.35.0",
-    "postcss": "^8.5.13"
+    "postcss": "^8.5.23",
+    "nanoid": "^3.3.18"
   }
 }

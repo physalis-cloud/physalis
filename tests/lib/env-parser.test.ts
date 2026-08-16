@@ -4,15 +4,17 @@ import { parseEnv } from "@/lib/env-parser";
 describe("env-parser", () => {
   it("parse une cle=valeur simple", () => {
     const r = parseEnv("FOO=bar");
-    expect(r.entries).toEqual([{ key: "FOO", value: "bar" }]);
+    expect(r.entries).toEqual([
+      { key: "FOO", value: "bar", section: undefined },
+    ]);
     expect(r.errors).toEqual([]);
   });
 
-  it("ignore les lignes vides et les commentaires", () => {
+  it("n'importe pas les lignes vides ni les commentaires", () => {
     const r = parseEnv("\n# commentaire\nFOO=bar\n\n# autre\nBAZ=qux\n");
-    expect(r.entries).toEqual([
-      { key: "FOO", value: "bar" },
-      { key: "BAZ", value: "qux" },
+    expect(r.entries.map((e) => [e.key, e.value])).toEqual([
+      ["FOO", "bar"],
+      ["BAZ", "qux"],
     ]);
     expect(r.errors).toEqual([]);
   });
@@ -100,7 +102,9 @@ describe("env-parser", () => {
 
   it("signale les doublons et retient la derniere occurrence", () => {
     const r = parseEnv("FOO=first\nFOO=second");
-    expect(r.entries).toEqual([{ key: "FOO", value: "second" }]);
+    expect(r.entries).toEqual([
+      { key: "FOO", value: "second", section: undefined },
+    ]);
     expect(r.errors).toHaveLength(1);
     expect(r.errors[0]?.reason).toMatch(/deja vue/);
   });
@@ -113,5 +117,64 @@ describe("env-parser", () => {
   it("trim les espaces avant la valeur non-quotee", () => {
     const r = parseEnv("FOO=   bar");
     expect(r.entries[0]?.value).toBe("bar");
+  });
+
+  describe("sections (commentaires pleine ligne)", () => {
+    it("rattache chaque entree au dernier commentaire vu", () => {
+      // Format exact produit par l'export .env de l'app.
+      const r = parseEnv(
+        [
+          "# application",
+          "REPO_NAME=physalis-cloud/physalis-vitrine",
+          "",
+          "# ports",
+          "API_PORT=58103",
+          "FRONTEND_PORT=58102",
+          "",
+        ].join("\n"),
+      );
+      expect(r.entries.map((e) => [e.key, e.section])).toEqual([
+        ["REPO_NAME", "application"],
+        ["API_PORT", "ports"],
+        ["FRONTEND_PORT", "ports"],
+      ]);
+    });
+
+    it("une ligne vide referme le bloc de la section", () => {
+      // Sans cette regle, un `# Database` en tete de fichier rangerait
+      // tout ce qui suit, y compris des paragraphes sans rapport.
+      const r = parseEnv("# infra\nA=1\n\nB=2");
+      expect(r.entries.map((e) => e.section)).toEqual(["infra", undefined]);
+    });
+
+    it("mais une ligne vide juste apres l'en-tete ne referme rien", () => {
+      const r = parseEnv("# infra\n\nA=1\nB=2");
+      expect(r.entries.map((e) => e.section)).toEqual(["infra", "infra"]);
+    });
+
+    it("laisse la section vide avant tout commentaire", () => {
+      const r = parseEnv("FOO=bar\n# infra\nBAZ=qux");
+      expect(r.entries[0]?.section).toBeUndefined();
+      expect(r.entries[1]?.section).toBe("infra");
+    });
+
+    it("ignore les lignes purement decoratives", () => {
+      const r = parseEnv(
+        ["# -----------------", "# Database", "# =================", "DB=1"].join(
+          "\n",
+        ),
+      );
+      expect(r.entries[0]?.section).toBe("Database");
+    });
+
+    it("ne prend pas un commentaire inline pour une section", () => {
+      const r = parseEnv("# infra\nFOO=bar # une note sur foo\nBAZ=qux");
+      expect(r.entries.map((e) => e.section)).toEqual(["infra", "infra"]);
+    });
+
+    it("strip les # multiples et les espaces de bord", () => {
+      const r = parseEnv("### Infra ###\nFOO=bar");
+      expect(r.entries[0]?.section).toBe("Infra ###");
+    });
   });
 });

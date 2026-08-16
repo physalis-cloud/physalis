@@ -10,7 +10,7 @@ export const ADMIN_PASSWORD =
 /** Slug du tenant utilisé pour les tests d'intégration. Pré-requis :
  *  un client de ce slug doit exister dans `admin.clients`, et l'admin
  *  user (admin@artpotentiel.fr / ADMIN_PASSWORD) doit exister dans
- *  `client_<slug>.User`. Cf. docs/plan-tests.md pour le setup. */
+ *  `client_<slug>.User`. Cf. documentation/plans/done/plan-tests.md pour le setup. */
 export const TENANT_SLUG = process.env.TEST_TENANT_SLUG ?? "test";
 
 /** Nom du schéma Postgres tenant pour les INSERTs SQL directs. */

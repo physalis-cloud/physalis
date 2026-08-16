@@ -63,6 +63,104 @@ extraída al importar (los demás son contraseñas o identificadores). Para un
 `.p12`/keystore protegido, indica la **frase de contraseña** al importar: sirve
 para leer la fecha, no se conserva.
 
+## Generar en lugar de importar
+
+No estás obligado a fabricar este material tú mismo. En la ficha de la
+aplicación, **Generar el material de firma** lo produce dentro de la caja
+fuerte: la clave privada nace donde se va a guardar, así que nunca tiene que
+viajar. Disponible en todos los planes de pago, como el resto del despliegue
+móvil.
+
+**Android** — Physalis fabrica la clave de subida (par RSA + certificado, ~27
+años), su contraseña y su alias: **cuatro de las cinco credenciales**. Solo te
+queda la cuenta de servicio de Google Play. Esta generación no requiere ninguna
+cuenta.
+
+> ⚠️ Se trata de la **clave de subida**, la que Google puede reiniciar si
+> pierdes la tuya — no de la clave de firma de la app que guarda Play App
+> Signing.
+
+**iOS** — a partir únicamente de tu **clave de API de App Store Connect**
+(`.p8`, con su Key ID y su Issuer ID), Physalis encadena el par de claves, la
+CSR, el certificado de distribución, el `.p12` y el perfil de aprovisionamiento:
+**tres credenciales de seis**, siendo las otras tres precisamente la clave de
+API que sirve de entrada.
+
+> **Ningún Mac necesario.** Un Mac sirve para *compilar*, no para generar: una
+> CSR y un `.p12` son criptografía, no Xcode. Esto es lo que de verdad sustituye
+> a `fastlane match` — y el rodeo por el Llavero de macOS.
+
+Dos límites del lado de Apple: el **App ID debe estar ya registrado** en tu
+cuenta de desarrollador, y Apple limita los certificados de distribución (2 o 3
+por cuenta). Regenerar consume uno y **los perfiles ligados al certificado
+anterior dejan de firmar** — el material antiguo sigue consultable en el
+historial de la aplicación.
+
+## Verificar el material
+
+**Verificar el material** responde a «¿esto va a funcionar?» antes de gastar
+diez minutos de CI. La comprobación tiene dos tiempos: la coherencia de lo
+depositado y luego una **consulta real a las tiendas**.
+
+| Grupo | Qué se comprueba |
+|---|---|
+| Integridad | ¿están todas las credenciales necesarias? |
+| Keystore | legible con la contraseña dada, alias declarado realmente presente, contraseña de clave coherente |
+| Certificado / Perfil | legibles, no caducados, vencimiento conocido |
+| Google Play | la cuenta de servicio existe, está invitada a la consola y puede publicar **esta** aplicación |
+| App Store Connect | la clave se acepta y **ve** este bundle id |
+
+Esas dos últimas filas son las que ahorran tiempo: distinguen «clave inválida»
+de «clave válida pero no invitada a la consola», y «aplicación desconocida para
+Apple» de «rol demasiado estrecho». Un `permission denied` al fondo del log de
+un pipeline no hace ninguna de esas distinciones.
+
+## Vigilar la caducidad
+
+Un certificado de distribución de Apple dura un año, un perfil de
+aprovisionamiento también — y **ni Google, ni Apple, ni tu forja envían un aviso
+utilizable** al respecto. Caducan un viernes de release.
+
+Physalis lee el vencimiento al importar (o al generar) y avisa por correo a los
+**propietarios de la organización** a **D-60, D-30, D-7** y luego al caducar.
+Tres avisos y no uno solo porque el remedio no es el mismo: a 60 días se
+planifica, a 30 se actúa, a 7 ya se va tarde. La pestaña Móvil muestra en
+paralelo un aviso en la aplicación afectada.
+
+El recordatorio se envía **una sola vez por umbral**: la comprobación se ejecuta
+a diario sin inundar los buzones, y un vencimiento aplazado (material renovado)
+rearma el mecanismo limpiamente. Un proyecto con la pestaña Móvil desactivada no
+genera ningún aviso — has dicho que ya no publicas desde ahí.
+
+## El registro de entregas
+
+La pestaña **Entregas** de una aplicación responde a «qué versión está en
+revisión, cuál está publicada, quién la subió y con qué material» — una pregunta
+cuya respuesta suele vivir en tres consolas y un hilo de chat.
+
+Una fila se escribe en dos momentos, y la distinción es el núcleo del diseño:
+
+- **lo que Physalis constata** — al entregar el material: número de build
+  consumido, huellas del material servido, identidad OIDC del pipeline. Esa
+  mitad no puede mentir;
+- **lo que el pipeline informa** — pista y estado, mediante
+  `POST /api/deploy/mobile/report`, con el mismo token OIDC y la misma policy
+  que el bundle. Declarativo por naturaleza.
+
+Los estados van de `material servido` a `publicado`, pasando por `subido`, `en
+proceso`, `en revisión`, `suspendido`, `rechazado` y `fallido`. Una fila que se
+queda en `material servido` no es un fallo: dice que alguien obtuvo material de
+firma y no publicó nada — justo lo que un registro debe mostrar.
+
+> **Physalis no guarda el artefacto.** Una entrega es un **parte fechado**, no
+> una prueba de que exista un binario ni de que una tienda lo haya aceptado. El
+> registro señala además las entregas firmadas con material **ya sustituido**:
+> ese build no se reproducirá igual.
+
+Las plantillas de workflow incluidas llaman a `/report` al final de la
+ejecución, incluso cuando esta falla — un fallo posterior a la entrega del
+material es precisamente lo que quieres ver.
+
 ## El número de versión
 
 Apple y Google rechazan un número de build que no crece. Physalis lo lleva por

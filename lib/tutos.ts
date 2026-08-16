@@ -95,10 +95,16 @@ function stripRules(s: string): string {
   return s.replace(/^\s*---\s*$/gm, "").trim();
 }
 
-/** Réécrit les liens : `tuto:slug` → /locale/tutos/slug ; slug nu → /locale/docs/slug. */
+/** Réécrit les liens : `tuto:slug` → /locale/tutos/slug ; slug nu → /locale/docs/slug.
+ *  Les liens externes partent dans un nouvel onglet : un tuto est une procédure
+ *  qu'on suit écran par écran, et ouvrir la console Google ou Apple dans
+ *  l'onglet courant fait perdre sa place — donc l'étape en cours. */
 function rewriteLinks(html: string, locale: string): string {
   return html.replace(/href="([^"]+)"/g, (full, href: string) => {
-    if (/^(https?:|mailto:|#|\/)/.test(href)) return full;
+    // `rel` autant que `target` : sans lui, la page ouverte accède à
+    // `window.opener` et peut réécrire l'onglet d'origine.
+    if (/^https?:/.test(href)) return `${full} target="_blank" rel="noopener noreferrer"`;
+    if (/^(mailto:|#|\/)/.test(href)) return full;
     if (href.startsWith("tuto:")) return `href="/${locale}/tutos/${href.slice(5)}"`;
     return `href="/${locale}/docs/${href}"`;
   });

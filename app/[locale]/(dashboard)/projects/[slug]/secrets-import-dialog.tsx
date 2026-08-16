@@ -16,6 +16,14 @@ import {
 
 type ConflictPolicy = "skip" | "overwrite";
 
+/** Répartition renvoyée par l'API : combien de clés chaque en-tête de
+ *  section a rangées, et combien retombent sur la catégorie par défaut.
+ *  La clé `_none` = rangées explicitement « sans catégorie ». */
+type CategoryBreakdown = {
+  byCategory: Record<string, number>;
+  fallback: number;
+};
+
 type DryRunResponse = {
   dryRun: true;
   summary: {
@@ -26,6 +34,7 @@ type DryRunResponse = {
     invalid: number;
     parseErrors: number;
   };
+  categories: CategoryBreakdown;
   keys: {
     toCreate: string[];
     toUpdate: string[];
@@ -41,11 +50,13 @@ type ExecuteResponse = {
     parsed: number;
     created: number;
     updated: number;
+    recategorized: number;
     skipped: number;
     invalid: number;
     parseErrors: number;
     failed: number;
   };
+  categories: CategoryBreakdown;
   keys: {
     created: string[];
     updated: string[];
@@ -272,9 +283,10 @@ export default function SecretsImportDialog({
               <select
                 id="defaultCategory"
                 value={defaultCategory}
-                onChange={(e) =>
-                  setDefaultCategory(e.target.value as SecretCategory | "")
-                }
+                onChange={(e) => {
+                  setDefaultCategory(e.target.value as SecretCategory | "");
+                  setPreview(null);
+                }}
                 className="select"
               >
                 <option value="">{UNCATEGORIZED_LABEL}</option>
@@ -284,6 +296,7 @@ export default function SecretsImportDialog({
                   </option>
                 ))}
               </select>
+              <div className="help">{t("categoryHelp")}</div>
             </div>
           </div>
 
@@ -356,27 +369,31 @@ function PreviewSummary({ preview }: { preview: DryRunResponse }) {
       }}
     >
       <div style={{ fontWeight: 600, fontSize: 13 }}>{t("previewTitle")}</div>
+      {/* Les pictos (✓ ↻ ⊘ ⚠) font partie des chaînes i18n — ne pas les
+          redoubler ici, comme dans ResultSummary plus bas. */}
       <div className="row-meta">
         <span>{t("entries", { count: summary.parsed })}</span>
         <span style={{ color: "var(--success)" }}>
-          ✓ {t("newCount", { count: summary.toCreate })}
+          {t("newCount", { count: summary.toCreate })}
         </span>
         {summary.toUpdate > 0 && (
           <span style={{ color: "var(--accent-text)" }}>
-            ↻ {t("updateCount", { count: summary.toUpdate })}
+            {t("updateCount", { count: summary.toUpdate })}
           </span>
         )}
         {summary.toSkip > 0 && (
           <span style={{ color: "var(--muted)" }}>
-            ⊘ {t("skipCount", { count: summary.toSkip })}
+            {t("skipCount", { count: summary.toSkip })}
           </span>
         )}
         {summary.invalid > 0 && (
           <span style={{ color: "var(--danger)" }}>
-            ⚠ {t("invalidCount", { count: summary.invalid })}
+            {t("invalidCount", { count: summary.invalid })}
           </span>
         )}
       </div>
+
+      <CategoryBreakdownRow breakdown={preview.categories} />
 
       <KeyList label={t("keyListNew")} keys={keys.toCreate} />
       <KeyList
@@ -420,6 +437,43 @@ function PreviewSummary({ preview }: { preview: DryRunResponse }) {
   );
 }
 
+/** Ce que les commentaires du fichier ont rangé, et ce qui retombe sur
+ *  la catégorie par défaut. Affiché AVANT l'import : c'est la seule
+ *  occasion de voir le rangement avant qu'il soit écrit. */
+function CategoryBreakdownRow({ breakdown }: { breakdown?: CategoryBreakdown }) {
+  const t = useTranslations("projects.secrets.import");
+  if (!breakdown) return null;
+  const detected = Object.entries(breakdown.byCategory).filter(
+    ([, n]) => n > 0,
+  );
+  if (detected.length === 0 && breakdown.fallback === 0) return null;
+  return (
+    <div>
+      <div className="help" style={{ fontWeight: 600, marginBottom: 4 }}>
+        {t("detectedCategories")}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {detected.length === 0 && (
+          <span className="chip">{t("noCategoryDetected")}</span>
+        )}
+        {detected.map(([cat, n]) => (
+          <span key={cat} className="chip">
+            {cat === "_none"
+              ? UNCATEGORIZED_LABEL
+              : (SECRET_CATEGORY_LABELS[cat as SecretCategory] ?? cat)}{" "}
+            · {n}
+          </span>
+        ))}
+        {breakdown.fallback > 0 && (
+          <span className="chip" style={{ opacity: 0.75 }}>
+            {t("fallbackCount", { count: breakdown.fallback })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ResultSummary({ result }: { result: ExecuteResponse }) {
   const t = useTranslations("projects.secrets.import");
   const { summary, keys } = result;
@@ -432,6 +486,11 @@ function ResultSummary({ result }: { result: ExecuteResponse }) {
         {summary.updated > 0 && (
           <span style={{ color: "var(--accent-text)" }}>
             {t("resultUpdated", { count: summary.updated })}
+          </span>
+        )}
+        {summary.recategorized > 0 && (
+          <span style={{ color: "var(--accent-text)" }}>
+            {t("resultRecategorized", { count: summary.recategorized })}
           </span>
         )}
         {summary.skipped > 0 && (
@@ -450,6 +509,7 @@ function ResultSummary({ result }: { result: ExecuteResponse }) {
           </span>
         )}
       </div>
+      <CategoryBreakdownRow breakdown={result.categories} />
       <KeyList label={t("keyListCreated")} keys={keys.created} />
       <KeyList label={t("keyListUpdated")} keys={keys.updated} color="var(--accent-text)" />
       {keys.failed.length > 0 && (

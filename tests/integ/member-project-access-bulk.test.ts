@@ -21,26 +21,49 @@ const STAMP = Date.now();
 const ORG_SLUG = `mpaorg${STAMP}`;
 const PROJ_A = `mpaA${STAMP}`;
 const PROJ_B = `mpaB${STAMP}`;
+const PROJ_C = `mpac${STAMP}`;
 const HDR = { "content-type": "application/json", "x-forwarded-host": TENANT_HOST };
 
 let admin: Session;
 let orgId: string;
 let adminUserId: string;
 let memberUserId: string;
+let devUserId: string;
 let projAId: string;
 let projBId: string;
+let envId: string;
 let tokenId: string;
+let devTokenId: string;
 
 const q = (sql: string) => execSqlValue(sql);
 
-async function memberRow(projectId: string) {
+async function rowFor(userId: string, projectId: string) {
   const role = await q(
-    `SELECT role FROM "${TENANT_SCHEMA}"."ProjectMember" WHERE "userId"='${memberUserId}' AND "projectId"='${projectId}'`,
+    `SELECT role FROM "${TENANT_SCHEMA}"."ProjectMember" WHERE "userId"='${userId}' AND "projectId"='${projectId}'`,
   );
   const hidden = await q(
-    `SELECT hidden FROM "${TENANT_SCHEMA}"."ProjectMember" WHERE "userId"='${memberUserId}' AND "projectId"='${projectId}'`,
+    `SELECT hidden FROM "${TENANT_SCHEMA}"."ProjectMember" WHERE "userId"='${userId}' AND "projectId"='${projectId}'`,
   );
   return role ? { role, hidden } : null;
+}
+
+const memberRow = (projectId: string) => rowFor(memberUserId, projectId);
+
+/** État vu par la modale : accès EFFECTIF calculé serveur (§4). */
+async function accessState(userId: string) {
+  const res = await admin.fetch(
+    `/api/orgs/${ORG_SLUG}/members/${userId}/project-access`,
+    { headers: { "x-forwarded-host": TENANT_HOST } },
+  );
+  const data = (await res.json()) as {
+    projects: {
+      id: string;
+      hidden: boolean;
+      hasAccess: boolean;
+      effectiveRole: string | null;
+    }[];
+  };
+  return new Map(data.projects.map((p) => [p.id, p]));
 }
 
 function put(userId: string, projectAccess: { projectId: string; role: string }[]) {
@@ -68,14 +91,23 @@ beforeAll(async () => {
   await execSql(
     `INSERT INTO "${TENANT_SCHEMA}"."Project" (id, name, slug, "organizationId", "createdAt") VALUES ('${projAId}', 'A', '${PROJ_A}', '${orgId}', NOW()), ('${projBId}', 'B', '${PROJ_B}', '${orgId}', NOW())`,
   );
+  // Un DEV : il a l'EDITOR implicite sur A et B sans aucune ligne (règle 4).
+  devUserId = cuid();
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."User" (id, email) VALUES ('${devUserId}', 'mpadev-${STAMP}@test.local')`,
+  );
+  await execSql(
+    `INSERT INTO "${TENANT_SCHEMA}"."OrgMember" (id, "userId", "organizationId", role, "createdAt") VALUES ('${cuid()}', '${devUserId}', '${orgId}', 'DEV', NOW())`,
+  );
   // Environnement + MachineToken du MEMBRE sur le projet A (cascade §2.15).
-  const envId = cuid();
+  envId = cuid();
   await execSql(
     `INSERT INTO "${TENANT_SCHEMA}"."Environment" (id, name, "projectId") VALUES ('${envId}', 'prod', '${projAId}')`,
   );
   tokenId = cuid();
+  devTokenId = cuid();
   await execSql(
-    `INSERT INTO "${TENANT_SCHEMA}"."MachineToken" (id, name, "tokenHash", "projectId", "environmentId", "createdById", "createdAt") VALUES ('${tokenId}', 'tok', 'hash-${STAMP}', '${projAId}', '${envId}', '${memberUserId}', NOW())`,
+    `INSERT INTO "${TENANT_SCHEMA}"."MachineToken" (id, name, "tokenHash", "projectId", "environmentId", "createdById", "createdAt") VALUES ('${tokenId}', 'tok', 'hash-${STAMP}', '${projAId}', '${envId}', '${memberUserId}', NOW()), ('${devTokenId}', 'devtok', 'devhash-${STAMP}', '${projAId}', '${envId}', '${devUserId}', NOW())`,
   );
   admin = await adminSession();
 });
@@ -149,5 +181,119 @@ describe("#2-B — pose en bloc des accès projet d'un membre", () => {
   it("cible OWNER d'org → 400 (OWNER implicite, accès par projet sans objet)", async () => {
     const res = await put(adminUserId, [{ projectId: projAId, role: "VIEWER" }]);
     expect(res.status).toBe(400);
+  });
+});
+
+// Cible DEV — le cas qui manquait. Un DEV a l'EDITOR implicite PARTOUT (règle 4) :
+// lui « retirer » un projet en omettant sa ligne ne fait rien du tout. Seul
+// `NONE` (→ barrière `hidden`) le coupe réellement.
+describe("#2-B bis — « aucun accès » sur un DEV pose une barrière", () => {
+  it("A=NONE → ligne masquée ; B=EDITOR → AUCUNE ligne (l'implicite suffit)", async () => {
+    const res = await put(devUserId, [
+      { projectId: projAId, role: "NONE" },
+      { projectId: projBId, role: "EDITOR" },
+    ]);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ granted: 0, revoked: 1 });
+    expect(await rowFor(devUserId, projAId)).toEqual({
+      role: "VIEWER",
+      hidden: "t",
+    });
+    // Figer une ligne EDITOR explicite ici la lui laisserait après une
+    // rétrogradation en MEMBER, qui doit au contraire tout lui retirer.
+    expect(await rowFor(devUserId, projBId)).toBeNull();
+  });
+
+  it("le DEV masqué perd l'accès effectif sur A, le garde sur B", async () => {
+    const state = await accessState(devUserId);
+    expect(state.get(projAId)).toMatchObject({
+      hidden: true,
+      hasAccess: false,
+      effectiveRole: null,
+    });
+    expect(state.get(projBId)).toMatchObject({
+      hasAccess: true,
+      effectiveRole: "EDITOR",
+    });
+  });
+
+  it("ses MachineTokens sur le projet masqué sont révoqués (§2.15)", async () => {
+    // Sans ça, le DEV ne voit plus le projet mais son Bearer continue de lire.
+    const revoked = await q(
+      `SELECT "revokedAt" FROM "${TENANT_SCHEMA}"."MachineToken" WHERE id='${devTokenId}'`,
+    );
+    expect(revoked).not.toBe("");
+  });
+
+  it("re-PUT A=EDITOR : la barrière est levée sans laisser de ligne", async () => {
+    const res = await put(devUserId, [
+      { projectId: projAId, role: "EDITOR" },
+      { projectId: projBId, role: "EDITOR" },
+    ]);
+    expect(res.status).toBe(200);
+    expect(await rowFor(devUserId, projAId)).toBeNull();
+    const state = await accessState(devUserId);
+    expect(state.get(projAId)).toMatchObject({
+      hasAccess: true,
+      effectiveRole: "EDITOR",
+    });
+  });
+});
+
+// Lot 3 — les droits se posent DANS la création, pas après : un projet neuf ne
+// doit jamais exister, même une seconde, ouvert à un dev qu'on voulait exclure.
+describe("création de projet — accès des membres posé d'entrée", () => {
+  it("POST /api/projects avec memberAccess : DEV bloqué, MEMBER autorisé", async () => {
+    const res = await admin.fetch("/api/projects", {
+      method: "POST",
+      headers: HDR,
+      body: JSON.stringify({
+        name: `C ${STAMP}`,
+        slug: PROJ_C,
+        organization: ORG_SLUG,
+        memberAccess: [
+          { userId: devUserId, role: "NONE" },
+          { userId: memberUserId, role: "VIEWER" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { project } = (await res.json()) as { project: { id: string } };
+
+    expect(await rowFor(devUserId, project.id)).toEqual({
+      role: "VIEWER",
+      hidden: "t",
+    });
+    expect(await rowFor(memberUserId, project.id)).toEqual({
+      role: "VIEWER",
+      hidden: "f",
+    });
+    // Le créateur reste OWNER du projet.
+    expect(await rowFor(adminUserId, project.id)).toEqual({
+      role: "OWNER",
+      hidden: "f",
+    });
+
+    const state = await accessState(devUserId);
+    expect(state.get(project.id)).toMatchObject({ hasAccess: false });
+  });
+
+  it("un userId étranger à l'org est ignoré, la création aboutit", async () => {
+    const res = await admin.fetch("/api/projects", {
+      method: "POST",
+      headers: HDR,
+      body: JSON.stringify({
+        name: `D ${STAMP}`,
+        slug: `mpad${STAMP}`,
+        organization: ORG_SLUG,
+        memberAccess: [{ userId: cuid(), role: "OWNER" }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { project } = (await res.json()) as { project: { id: string } };
+    const rows = await q(
+      `SELECT count(*) FROM "${TENANT_SCHEMA}"."ProjectMember" WHERE "projectId"='${project.id}'`,
+    );
+    expect(rows).toBe("1"); // le créateur, et lui seul
   });
 });

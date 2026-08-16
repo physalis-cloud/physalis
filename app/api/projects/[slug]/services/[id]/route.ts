@@ -135,7 +135,7 @@ export async function PATCH(req: Request, { params }: Params) {
     data.rotationExecMode = body.rotationExecMode === "DIRECT" ? "DIRECT" : body.rotationExecMode === "AGENT" ? "AGENT" : null;
   }
   // Passage explicite en DIRECT avec une URL de hook → refus des cibles internes
-  // (garde SSRF, cf. docs/failles.md §6). L'enforcement autoritaire reste
+  // (garde SSRF, cf. documentation/rapports/failles.md §6). L'enforcement autoritaire reste
   // `safeFetchHook` à l'appel ; ceci est un retour clair à la configuration.
   if (data.rotationExecMode === "DIRECT" && typeof data.rotationWebhookUrl === "string") {
     const urlError = validateHookUrlSyntax(data.rotationWebhookUrl);

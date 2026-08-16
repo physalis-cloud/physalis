@@ -78,6 +78,7 @@ export async function POST(req: Request, { params }: Params) {
         invitation.organizationId,
         invitation.projectAccess,
         user.id,
+        invitation.role,
       );
     }
     await tx.invitation.update({

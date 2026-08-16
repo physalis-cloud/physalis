@@ -1,7 +1,7 @@
 // lib/hybrid-kem.ts
 //
 // Échange de clés HYBRIDE classique + post-quantique pour SecretRequest
-// (Phase 1, cf. docs/steps-docs/securite-post-quantique.md).
+// (Phase 1, cf. documentation/plans/done/securite-post-quantique.md).
 //
 //   Classique : ECDH P-256        → résiste si ML-KEM s'avère immature
 //   PQC        : ML-KEM-768       → résiste à un ordinateur quantique (Shor)

@@ -133,7 +133,7 @@ function ipv6Prefix64(raw: string): string | null {
  * l'identifiant d'interface toutes seules. Bucketiser sur le /128 rendait
  * l'étage IP à la fois **contournable** (une adresse neuve par tentative, 2⁶⁴
  * disponibles) et **instable** pour les utilisateurs légitimes, dont l'adresse
- * change sans qu'ils y soient pour rien. Cf. docs/failles.md §16.
+ * change sans qu'ils y soient pour rien. Cf. documentation/rapports/failles.md §16.
  *
  * IPv4 → inchangée. Utilisé UNIQUEMENT pour les clés de rate-limit : l'audit
  * (`lib/audit.ts`) conserve l'adresse complète, qui a une valeur forensique.

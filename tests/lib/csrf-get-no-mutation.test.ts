@@ -1,4 +1,4 @@
-// Test statique — garde-fou de la piste d'audit P3 (docs/failles.md §5/P3, §37).
+// Test statique — garde-fou de la piste d'audit P3 (documentation/rapports/failles.md §5/P3, §37).
 //
 // Contexte : le cookie de session est `sameSite: lax` (partagé sur
 // `.physalis.cloud` pour porter le SSO multi-tenant). `lax` envoie le cookie
@@ -76,7 +76,7 @@ describe("P3 — CSRF : aucun handler GET ne mute l'état (sameSite lax)", () =>
   it("aucun corps de GET sous app/ ne contient de mutation Prisma inline", () => {
     // Allowlist : vide. Toute route ajoutée ici DOIT être justifiée (soit
     // authentifiée par bearer non-cookie, soit prouvée non CSRF) ET consignée
-    // dans docs/failles.md §5/P3.
+    // dans documentation/rapports/failles.md §5/P3.
     const ALLOWLIST = new Set<string>([]);
 
     const offenders: string[] = [];

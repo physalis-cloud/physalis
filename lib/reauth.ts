@@ -5,7 +5,7 @@
 // ⚠️ Les deux contrôles ne se remplacent PAS. La phrase à recopier est affichée
 // à l'écran : quiconque détient une session volée la lit et la recopie. Elle
 // défend contre l'accident, jamais contre l'usurpation. Voir
-// docs/steps-docs/todo/suppression-compte.md § « Deux contrôles distincts ».
+// documentation/plans/suppression-compte.md § « Deux contrôles distincts ».
 //
 // N'appliquer QUE sur l'irréversible : une action récupérable (demande de
 // suppression avec fenêtre de 30 j, réactivation…) n'a pas à payer ce coût.

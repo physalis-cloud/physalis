@@ -84,6 +84,7 @@ export default async function ProjectsPage() {
       ciConnection: { select: { provider: true } },
       emailConfig: { select: { verified: true } },
       backupConfig: { select: { enabled: true } },
+      mobileEnabled: true,
       _count: {
         select: {
           tokens: { where: { revokedAt: null } },
@@ -166,6 +167,7 @@ export default async function ProjectsPage() {
         emailVerified: p.emailConfig?.verified ?? false,
         backupEnabled: p.backupConfig?.enabled ?? false,
         apiCount: p._count.apis,
+        mobileEnabled: p.mobileEnabled,
       },
       lastDeploy: lastDeploy
         ? { at: lastDeploy.at.toISOString(), envName: lastDeploy.envName }
@@ -175,6 +177,27 @@ export default async function ProjectsPage() {
 
   // Édition (création de groupe via DnD) réservée aux DEV+ / admins org.
   const canEdit = isGlobalAdmin || isOrgAdmin || hasDevPrivileges(orgRole);
+
+  // Membres dont l'accès au projet est réglable AU MOMENT de le créer. Un projet
+  // neuf est sinon accessible d'emblée à tous les DEV de l'org (EDITOR implicite,
+  // règle 4), et il faut y penser après coup.
+  // Exclus : le créateur (project OWNER d'office) et les OrgOWNER/ADMIN (OWNER
+  // implicite partout, `hidden` ignoré → le régler ici ne ferait rien).
+  const settableMembers = (
+    await prisma.orgMember.findMany({
+      where: {
+        organization: { slug: orgSlug },
+        role: { in: ["ADMIN_DEV", "DEV", "MEMBER"] },
+        userId: { not: session.user.id },
+      },
+      select: { role: true, user: { select: { id: true, email: true } } },
+      orderBy: { createdAt: "asc" },
+    })
+  ).map((m) => ({
+    userId: m.user.id,
+    email: m.user.email,
+    orgRole: m.role,
+  }));
 
   return (
     <div className="page">
@@ -191,7 +214,7 @@ export default async function ProjectsPage() {
 
         <div className="create-row">
           <div className="create-col-main">
-            <CreateProjectForm />
+            <CreateProjectForm members={settableMembers} />
           </div>
           <div className="create-col-aside">
             <CreateGroupForm groups={groups} canEdit={canEdit} />

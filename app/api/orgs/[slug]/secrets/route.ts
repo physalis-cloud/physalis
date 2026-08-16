@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { encrypt } from "@/lib/crypto";
 import {
   isValidSecretKey,
@@ -72,7 +73,8 @@ export async function POST(req: Request, { params }: Params) {
   const payload = encrypt(body.value);
 
   // Transaction : snapshot ancien (si existant) + upsert nouveau, atomique.
-  const secret = await prisma.$transaction(async (tx) => {
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  const secret = await withTenantSchema(access.tenantSlug, async (tx) => {
     if (existing) {
       await createOrgSecretVersion({
         tx,

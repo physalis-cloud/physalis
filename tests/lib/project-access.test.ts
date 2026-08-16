@@ -22,6 +22,9 @@ import {
   filterAccessibleProjects,
   hasProjectRole,
   resolveOrgRole,
+  desiredMembershipRow,
+  isDesiredProjectAccess,
+  type DesiredProjectAccess,
 } from "@/lib/project-access";
 
 const ORG_ROLES: Array<OrgRole | null> = [
@@ -294,6 +297,68 @@ describe("lib/project-access", () => {
       ).toEqual(["visible", "sans ligne", "ligne d'un autre"]);
       // OWNER : tout, `hidden` ignoré.
       expect(filterAccessibleProjects(projects, USER, "OWNER")).toHaveLength(4);
+    });
+  });
+
+  // Forme ÉCRITURE — réciproque de la forme POINT. Sans cet aller-retour, une
+  // règle d'écriture (« décocher un DEV pose hidden ») pourrait diverger de la
+  // règle de lecture sans que rien ne le signale : exactement le générateur de
+  // bugs que ce module ferme.
+  describe("desiredMembershipRow — aller-retour avec effectiveProjectRole", () => {
+    const DESIRED: DesiredProjectAccess[] = [
+      "NONE",
+      "VIEWER",
+      "EDITOR",
+      "OWNER",
+    ];
+
+    for (const orgRole of ["ADMIN_DEV", "DEV", "MEMBER"] as const) {
+      for (const desired of DESIRED) {
+        it(`org=${orgRole} désiré=${desired} → accès effectif = ${desired}`, () => {
+          const row = desiredMembershipRow(orgRole, desired);
+          expect(
+            effectiveProjectRole({ orgRole, membership: row }),
+          ).toBe(desired === "NONE" ? null : desired);
+        });
+      }
+    }
+
+    it("n'écrit rien quand l'implicite suffit déjà", () => {
+      // Un DEV a EDITOR partout sans ligne (règle 4) : lui « donner » EDITOR ne
+      // doit PAS figer de ligne, qui lui survivrait à une rétrogradation.
+      expect(desiredMembershipRow("DEV", "EDITOR")).toBeNull();
+      expect(desiredMembershipRow("ADMIN_DEV", "EDITOR")).toBeNull();
+      // Un MEMBER n'a rien sans ligne (règle 5) : le bloquer = ne rien écrire,
+      // une barrière serait redondante.
+      expect(desiredMembershipRow("MEMBER", "NONE")).toBeNull();
+    });
+
+    it("pose une barrière — et pas un rôle — pour couper un accès implicite", () => {
+      expect(desiredMembershipRow("DEV", "NONE")).toEqual({
+        role: "VIEWER",
+        hidden: true,
+      });
+    });
+
+    it("ne produit aucune ligne pour les cibles où elle serait sans effet", () => {
+      // OrgOWNER/ADMIN : OWNER implicite, `hidden` ignoré (règle 1).
+      for (const orgRole of ["OWNER", "ADMIN"] as const) {
+        for (const desired of DESIRED) {
+          expect(desiredMembershipRow(orgRole, desired)).toBeNull();
+        }
+      }
+      // Non-membre de l'org : règle 6, aucune ligne ne doit subsister.
+      for (const desired of DESIRED) {
+        expect(desiredMembershipRow(null, desired)).toBeNull();
+      }
+    });
+
+    it("valide les valeurs venues du réseau", () => {
+      expect(isDesiredProjectAccess("NONE")).toBe(true);
+      expect(isDesiredProjectAccess("EDITOR")).toBe(true);
+      expect(isDesiredProjectAccess("editor")).toBe(false);
+      expect(isDesiredProjectAccess("ADMIN")).toBe(false);
+      expect(isDesiredProjectAccess(null)).toBe(false);
     });
   });
 });

@@ -1,4 +1,4 @@
-// Garde-fou P5 (docs/failles.md §40) : la metadata d'audit est bornée avant
+// Garde-fou P5 (documentation/rapports/failles.md §40) : la metadata d'audit est bornée avant
 // écriture, pour qu'une metadata anormalement grande ou non sérialisable ne
 // puisse jamais faire échouer silencieusement l'écriture d'audit (seul vecteur
 // théorique de l'échec silencieux du log — colonnes AccessLog toutes text/jsonb

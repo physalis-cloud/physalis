@@ -8,6 +8,7 @@ import {
   RiMailLine,
   RiSafe2Line,
   RiRouteLine,
+  RiSmartphoneLine,
   type RemixiconComponentType,
 } from "@remixicon/react";
 
@@ -22,6 +23,9 @@ export type ProjectStatusData = {
   emailVerified: boolean;
   backupEnabled: boolean;
   apiCount: number;
+  /** Onglet Mobile activé sur le projet (Project.mobileEnabled) — l'icône dit
+   *  « ce projet publie sur les stores », pas « le plan y donne droit ». */
+  mobileEnabled: boolean;
 };
 
 const ACTIVE = "var(--muted)"; // monochrome discret, lisible
@@ -128,6 +132,12 @@ export default function ProjectStatusIcons({ data }: { data: ProjectStatusData }
       {data.backupEnabled && (
         <span title="Sauvegarde configurée" style={{ display: "inline-flex", color: ACTIVE }}>
           <RiSafe2Line size={SIZE} />
+        </span>
+      )}
+
+      {data.mobileEnabled && (
+        <span title="Déploiement mobile activé" style={{ display: "inline-flex", color: ACTIVE }}>
+          <RiSmartphoneLine size={SIZE} />
         </span>
       )}
 

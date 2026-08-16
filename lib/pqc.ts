@@ -1,7 +1,7 @@
 // lib/pqc.ts
 //
 // Abstraction des opérations post-quantiques (Phase 1 du plan PQC, cf.
-// docs/steps-docs/securite-post-quantique.md).
+// documentation/plans/done/securite-post-quantique.md).
 //
 // Algorithme : ML-KEM-768 (NIST FIPS 203) — KEM standardisé, niveau de
 // sécurité 3. On passe par `@noble/post-quantum` : pur JS, fonctionne à

@@ -1,5 +1,5 @@
 // Test statique — garde-fou de la classe SSRF
-// (docs/failles.md §6 / §2.25d, docs/rapport-security.md F9.1).
+// (documentation/rapports/failles.md §6 / §2.25d, documentation/rapports/rapport-security.md F9.1).
 //
 // Contexte : `lib/safe-fetch.ts` est une garde SSRF de bonne facture (https
 // imposé, refus des identifiants inline et des hôtes sans point, DNS résolu
@@ -53,12 +53,26 @@ const API_ALLOWED: Record<string, string> = {
  */
 const LIB_ALLOWED: Record<string, string> = {
   "lib/safe-fetch.ts": "la garde elle-même",
+  // ⚠️ Cette raison ne parle QUE de l'appel `fetch` littéral. `lib/sso.ts`
+  // portait aussi une sortie réseau DÉLÉGUÉE — un `issuer` fourni par l'admin
+  // du tenant, remis à NextAuth qui le fetch lui-même — invisible pour une
+  // règle qui cherche un appel. Fermée le 2026-08-09 (`customFetch` →
+  // `safeFetchHook`) et surveillée par `tests/lib/sso-outbound-fetch.test.ts`,
+  // qui mesure l'objet provider construit et non le texte du fichier.
   "lib/sso.ts": "URL constante api.github.com (récupération de l'email)",
   "lib/email.ts": "relais email interne, URL de configuration serveur",
   "lib/physalis-email.ts": "service interne, URL de configuration serveur",
   "lib/support.ts": "microservice support, URL de configuration serveur",
   "lib/redeploy.ts": "API du provider CI (GitHub/GitLab/Bitbucket), hôtes constants",
   "lib/project-docs.ts": "API du provider CI, hôtes constants + chemin de dépôt",
+  // Sondes d'accréditation Google Play / App Store Connect (Phase 2 du
+  // déploiement mobile). Les quatre endpoints sont des CONSTANTES du module.
+  // ⚠️ Le piège est ailleurs et vaut d'être écrit : un JSON de compte de
+  // service Google porte un champ `token_uri` qu'il serait naturel d'honorer.
+  // Le faire donnerait à quiconque peut importer un credential le pouvoir de
+  // faire fetcher une URL arbitraire par le serveur central. Le champ est donc
+  // délibérément IGNORÉ au profit de l'endpoint écrit en dur.
+  "lib/mobile-store-api.ts": "API Google Play / App Store Connect, hôtes constants (token_uri du credential ignoré exprès)",
   "lib/sync/vercel.ts": "API Vercel, hôte constant",
   "lib/sync/render.ts": "API Render, hôte constant",
   "lib/sync/railway.ts": "API Railway, hôte constant",

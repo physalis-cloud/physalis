@@ -2,7 +2,7 @@
 // WEBHOOK en mode DIRECT : c'est le serveur central qui fetch une URL choisie
 // par un EDITOR de projet). Sans garde, l'URL peut viser le réseau interne
 // (base, KMS, métadonnées cloud) et le corps de réponse est réfléchi à
-// l'appelant → exfiltration + POST sortant forgé. Cf. docs/failles.md §6.
+// l'appelant → exfiltration + POST sortant forgé. Cf. documentation/rapports/failles.md §6.
 //
 // La validation est faite AU MOMENT DE L'APPEL et RE-appliquée à CHAQUE saut de
 // redirection (fetch suit les redirects) : valider seulement à l'écriture serait

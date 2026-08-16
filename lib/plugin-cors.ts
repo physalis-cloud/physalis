@@ -45,7 +45,7 @@ export type CorsResult =
 //
 // Sans le motif ci-dessous, tout client Firefox prend donc un 403
 // `origin_not_allowed`. Contrairement a ce qu'affirmait
-// `physalis-extension/docs/send-to-store.md` §4, un Origin PRESENT mais non
+// `documentation/extension/send-to-store.md` §4, un Origin PRESENT mais non
 // whiteliste ne « retombe » pas dans la branche « Origin absent » : les deux
 // branches sont disjointes.
 //

@@ -1,37 +1,48 @@
 "use client";
 
 // #2-C — Modale « Droits d'accès » : pose les accès projet d'un membre (ou
-// pré-remplit ceux d'une invitation). Cochage par projet + rôle par projet.
+// pré-remplit ceux d'une invitation). Case cochée = a accès, + rôle par projet.
 //
 // Auto-chargeante :
 //   • userId fourni  → GET members/[userId]/project-access (accès courant).
-//   • userId absent  → GET orgs/[slug]/projects (mode invitation, tout vierge).
+//   • userId absent  → GET orgs/[slug]/projects (mode invitation).
 //
 // La modale ne décide RIEN : elle renvoie la sélection via onSave. Le parent
 // choisit quoi en faire (PUT pour un membre, corps du POST pour une invitation).
 //
-// Distinction clé rendue lisible (cf. #2-B) :
-//   • MEMBER    : décocher = AUCUN accès.
-//   • DEV/ADMIN_DEV : décocher = retombe sur l'EDITOR implicite (règle 4), pas
-//     une barrière. Les projets non cochés y sont marqués « implicite ».
-//   • OWNER/ADMIN : OWNER implicite partout → la modale n'a pas d'objet.
+// ── La case dit l'accès EFFECTIF, pas l'existence d'une ligne en base ──
+// C'est le point qui rend la modale sûre. Un DEV a l'EDITOR implicite sur tout
+// (règle 4) SANS aucune ligne : si on pré-cochait « les lignes explicites », il
+// s'ouvrirait tout décoché alors qu'il a accès à tout, et un simple
+// « Enregistrer » le bloquerait partout sans que personne ne l'ait voulu.
+// On pré-coche donc `hasAccess` / `effectiveRole`, et décocher est un ordre :
+//   • DEV/ADMIN_DEV : décoché → barrière (`NONE`, ligne `hidden`), le projet
+//     disparaît de sa liste et l'accès est refusé.
+//   • MEMBER        : décoché → `NONE` aussi, mais aucune ligne n'est écrite —
+//     l'absence de ligne EST déjà le refus (règle 5).
+//   • OWNER/ADMIN   : OWNER implicite partout → la modale n'a pas d'objet.
+// La traduction accès voulu → ligne est faite côté serveur par
+// `desiredMembershipRow` (§4), jamais ici.
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { OrgRole, ProjectRole } from "@prisma/client";
+import type { DesiredProjectAccess } from "@/lib/project-access";
 
 const PROJECT_ROLES: ProjectRole[] = ["VIEWER", "EDITOR", "OWNER"];
 
-export type ProjectAccessSelection = { projectId: string; role: ProjectRole };
+export type ProjectAccessSelection = {
+  projectId: string;
+  role: DesiredProjectAccess;
+};
 
 type ProjectItem = {
   id: string;
   slug: string;
   name: string;
-  explicit?: boolean;
-  explicitRole?: ProjectRole | null;
   hidden?: boolean;
   hasAccess?: boolean;
+  effectiveRole?: ProjectRole | null;
 };
 
 export default function ProjectAccessModal({
@@ -94,21 +105,28 @@ export default function ProjectAccessModal({
       }
       const data = (await res.json()) as { projects: ProjectItem[] };
       setProjects(data.projects);
-      // Pré-cochage : lignes explicites non masquées (mode membre) OU sélection
-      // déjà faite (mode invitation, réouverture).
+      // Pré-cochage = accès EFFECTIF (mode membre), ce que l'invité OBTIENDRA
+      // (mode invitation), ou la sélection déjà faite si la modale est rouverte.
       const nextChecked = new Set<string>();
       const nextRoles = new Map<string, ProjectRole>();
       const initByProject = new Map(
         (initialSelection ?? []).map((s) => [s.projectId, s.role]),
       );
       for (const p of data.projects) {
-        if (!userId && initByProject.has(p.id)) {
-          nextChecked.add(p.id);
-          nextRoles.set(p.id, initByProject.get(p.id)!);
-        } else if (p.explicit) {
-          nextChecked.add(p.id);
-          nextRoles.set(p.id, p.explicitRole ?? "VIEWER");
+        const init = userId ? undefined : initByProject.get(p.id);
+        if (init !== undefined) {
+          if (init !== "NONE") {
+            nextChecked.add(p.id);
+            nextRoles.set(p.id, init);
+          }
+          continue;
         }
+        // Mode invitation : pas d'accès courant à lire, on projette la règle 4
+        // (un invité DEV arrivera EDITOR partout).
+        const hasAccess = userId ? Boolean(p.hasAccess) : hasImplicitEditor;
+        if (!hasAccess) continue;
+        nextChecked.add(p.id);
+        nextRoles.set(p.id, (userId ? p.effectiveRole : "EDITOR") ?? "VIEWER");
       }
       setChecked(nextChecked);
       setRoles(nextRoles);
@@ -120,7 +138,7 @@ export default function ProjectAccessModal({
     // remontée à chaque ouverture) — l'ajouter aux deps ne changerait rien
     // au comportement mais brouillerait l'intention « charger une fois ».
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgSlug, userId, isImplicitOwner, t]);
+  }, [orgSlug, userId, isImplicitOwner, hasImplicitEditor, t]);
 
   function toggle(projectId: string) {
     setChecked((prev) => {
@@ -146,9 +164,13 @@ export default function ProjectAccessModal({
   async function save() {
     setSaving(true);
     try {
-      const selection: ProjectAccessSelection[] = [...checked].map((id) => ({
-        projectId: id,
-        role: roles.get(id) ?? "VIEWER",
+      // On envoie TOUS les projets, y compris les décochés en `NONE` : le
+      // serveur converge vers ce qu'on lui décrit. N'envoyer que les cochés
+      // laisserait un DEV décoché sur son accès implicite — le geste serait sans
+      // effet, exactement le piège qu'on ferme.
+      const selection: ProjectAccessSelection[] = (projects ?? []).map((p) => ({
+        projectId: p.id,
+        role: checked.has(p.id) ? (roles.get(p.id) ?? "VIEWER") : "NONE",
       }));
       await onSave(selection);
       onClose();
@@ -208,8 +230,9 @@ export default function ProjectAccessModal({
                 >
                   {projects.map((p) => {
                     const isChecked = checked.has(p.id);
-                    const implicit =
-                      !isChecked && hasImplicitEditor && !p.hidden;
+                    // Décoché sur une cible à accès implicite = barrière à
+                    // poser (ou déjà posée) : on le dit, ce n'est pas neutre.
+                    const willBlock = !isChecked && hasImplicitEditor;
                     return (
                       <label
                         key={p.id}
@@ -225,8 +248,7 @@ export default function ProjectAccessModal({
                         <div className="row-info">
                           <div className="row-name">{p.name}</div>
                           <div className="row-meta">
-                            {implicit && <span>{t("implicitEditor")}</span>}
-                            {p.hidden && <span>{t("hiddenNote")}</span>}
+                            {willBlock && <span>{t("blockedNote")}</span>}
                           </div>
                         </div>
                         {isChecked && (

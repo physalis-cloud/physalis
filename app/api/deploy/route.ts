@@ -151,6 +151,11 @@ export async function POST(req: Request) {
   // Vérifie qu'une Policy match les claims OIDC.
   const policy = await prisma.policy.findFirst({
     where: {
+      // ⚠️ Cf. la source SaaS : la table porte aussi des policies "mobile"
+      // depuis la Phase 2 du déploiement mobile. Une policy mobile ne doit
+      // jamais ouvrir les secrets d'un environnement.
+      kind: "server",
+
       repo: repository,
       workflow: workflowFile,
       branch,

@@ -1,5 +1,5 @@
 // Source UNIQUE du coût bcrypt des mots de passe de COMPTE, et du hash factice
-// anti-timing qui doit lui correspondre (docs/rapport-security.md F3.1).
+// anti-timing qui doit lui correspondre (documentation/rapports/rapport-security.md F3.1).
 //
 // Le problème que ce module ferme : la mitigation anti-timing du login compare
 // le mot de passe soumis à un hash factice quand le compte n'existe pas, pour

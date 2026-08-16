@@ -10,7 +10,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 // dans le ciphertext ne le lie à sa ligne d'origine.
 //
 // Aujourd'hui aucun chemin applicatif n'est exploitable : audit exhaustif
-// (docs/failles.md §5/P4 + §36) — toute traversée de frontière re-chiffre, et
+// (documentation/rapports/failles.md §5/P4 + §36) — toute traversée de frontière re-chiffre, et
 // les seules copies verbatim (versioning / rollback) restent intra-secret.
 // Cet invariant N'EST PAS enforcé par le type-système : c'est une règle de
 // revue. RÈGLE À TENIR pour ne pas rouvrir la faille :
@@ -24,7 +24,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 //
 // Le garde-fou de régression vit dans tests/lib/crypto-aad-invariant.test.ts.
 // Le durcissement cryptographique (lier le ciphertext à sa ligne via AAD) est
-// un chantier différé — cf. docs/failles.md §5/P4.
+// un chantier différé — cf. documentation/rapports/failles.md §5/P4.
 // ────────────────────────────────────────────────────────────────────────
 
 const ALGORITHM = "aes-256-gcm";

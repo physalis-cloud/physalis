@@ -25,7 +25,7 @@
  *   `alt` vide : si le client bloque les images, le nom reste lisible sans
  *   doublon pour les lecteurs d'écran.
  *
- * ── Contrat d'échappement (cf. docs/failles.md §2.11) ──
+ * ── Contrat d'échappement (cf. documentation/rapports/failles.md §2.11) ──
  * Les champs suffixés `Html` sont insérés TELS QUELS : c'est à l'appelant de
  * les échapper. Les autres champs sont du texte, échappés ici. Ce suffixe est
  * la convention qui rend la revue possible d'un coup d'œil.

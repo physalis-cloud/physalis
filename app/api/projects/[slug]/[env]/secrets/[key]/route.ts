@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 // Route session-based (requireEnvironment → tenant context entré) →
 // utilise le strict prisma qui auto-route via search_path.
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { isValidSecretKey, readJson, requireEnvironment } from "@/lib/api";
 import { isValidCategory } from "@/lib/categories";
@@ -206,7 +207,8 @@ export async function PATCH(req: Request, { params }: Params) {
 
   // Snapshot atomique + update si la valeur change. Sinon update simple.
   const updated = mustSnapshot
-    ? await prisma.$transaction(async (tx) => {
+    ? // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+      await withTenantSchema(access.tenantSlug, async (tx) => {
         await createSecretVersion({
           tx,
           secretId: existing.id,

@@ -17,7 +17,10 @@ export async function GET(_req: Request, { params }: Params) {
   if ("error" in access) return access.error;
 
   const policies = await prisma.policy.findMany({
-    where: { projectId: access.project.id },
+    // Écran de policies SERVEUR uniquement : la table porte aussi des policies
+    // "mobile" (Phase 2 déploiement mobile), qui visent une app et n'ont pas
+    // d'environmentId — leur `environment` null casserait ce rendu.
+    where: { projectId: access.project.id, kind: "server" },
     select: {
       id: true,
       repo: true,
@@ -35,8 +38,8 @@ export async function GET(_req: Request, { params }: Params) {
       repo: p.repo,
       workflow: p.workflow,
       branch: p.branch,
-      environment: p.environment.name,
-      environmentId: p.environment.id,
+      environment: p.environment!.name,
+      environmentId: p.environment!.id,
       createdAt: p.createdAt,
     })),
   });
@@ -168,8 +171,8 @@ export async function POST(req: Request, { params }: Params) {
         repo: policy.repo,
         workflow: policy.workflow,
         branch: policy.branch,
-        environment: policy.environment.name,
-        environmentId: policy.environment.id,
+        environment: policy.environment!.name,
+        environmentId: policy.environment!.id,
         createdAt: policy.createdAt,
       },
     },

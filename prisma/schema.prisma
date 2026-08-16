@@ -21,62 +21,63 @@ datasource db {
 }
 
 model User {
-  id                   String            @id @default(cuid())
-  email                String            @unique
+  id                       String                    @id @default(cuid())
+  email                    String                    @unique
   /// Nullable depuis le chantier SSO : un compte fédéré (ssoProvider non null)
   /// n'a pas de mot de passe Physalis. Credentials refuse si password est null.
-  password             String?
+  password                 String?
   /// SSO — null pour un compte mot de passe classique ; "google"|"github"|…
   /// pour un compte fédéré (dénormalisé pour l'affichage UI sécurité).
-  ssoProvider          String?
-  role                 Role              @default(MEMBER)
+  ssoProvider              String?
+  role                     Role                      @default(MEMBER)
   /// 2FA TOTP — secret chiffré avec la même ENCRYPTION_KEY que les Secrets
   /// (3 colonnes : encryptedValue/iv/tag, base64). Désactivé par défaut.
-  twoFactorEnabled     Boolean           @default(false)
-  twoFactorSecret      String?
-  twoFactorIv          String?
-  twoFactorTag         String?
+  twoFactorEnabled         Boolean                   @default(false)
+  twoFactorSecret          String?
+  twoFactorIv              String?
+  twoFactorTag             String?
   /// 8 codes de secours bcrypt-hashés. Vidé à chaque rotation 2FA.
-  backupCodes          String[]          @default([])
+  backupCodes              String[]                  @default([])
   /// §2.17 — dernier pas de temps TOTP consommé (RFC 6238 §5.2, anti-rejeu).
   /// Un code n'est accepté que si son timeStep > lastTotpTimeStep.
-  lastTotpTimeStep     Int?
-  projects             ProjectMember[]
-  organizations        OrgMember[]
-  invitationsSent      Invitation[]      @relation("invitedBy")
-  invitationsReceived  Invitation[]      @relation("invitationsReceived")
-  createdMachineTokens MachineToken[]    @relation("machineTokenCreator")
-  pluginTokens         PluginToken[]
-  vaultEntries         VaultEntry[]
-  vaultCollections     VaultCollection[]
-  teamVaultMemberships TeamVaultMember[]
-  userTokens           UserToken[]
-  orgTokensCreated     OrgToken[]        @relation("orgTokenCreator")
-  oneTimeShares        OneTimeShare[]    @relation("oneTimeShareCreator")
-  accessLogs           AccessLog[]       @relation("accessLogActor")
-  secretRequests       SecretRequest[]   @relation("secretRequestCreator")
-  secretVersions       SecretVersion[]   @relation("secretVersionCreator")
-  orgSecretVersions    OrgSecretVersion[] @relation("orgSecretVersionCreator")
-  apiKeysCreated       ApiKey[]          @relation("apiKeyCreator")
-  createdAt            DateTime          @default(now())
+  lastTotpTimeStep         Int?
+  projects                 ProjectMember[]
+  organizations            OrgMember[]
+  invitationsSent          Invitation[]              @relation("invitedBy")
+  invitationsReceived      Invitation[]              @relation("invitationsReceived")
+  createdMachineTokens     MachineToken[]            @relation("machineTokenCreator")
+  pluginTokens             PluginToken[]
+  vaultEntries             VaultEntry[]
+  vaultCollections         VaultCollection[]
+  teamVaultMemberships     TeamVaultMember[]
+  userTokens               UserToken[]
+  orgTokensCreated         OrgToken[]                @relation("orgTokenCreator")
+  oneTimeShares            OneTimeShare[]            @relation("oneTimeShareCreator")
+  accessLogs               AccessLog[]               @relation("accessLogActor")
+  secretRequests           SecretRequest[]           @relation("secretRequestCreator")
+  secretVersions           SecretVersion[]           @relation("secretVersionCreator")
+  orgSecretVersions        OrgSecretVersion[]        @relation("orgSecretVersionCreator")
+  mobileCredentialVersions MobileCredentialVersion[] @relation("mobileCredentialVersionCreator")
+  apiKeysCreated           ApiKey[]                  @relation("apiKeyCreator")
+  createdAt                DateTime                  @default(now())
   /// #5 — borne basse de validité des sessions : tout JWT émis avant cette
   /// date est rejeté par requireUser(). Posé au reset password / 2FA disable
   /// pour couper les sessions existantes. NULL = jamais invalidé (legacy).
-  sessionsValidFrom    DateTime?
+  sessionsValidFrom        DateTime?
   /// Suppression de compte MEMBRE (self-service) — à ne pas confondre avec la
   /// suppression du compte CLIENT, qui vit sur `admin.clients`. Ici le tenant
   /// survit : seule cette ligne `User` et ses dépendances en Cascade (coffre
   /// perso, appartenances, tokens) disparaissent à `purgeAt`. C'est
   /// `deletionRequestedAt` — et non un statut — qui fait foi et déclenche le
   /// verrou d'espace. NULL hors processus.
-  deletionRequestedAt  DateTime?
-  purgeAt              DateTime?
+  deletionRequestedAt      DateTime?
+  purgeAt                  DateTime?
   /// Dernier export RGPD réussi (/api/me/export). Alimente le compteur
   /// « X membres sur Y ont récupéré leurs données » et la règle du plancher
   /// côté owner ; seul un export POSTÉRIEUR à la demande compte.
-  dataExportedAt       DateTime?
+  dataExportedAt           DateTime?
   /// Identités externes liées (social login / SSO perso, Phase F).
-  socialIdentities     UserSocialIdentity[]
+  socialIdentities         UserSocialIdentity[]
 }
 
 /// Identité externe (social login / SSO perso) liée à un User. L'utilisateur lie
@@ -171,29 +172,29 @@ model ClientEmailConfig {
 /// switch ; la config par projet (ProjectBackupConfig, cf. spec backups-auto.md)
 /// viendra ensuite et exigera ce switch.
 model ClientBackupConfig {
-  id         String   @id @default(cuid())
-  tenantSlug String   @unique
-  enabled    Boolean  @default(false)
+  id             String   @id @default(cuid())
+  tenantSlug     String   @unique
+  enabled        Boolean  @default(false)
   /// Destination des backups, au niveau CLIENT (un VPS pour tous ses projets).
   /// Le chemin effectif d'un projet est dérivé : backupPath/<slug projet>.
   backupServerId String?
-  backupServer   Server? @relation("BackupDest", fields: [backupServerId], references: [id])
+  backupServer   Server?  @relation("BackupDest", fields: [backupServerId], references: [id])
   backupPath     String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
-/// Config de backup automatisé d'un projet (cf. docs/steps-docs/backups-auto.md).
+/// Config de backup automatisé d'un projet (cf. documentation/plans/done/backups-auto.md).
 /// Physalis ne détient QUE la clé GPG publique (postée par l'agent) ; ni le mot
 /// de passe DB ni la clé privée ne vivent ici. La destination est un Server.
 model ProjectBackupConfig {
-  id               String   @id @default(cuid())
-  projectId        String   @unique
-  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  enabled          Boolean  @default(false)
+  enabled         Boolean @default(false)
   /// Un seul environnement backupé par projet (prod par défaut).
-  environmentName  String
+  environmentName String
 
   // DB(s) source : multi-DB → modèle enfant ProjectBackupDatabase.
   // La destination vit au niveau CLIENT (ClientBackupConfig).
@@ -208,40 +209,40 @@ model ProjectBackupConfig {
   // l'agent scelle via OpenBao transit (datakey) → archive .penv.
   // `kmsKeyName` = nom logique de la KEK transit du tenant (`tenant-<slug>`).
   // Physalis ne détient JAMAIS la KEK ni de capacité decrypt sur les données.
-  backupKeyScheme   String?
-  kmsKeyName        String?
+  backupKeyScheme  String?
+  kmsKeyName       String?
   /// Hash SHA-256 du token d'agent — vérifie register/plan/report (timingSafeEqual,
   /// sans déchiffrer à chaque poll).
-  agentTokenHash    String?
+  agentTokenHash   String?
   /// Copie chiffrée (AES-256-GCM) du MÊME token, pour l'injection zéro-touch dans le
   /// bundle de déploiement (Physalis déchiffre et pose BACKUP_TOKEN). Même posture que
   /// la clé SSH du serveur, déjà dans le bundle. Null tant qu'aucun token n'a été émis.
-  agentTokenEnc     String?
-  agentTokenIv      String?
-  agentTokenTag     String?
+  agentTokenEnc    String?
+  agentTokenIv     String?
+  agentTokenTag    String?
   /// Anti-spam du watchdog : dernière alerte « backup en retard » envoyée.
-  overdueAlertedAt  DateTime?
+  overdueAlertedAt DateTime?
 
   // Rétention (appliquée côté agent)
-  retentionDaily   Int      @default(7)
-  retentionWeekly  Int      @default(4)
-  retentionMonthly Int      @default(3)
+  retentionDaily   Int @default(7)
+  retentionWeekly  Int @default(4)
+  retentionMonthly Int @default(3)
 
   // Planification (servie à l'agent ; le cron Physalis = watchdog)
-  scheduleHour     Int      @default(3)
-  intervalDays     Int      @default(1)
+  scheduleHour     Int       @default(3)
+  intervalDays     Int       @default(1)
   backupNextAt     DateTime?
   backupLastAt     DateTime?
   backupLastStatus String?
-  backupErrorCount Int      @default(0)
+  backupErrorCount Int       @default(0)
   forceRequestedAt DateTime?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  databases        ProjectBackupDatabase[]
-  entries          ProjectBackupEntry[]
-  restores         ProjectBackupRestore[]
+  databases ProjectBackupDatabase[]
+  entries   ProjectBackupEntry[]
+  restores  ProjectBackupRestore[]
 }
 
 /// Une DB d'un projet à sauvegarder (un projet peut en avoir plusieurs).
@@ -249,9 +250,9 @@ model ProjectBackupConfig {
 /// Physalis ne stocke PAS le mot de passe : seulement la clé du secret (.env)
 /// qui le contient, pour l'injecter au déploiement.
 model ProjectBackupDatabase {
-  id                String              @id @default(cuid())
-  configId          String
-  config            ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  id       String              @id @default(cuid())
+  configId String
+  config   ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   dbType            BackupDbType
   dbName            String
@@ -261,21 +262,21 @@ model ProjectBackupDatabase {
   /// Clé du secret (.env) contenant le mot de passe (null si en clair / non résolu).
   passwordSecretKey String?
   port              Int?
-  enabled           Boolean  @default(true)
+  enabled           Boolean      @default(true)
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([configId])
 }
 
 /// Une archive de backup (remplie par les rapports de l'agent — tranche suivante).
 model ProjectBackupEntry {
-  id              String              @id @default(cuid())
-  projectId       String
-  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  configId        String
-  config          ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  id        String              @id @default(cuid())
+  projectId String
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  configId  String
+  config    ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   filename        String
   sizeBytes       BigInt?
@@ -284,11 +285,11 @@ model ProjectBackupEntry {
   environmentName String
   destLocation    String
 
-  status          BackupEntryStatus
-  errorMessage    String?
-  restorable      Boolean  @default(true)
-  restoreJobId    String?
-  createdAt       DateTime @default(now())
+  status       BackupEntryStatus
+  errorMessage String?
+  restorable   Boolean           @default(true)
+  restoreJobId String?
+  createdAt    DateTime          @default(now())
 
   @@index([projectId, createdAt(sort: Desc)])
   @@index([projectId, status])
@@ -300,29 +301,29 @@ model ProjectBackupEntry {
 /// `.penv` depuis la destination, déchiffre via OpenBao (identité restore = decrypt),
 /// et restaure EN LOCAL sur le VPS. Physalis ne voit jamais le plaintext.
 model ProjectBackupRestore {
-  id              String              @id @default(cuid())
-  projectId       String
-  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  configId        String
-  config          ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  id        String              @id @default(cuid())
+  projectId String
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  configId  String
+  config    ProjectBackupConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   filename        String
   destLocation    String
   dbType          BackupDbType
-  dbName          String              // DB source (= clé pour matcher la connexion côté agent)
+  dbName          String // DB source (= clé pour matcher la connexion côté agent)
   environmentName String
-  targetDbName    String              // DB cible (par défaut = dbName ; distincte pour une restauration sûre)
+  targetDbName    String // DB cible (par défaut = dbName ; distincte pour une restauration sûre)
   /// true = remplacer en place (la cible peut être non vide ; le dump --clean
   /// drop+recreate). false = restaurer dans une DB neuve/vide (garde-fou agent).
-  replaceExisting Boolean             @default(false)
+  replaceExisting Boolean      @default(false)
 
-  status          RestoreStatus       @default(PENDING)
-  errorMessage    String?
-  requestedById   String?
-  claimedAt       DateTime?
-  finishedAt      DateTime?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  status        RestoreStatus @default(PENDING)
+  errorMessage  String?
+  requestedById String?
+  claimedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@index([configId, status])
   @@index([projectId, createdAt(sort: Desc)])
@@ -352,42 +353,42 @@ enum BackupEntryStatus {
 /// déploiement). La clé API est chiffrée au repos (même schéma AES-256-GCM que
 /// Secret/Service). Les enregistrements DNS sont mémorisés en JSON.
 model ProjectEmailConfig {
-  id           String   @id @default(cuid())
-  projectId    String   @unique
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  domain       String
-  domainId     String
-  keyId        String
-  encryptedKey String
-  iv           String
-  tag          String
-  verified     Boolean  @default(false)
-  dnsRecords   Json     @default("[]")
+  id                   String    @id @default(cuid())
+  projectId            String    @unique
+  project              Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  domain               String
+  domainId             String
+  keyId                String
+  encryptedKey         String
+  iv                   String
+  tag                  String
+  verified             Boolean   @default(false)
+  dnsRecords           Json      @default("[]")
   /// Expéditeur principal du projet, injecté en `PHYSALIS_EMAIL_FROM` au
   /// déploiement. On ne stocke que l'ADRESSE : le nom d'affichage vit côté
   /// relais (sur le sender) et y est appliqué à l'envoi, donc le renommer ne
   /// demande pas de redeploy. Le premier expéditeur créé le devient d'office ;
   /// supprimer l'expéditeur principal remet ce champ à null.
-  defaultSender String?
+  defaultSender        String?
   /// Rotation automatique de la clé API (blue/green). À la rotation, on crée
   /// une nouvelle clé + redeploy, et on diffère la révocation de l'ancienne au
   /// cycle suivant (fenêtre de grâce — l'app lit la clé depuis son .env, mis à
   /// jour seulement au redeploy). `pendingRevokeKeyId` = ancienne clé à révoquer.
-  rotationEnabled     Boolean   @default(false)
+  rotationEnabled      Boolean   @default(false)
   rotationIntervalDays Int?
-  rotationNextAt      DateTime?
-  rotationLastAt      DateTime?
-  rotationLastStatus  String?
-  rotationErrorCount  Int       @default(0)
-  pendingRevokeKeyId  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  rotationNextAt       DateTime?
+  rotationLastAt       DateTime?
+  rotationLastStatus   String?
+  rotationErrorCount   Int       @default(0)
+  pendingRevokeKeyId   String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([rotationNextAt])
 }
 
 model Server {
-  id             String        @id @default(cuid())
+  id             String               @id @default(cuid())
   name           String
   ip             String
   sshUser        String
@@ -395,11 +396,11 @@ model Server {
   iv             String
   tag            String
   organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   environments   Environment[]
   backupDests    ClientBackupConfig[] @relation("BackupDest")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -485,11 +486,11 @@ model Invitation {
 }
 
 model Project {
-  id                   String                @id @default(cuid())
+  id                   String                 @id @default(cuid())
   name                 String
-  slug                 String                @unique
+  slug                 String                 @unique
   organizationId       String
-  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization         Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members              ProjectMember[]
   environments         Environment[]
   tokens               MachineToken[]
@@ -505,24 +506,31 @@ model Project {
   backupEntries        ProjectBackupEntry[]
   backupRestores       ProjectBackupRestore[]
   docs                 ProjectDoc[]
+  mobileApps           MobileApp[]
   /// Groupe d'organisation (kanban projets). Null = « Sans groupe ».
   groupId              String?
-  group                ProjectGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  group                ProjectGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
   /// Ordre du projet à l'intérieur de son groupe (ou des non-groupés). Posé
   /// explicitement par le drag-and-drop ; ties cassés par createdAt.
-  position             Int                   @default(0)
+  position             Int                    @default(0)
   githubRepo           String?
   githubWorkflow       String?
   /// Connexion CI/CD org-level (provider + issuer + tokens). Cf. modèle public.
   ciConnectionId       String?
-  ciConnection         CiConnection?         @relation(fields: [ciConnectionId], references: [id], onDelete: SetNull)
+  ciConnection         CiConnection?          @relation(fields: [ciConnectionId], references: [id], onDelete: SetNull)
   /// Repo natif quand le provider ≠ github (group/project GitLab ou UUID Bitbucket).
   ciRepo               String?
   /// Dernier fetch des docs depuis le repo (null = jamais tenté). Distingue
   /// « aucun fichier de doc » de « jamais récupéré ».
   docsFetchedAt        DateTime?
-  rotationPaused       Boolean               @default(false)
-  createdAt            DateTime              @default(now())
+  rotationPaused       Boolean                @default(false)
+  /// Onglet « Mobile » activé pour CE projet — DÉFAUT OFF. Deux verrous
+  /// distincts : la feature de plan `mobile_deploy` (payante, refusée en FREE)
+  /// ouvre la capacité au tenant, ce drapeau la déclenche projet par projet
+  /// depuis la modale Paramètres. Un projet sans publication mobile ne porte
+  /// donc pas l'onglet.
+  mobileEnabled        Boolean                @default(false)
+  createdAt            DateTime               @default(now())
 
   @@index([organizationId])
   @@index([ciConnectionId])
@@ -547,17 +555,17 @@ model ProjectGroup {
 
 /// Connexion CI/CD au niveau organisation (cf. modèle public schema.prisma).
 model CiConnection {
-  id             String               @id @default(cuid())
+  id             String                  @id @default(cuid())
   organizationId String
-  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
-  provider       String               @default("github")
+  provider       String                  @default("github")
   issuer         String?
   secrets        CiConnectionSecret[]
   projects       Project[]
   syncTargets    EnvironmentSyncTarget[]
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -582,22 +590,22 @@ model CiConnectionSecret {
 /// Cible de synchronisation sortante d'un environnement (Vercel, puis
 /// Render/Railway). Cf. modèle public + lib/sync/.
 model EnvironmentSyncTarget {
-  id                  String       @id @default(cuid())
-  environmentId       String
-  environment         Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  ciConnectionId      String
-  ciConnection        CiConnection @relation(fields: [ciConnectionId], references: [id], onDelete: Cascade)
-  externalProjectId   String
-  externalProjectName String?
+  id                    String       @id @default(cuid())
+  environmentId         String
+  environment           Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  ciConnectionId        String
+  ciConnection          CiConnection @relation(fields: [ciConnectionId], references: [id], onDelete: Cascade)
+  externalProjectId     String
+  externalProjectName   String?
   externalEnvironmentId String?
   externalServiceId     String?
-  targets             String[]     @default([])
-  tagFilter           String[]     @default([])
-  lastSyncAt          DateTime?
-  lastSyncStatus      String?
-  lastSyncError       String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  targets               String[]     @default([])
+  tagFilter             String[]     @default([])
+  lastSyncAt            DateTime?
+  lastSyncStatus        String?
+  lastSyncError         String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
   @@unique([environmentId, ciConnectionId])
   @@index([ciConnectionId])
@@ -612,7 +620,7 @@ model ProjectDoc {
   projectId String
   project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   kind      ProjectDocKind
-  content   String         // markdown brut
+  content   String // markdown brut
   fetchedAt DateTime       @default(now())
 
   @@unique([projectId, kind])
@@ -626,9 +634,9 @@ enum ProjectDocKind {
 }
 
 model Policy {
-  id            String      @id @default(cuid())
+  id            String       @id @default(cuid())
   /// "github" | "gitlab" | "bitbucket". String, pas enum PG.
-  provider      String      @default("github")
+  provider      String       @default("github")
   /// Issuer OIDC ; null = défaut du provider (github.com / gitlab.com).
   /// Rempli pour GitLab self-hosted et Bitbucket.
   issuer        String?
@@ -637,16 +645,26 @@ model Policy {
   workflow      String
   branch        String
   projectId     String
-  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// "server" (défaut) | "mobile" — cf. OidcPolicy.kind côté admin.
+  kind          String       @default("server")
+  /// Renseigné SSI kind = "server".
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  /// Renseigné SSI kind = "mobile".
+  mobileAppId   String?
+  mobileApp     MobileApp?   @relation(fields: [mobileAppId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  @@unique([provider, repo, workflow, branch, projectId, environmentId])
+  /// Deux uniques : cf. la note du modèle OidcPolicy — un UNIQUE ne dédoublonne
+  /// pas les lignes dont une colonne est NULL.
+  @@unique([provider, repo, workflow, branch, projectId, environmentId], map: "Policy_provider_repo_wf_branch_proj_env_key")
+  @@unique([provider, repo, workflow, branch, projectId, mobileAppId], map: "Policy_provider_repo_wf_branch_proj_mobile_key")
   @@index([provider, repo, workflow, branch])
   @@index([projectId])
   @@index([environmentId])
+  @@index([mobileAppId])
 }
 
 model Service {
@@ -665,7 +683,7 @@ model Service {
   updatedAt     DateTime @updatedAt
 
   /// Comptes applicatifs dont l'URL pointe vers ce service (backend).
-  appAccounts   AppAccount[]
+  appAccounts AppAccount[]
 
   // Rotation REMINDER (Phase B) — rappel d'âge + rotation assistée des creds DU
   // service (Stripe-like). Pas de versioning → historique capé à 3.
@@ -679,9 +697,9 @@ model Service {
   // Hook de rotation des COMPTES liés (Phase C) — service "backend". Les comptes
   // en stratégie WEBHOOK liés à ce service rotent via ce hook. Optionnel (un
   // service Stripe-like n'en a pas). rotationExecMode : "AGENT" | "DIRECT".
-  rotationWebhookUrl   String?
-  rotationHookToken    String?
-  rotationExecMode     String?
+  rotationWebhookUrl String?
+  rotationHookToken  String?
+  rotationExecMode   String?
 
   // Cible de rotation DATABASE des COMPTES liés (A3) — service "base de données
   // managée" (Supabase/RDS/Neon…). La connexion (host/port/base) vit ici, AINSI
@@ -689,17 +707,17 @@ model Service {
   // dbPw*), DISTINCTS des creds « interface/dashboard » du service
   // (encryptedData {user,password}). Un compte lié en stratégie DATABASE rote
   // via cette connexion admin. dbType en TEXT (pas l'enum : absent du schéma public).
-  dbType               String?
-  dbHost               String?
-  dbPort               Int?
-  dbName               String?
+  dbType        String?
+  dbHost        String?
+  dbPort        Int?
+  dbName        String?
   /// Identifiant admin de connexion DB (ex. `postgres` ou `postgres.<ref>` via
   /// pooler Supabase). Plaintext comme dbHost (le secret = le mot de passe).
-  dbUser               String?
+  dbUser        String?
   /// Mot de passe admin DB, chiffré (AES-GCM, comme les autres secrets).
-  dbPwEncrypted        String?
-  dbPwIv               String?
-  dbPwTag              String?
+  dbPwEncrypted String?
+  dbPwIv        String?
+  dbPwTag       String?
 
   @@index([projectId])
   @@index([rotationNextAt])
@@ -754,20 +772,20 @@ model AppAccount {
 }
 
 model Environment {
-  id            String         @id @default(cuid())
+  id            String                  @id @default(cuid())
   name          String
   projectId     String
-  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   url           String?
   dockerCompose String?
   serverId      String?
-  server        Server?        @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  server        Server?                 @relation(fields: [serverId], references: [id], onDelete: SetNull)
   deployPath    String?
   secrets       Secret[]
   tokens        MachineToken[]
   policies      Policy[]
-  liveApis      Api[]          @relation("apiLiveEnv")
-  testApis      Api[]          @relation("apiTestEnv")
+  liveApis      Api[]                   @relation("apiLiveEnv")
+  testApis      Api[]                   @relation("apiTestEnv")
   syncTargets   EnvironmentSyncTarget[]
   /// Comptes applicatifs dont l'URL pointe vers cet environnement (frontend).
   appAccounts   AppAccount[]
@@ -777,47 +795,47 @@ model Environment {
 }
 
 model Secret {
-  id                    String            @id @default(cuid())
-  key                   String
-  encryptedValue        String
-  iv                    String
-  tag                   String
-  category              String?
+  id                       String            @id @default(cuid())
+  key                      String
+  encryptedValue           String
+  iv                       String
+  tag                      String
+  category                 String?
   /// Tags techniques pour le filtrage dans les intégrations (N8n/Make).
   /// Distinct de `category` (organisation visuelle UI). Ex: ["postgres", "production"].
-  tags                  String[]          @default([])
-  environmentId         String
-  environment           Environment       @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  versions              SecretVersion[]
-  rotationEnabled       Boolean           @default(false)
-  rotationStrategy      RotationStrategy?
-  rotationIntervalDays  Int?
-  rotationLastAt        DateTime?
-  rotationNextAt        DateTime?
-  rotationLastStatus    String?           // "success" | "error" | null
-  rotationErrorCount    Int               @default(0)
+  tags                     String[]          @default([])
+  environmentId            String
+  environment              Environment       @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  versions                 SecretVersion[]
+  rotationEnabled          Boolean           @default(false)
+  rotationStrategy         RotationStrategy?
+  rotationIntervalDays     Int?
+  rotationLastAt           DateTime?
+  rotationNextAt           DateTime?
+  rotationLastStatus       String? // "success" | "error" | null
+  rotationErrorCount       Int               @default(0)
   /// Mode d'exécution de la rotation DATABASE : "AGENT" (DB Docker-interne, sidecar
   /// agent self-rotation) ou "DIRECT" (DB managée joignable, chemin N8n). Défaut AGENT.
-  rotationExecMode      String            @default("AGENT")
+  rotationExecMode         String            @default("AGENT")
   /// Demande de rotation immédiate (bouton « Forcer ») : bypass la fenêtre horaire
   /// planifiée. Posé par /rotation/force (mode AGENT), purgé au report. null = pas de force.
   rotationForceRequestedAt DateTime?
-  dbHost                String?
-  dbPort                Int?
-  dbName                String?
-  dbType                DatabaseType?
-  dbUser                String?
-  rotationNeedsFullDeploy Boolean          @default(false)
-  rotationWebhookUrl    String?
+  dbHost                   String?
+  dbPort                   Int?
+  dbName                   String?
+  dbType                   DatabaseType?
+  dbUser                   String?
+  rotationNeedsFullDeploy  Boolean           @default(false)
+  rotationWebhookUrl       String?
   /// Stratégie WEBHOOK (Phase C) — libellé de la cible (ex. « Compte admin de l'app »)
   /// pour lever le flou UX, et token Bearer optionnel envoyé au hook pour l'auth.
-  rotationHookLabel     String?
-  rotationHookToken     String?
-  jwtRedeployWebhookUrl String?
-  apiKeyId              String?
-  apiKey                ApiKey?           @relation("secretApiKey", fields: [apiKeyId], references: [id], onDelete: SetNull)
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  rotationHookLabel        String?
+  rotationHookToken        String?
+  jwtRedeployWebhookUrl    String?
+  apiKeyId                 String?
+  apiKey                   ApiKey?           @relation("secretApiKey", fields: [apiKeyId], references: [id], onDelete: SetNull)
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
 
   @@unique([environmentId, key])
   @@index([rotationNextAt])
@@ -850,6 +868,156 @@ model SecretVersion {
 
   @@unique([secretId, version])
   @@index([secretId, version(sort: Desc)])
+}
+
+/// Une application publiable = un couple (projet, plateforme, identifiant magasin).
+/// Cf. documentation/plans/deploiement-mobile.md §4.2. Phase 1 (socle credentials).
+/// Volontairement absent de prisma/schema.prisma (comme ProjectBackupConfig) :
+/// tenant-only, aucun consommateur admin-side à ce stade. La migration crée la
+/// table via un DO block hand-écrit (motif SecretRequest), pas via un diff
+/// `prisma migrate dev` sur schema.prisma.
+model MobileApp {
+  id           String             @id @default(cuid())
+  projectId    String
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// "android" | "ios". String, pas enum PG (cf. Policy.provider — un ALTER
+  /// TYPE sur un enum tenant-only plante le déploiement admin, mémoire
+  /// orgrole-enum-tenant-only).
+  platform     String
+  /// applicationId Android (com.exemple.app) ou bundleId iOS.
+  bundleId     String
+  displayName  String
+  /// Team ID Apple / identifiant développeur Play. Informatif + préremplissage.
+  vendorTeamId String?
+  /// Étiquette de regroupement cosmétique ("Production"/"Staging"/"Dev"),
+  /// orthogonale à `platform` — décidé §10.5 du plan (2026-08-14). Purement
+  /// UI, non contrainte : le repliage visuel par groupe est différé.
+  group        String?
+  /// Version marketing servie au CI (CFBundleShortVersionString / versionName),
+  /// ex. "1.4". Fixée à la main : bumper une version est une décision humaine.
+  versionName  String?
+  /// Dernier numéro de build SERVI (CFBundleVersion / versionCode). À
+  /// initialiser au dernier numéro déjà publié sur le store ; chaque
+  /// POST /api/deploy/mobile sert `buildNumber + 1` et le persiste. Compteur
+  /// LOCAL (repli §4.5 du plan) : la lecture autoritative du magasin est la
+  /// Phase 5. Des trous après un échec de build sont sans conséquence (un
+  /// numéro de build doit croître, pas être contigu).
+  buildNumber  Int                @default(0)
+  /// Coupe-circuit de publication PAR APP (donc par plateforme). true =>
+  /// /api/deploy/mobile répond 403 « publications en pause » à un pipeline
+  /// pourtant autorisé — gel manuel depuis la console, audité, sans toucher au
+  /// CI. Même motif que Secret.rotationPaused / Project.rotationPaused. La
+  /// FRONTIÈRE (policy) reste intacte : c'est un veto ponctuel, pas une
+  /// révocation d'accès.
+  deployPaused Boolean            @default(false)
+  credentials  MobileCredential[]
+  releases     MobileRelease[]
+  policies     Policy[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@unique([projectId, platform, bundleId])
+  @@index([projectId])
+}
+
+/// Matériel de signature et accès magasin (keystore, certificat, clé d'API…).
+/// La valeur est TOUJOURS du base64 (même un champ texte comme un mot de
+/// passe) : un seul chemin de codage. Séparé de `Secret` à dessein — un
+/// `Secret` coule dans le `.env` du bundle serveur, un keystore base64 y
+/// serait une fuite gratuite (plan §4.2).
+model MobileCredential {
+  id              String                    @id @default(cuid())
+  appId           String
+  app             MobileApp                 @relation(fields: [appId], references: [id], onDelete: Cascade)
+  /// "android_keystore" | "android_keystore_password" | "android_key_alias" |
+  /// "android_key_password" | "play_service_account" | "ios_p12" |
+  /// "ios_p12_password" | "ios_profile" | "asc_api_key" | "asc_key_id" |
+  /// "asc_issuer_id" — cf. plan §4.4. String, pas enum PG (même motif).
+  kind            String
+  /// Nom de fichier d'origine (restitué au CI ; sert aussi à l'UI).
+  filename        String?
+  sizeBytes       Int
+  /// Empreinte SHA-256 du CLAIR — détecte un remplacement et corrèle un
+  /// bundle à ce qui a réellement signé, sans révéler la valeur.
+  sha256          String
+  encryptedValue  String
+  iv              String
+  tag             String
+  /// Extraite du matériel à l'import (certificat X.509, profil provisioning).
+  /// Null si le type n'a pas de notion d'expiration (mot de passe, clé .p8).
+  expiresAt       DateTime?
+  /// Dernier rappel d'expiration envoyé — anti-spam, motif
+  /// ProjectBackupConfig.overdueAlertedAt. Phase 4 (pas encore émis en Phase 1).
+  expiryAlertedAt DateTime?
+  versions        MobileCredentialVersion[]
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@unique([appId, kind])
+  @@index([expiresAt])
+}
+
+/// Une livraison. Physalis ne détient PAS l'artefact (§3.2) — seulement son
+/// signalement : quelle version est partie sur quelle piste, signée par quel
+/// matériel, poussée par quel pipeline. C'est la réponse en un écran à une
+/// question qui vit aujourd'hui dans trois consoles et un canal Slack (§5.3).
+model MobileRelease {
+  id             String    @id @default(cuid())
+  appId          String
+  app            MobileApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+  /// "internal" | "alpha" | "beta" | "production" (Play) ;
+  /// "testflight" | "appstore" (iOS).
+  ///
+  /// ⚠️ Écart au plan, assumé : la ligne naît AU MOMENT OÙ LE BUNDLE EST SERVI,
+  /// donc avant que la piste soit connue — le CI ne la décide qu'à l'upload.
+  /// Elle vaut donc "pending" jusqu'au /report. Créer la ligne plus tôt est ce
+  /// qui rend la corrélation matériel↔version VRAIE : elle est écrite par
+  /// Physalis à partir de ce qu'il a réellement servi, pas déclarée après coup
+  /// par le pipeline.
+  track          String    @default("pending")
+  /// versionName / CFBundleShortVersionString.
+  versionName    String?
+  /// versionCode / CFBundleVersion. Texte et non entier : iOS accepte "1.2.3".
+  buildNumber    String
+  /// "reported" (le CI l'a dit) | "store" (relu au magasin, Phase 5).
+  statusSource   String    @default("reported")
+  /// requested | uploaded | processing | in_review | live | halted | rejected | failed
+  status         String    @default("requested")
+  statusDetail   String?
+  /// Empreintes du matériel SERVI, par kind : { "ios_p12": "AB12…" }. Répond à
+  /// « quel certificat a signé cette version » sans révéler la moindre valeur —
+  /// et permet de repérer qu'un build est parti sous un certificat depuis
+  /// remplacé.
+  credentialsSha Json      @default("{}")
+  /// Identité du pipeline (claims OIDC déjà vérifiés) — « qui a publié ça ».
+  ciProvider     String?
+  ciRepo         String?
+  ciRef          String?
+  requestedAt    DateTime  @default(now())
+  reportedAt     DateTime?
+  storeSyncedAt  DateTime?
+
+  @@unique([appId, track, buildNumber])
+  @@index([appId, requestedAt(sort: Desc)])
+  @@index([status])
+}
+
+/// Calque de SecretVersion : snapshot avant remplacement, même colonnes,
+/// même @@unique, même limite de rétention (cf. lib/versioning.ts).
+model MobileCredentialVersion {
+  id             String           @id @default(cuid())
+  credentialId   String
+  credential     MobileCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  encryptedValue String
+  iv             String
+  tag            String
+  version        Int
+  createdById    String?
+  createdBy      User?            @relation("mobileCredentialVersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime         @default(now())
+
+  @@unique([credentialId, version])
+  @@index([credentialId, version(sort: Desc)])
 }
 
 model MachineToken {
@@ -1221,6 +1389,9 @@ enum AccessAction {
   PROJECT_GROUP_DELETE
   DEPLOY_AUTHORIZED
   DEPLOY_DENIED
+  /// Déploiement mobile — Phase 2 (bundle de signature servi au CI).
+  MOBILE_DEPLOY_AUTHORIZED
+  MOBILE_DEPLOY_DENIED
   PLUGIN_AUTH_SUCCESS
   PLUGIN_AUTH_FAILURE
   PLUGIN_CREDENTIALS_FETCH
@@ -1303,6 +1474,27 @@ enum AccessAction {
   USER_ACCOUNT_DELETE_REQUESTED
   USER_ACCOUNT_DELETE_CANCELLED
   USER_ACCOUNT_DELETED
+  /// Déploiement mobile — Phase 1 (socle credentials). Cf. deploiement-mobile.md.
+  MOBILE_APP_CREATE
+  MOBILE_APP_UPDATE
+  MOBILE_APP_DELETE
+  MOBILE_CREDENTIAL_IMPORT
+  MOBILE_CREDENTIAL_REPLACE
+  MOBILE_CREDENTIAL_DELETE
+  /// Validation d'accréditation (Phase 2, §7) : sonde Google Play / App Store
+  /// Connect avec les clés du client. Audité parce que c'est un appel sortant
+  /// portant l'identité du client, pas une simple lecture.
+  MOBILE_CREDENTIAL_VERIFY
+  /// Génération du matériel de signature (Phase 7, §5.5) : keystore d'upload
+  /// Android, ou chaîne iOS complète (CSR → certificat ASC → .p12 → profil).
+  MOBILE_CREDENTIAL_GENERATE
+  /// Registre de livraisons (Phase 3) : le CI signale l'issue d'un téléversement.
+  MOBILE_RELEASE_REPORTED
+  /// Révocation d'un certificat de distribution Apple (Phase 7) — l'équivalent
+  /// de `match nuke`. `forced: true` en métadonnée signifie qu'on a révoqué le
+  /// certificat EN SERVICE : c'est la trace à chercher quand une publication
+  /// casse sans raison apparente.
+  MOBILE_CERTIFICATE_REVOKED
 }
 
 /// Demande de secret externe (Phase 9). Un user DEV+ crée la demande,
@@ -1314,27 +1506,27 @@ enum AccessAction {
 ///
 /// Lien one-shot : invalidé après soumission OU 48h.
 model SecretRequest {
-  id                 String        @id @default(cuid())
+  id                 String       @id @default(cuid())
   /// SHA-256 du token brut (`sv_extreq_<32hex>`). Le brut n'est jamais stocké.
-  tokenHash          String        @unique
+  tokenHash          String       @unique
   /// Label visible par le destinataire (ex: "Clé API Stripe production").
   label              String
   /// Description optionnelle, visible par le destinataire.
   description        String?
   /// Auteur de la demande (FK SetNull pour conserver la trace).
   requestedById      String?
-  requestedBy        User?         @relation("secretRequestCreator", fields: [requestedById], references: [id], onDelete: SetNull)
+  requestedBy        User?        @relation("secretRequestCreator", fields: [requestedById], references: [id], onDelete: SetNull)
   /// Email auteur dénormalisé (subsiste après suppression de l'user).
   requestedByEmail   String
   /// Email destinataire optionnel — si rempli, envoi auto via Mailgun.
   recipientEmail     String?
   /// Org propriétaire de la demande (Cascade : delete org → delete requests).
   organizationId     String
-  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   /// Cible projet optionnelle (SetNull pour garder la trace même après
   /// suppression du projet — l'import devient impossible mais l'audit reste).
   projectId          String?
-  project            Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  project            Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
   /// Nom de l'environnement cible (string, pas FK — l'env peut être renommé).
   environmentName    String?
   /// Clé .env cible (ex: "STRIPE_SECRET_KEY"). Validée à l'import contre /^[A-Z][A-Z0-9_]*$/.
@@ -1365,7 +1557,7 @@ model SecretRequest {
   viewedAt           DateTime?
   importedAt         DateTime?
   revokedAt          DateTime?
-  createdAt          DateTime      @default(now())
+  createdAt          DateTime     @default(now())
 
   @@index([organizationId])
   @@index([projectId])
@@ -1430,20 +1622,20 @@ model ApiKey {
 }
 
 model ApiLog {
-  id          String   @id @default(cuid())
-  apiId       String
-  api         Api      @relation(fields: [apiId], references: [id], onDelete: Cascade)
-  keyId       String?
-  keyPrefix   String?
-  method      String
-  path        String?
-  ipAddress   String?
-  userAgent   String?
-  valid       Boolean
-  reason      String?
-  statusCode  Int?
-  latencyMs   Int?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  apiId      String
+  api        Api      @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  keyId      String?
+  keyPrefix  String?
+  method     String
+  path       String?
+  ipAddress  String?
+  userAgent  String?
+  valid      Boolean
+  reason     String?
+  statusCode Int?
+  latencyMs  Int?
+  createdAt  DateTime @default(now())
 
   @@index([apiId, createdAt(sort: Desc)])
   @@index([keyId, createdAt(sort: Desc)])
@@ -1509,11 +1701,18 @@ model OidcPolicy {
   branch        String
   tenantSlug    String   @map("tenant_slug") @db.VarChar(100)
   projectId     String   @map("project_id")
-  environmentId String   @map("environment_id")
+  /// "server" (défaut) | "mobile" — miroir du modèle SaaS, cf.
+  /// prisma/schema.prisma OidcPolicy et deploiement-mobile.md §4.3.
+  kind          String   @default("server")
+  environmentId String?  @map("environment_id")
+  mobileAppId   String?  @map("mobile_app_id")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@unique([provider, repo, workflow, branch, tenantSlug, projectId, environmentId])
+  /// `map` explicite : les deux noms auto-générés se tronquent sur le même
+  /// préfixe (63 caractères) et entrent en collision.
+  @@unique([provider, repo, workflow, branch, tenantSlug, projectId, environmentId], map: "policies_provider_repo_wf_branch_tenant_proj_env_key")
+  @@unique([provider, repo, workflow, branch, tenantSlug, projectId, mobileAppId], map: "policies_provider_repo_wf_branch_tenant_proj_mobile_key")
   @@index([provider, repo, workflow, branch])
   @@index([tenantSlug, projectId])
   @@index([issuer])

@@ -17,6 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { requireEnvironment } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { triggerSync } from "@/lib/sync/dispatch";
@@ -62,7 +63,8 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   // Transaction : snapshot l'ancienne valeur + UPDATE atomique.
-  const result = await prisma.$transaction(async (tx) => {
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  const result = await withTenantSchema(access.tenantSlug, async (tx) => {
     const { version: snapshotVersion } = await createSecretVersion({
       tx,
       secretId: secret.id,

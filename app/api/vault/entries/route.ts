@@ -1,4 +1,4 @@
-// /api/vault/entries — coffre personnel (cf. docs/coffres.md)
+// /api/vault/entries — coffre personnel (cf. documentation/plans/done/coffres.md)
 //
 // Toutes les routes sont scopées sur req.user — un user ne voit JAMAIS
 // les entrees d'un autre, meme un admin global. Aucun partage en V1.

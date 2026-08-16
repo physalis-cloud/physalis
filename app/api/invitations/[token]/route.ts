@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
 import { hashInvitationToken } from "@/lib/invitations";
 import { logAction } from "@/lib/audit";
+import { applyInvitationProjectAccess } from "@/lib/invitation-project-access";
 
 type Params = { params: Promise<{ token: string }> };
 
@@ -79,20 +80,20 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  // §2.24b — re-vérifie le quota de sièges à l'acceptation (cf. me/invitations
-  // /[id]/accept). Sauté si l'user est déjà membre (l'upsert ne fait qu'un
-  // update de rôle, aucun siège ajouté).
-  const alreadyMember = await prisma.orgMember.findUnique({
-    where: {
-      userId_organizationId: {
-        userId: me.id,
-        organizationId: invitation.organizationId,
+  // (Le `alreadyMember` de la version SaaS n'existait ici que pour le quota de
+  // sièges, retiré en mono-tenant : il était devenu du code mort. La lecture
+  // équivalente vit désormais DANS la transaction, où elle sert vraiment.)
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.orgMember.findUnique({
+      where: {
+        userId_organizationId: {
+          userId: me.id,
+          organizationId: invitation.organizationId,
+        },
       },
-    },
-    select: { id: true },
-  });
-  await prisma.$transaction([
-    prisma.orgMember.upsert({
+      select: { id: true },
+    });
+    await tx.orgMember.upsert({
       where: {
         userId_organizationId: {
           userId: me.id,
@@ -105,12 +106,25 @@ export async function POST(req: Request, { params }: Params) {
         role: invitation.role,
       },
       update: { role: invitation.role },
-    }),
-    prisma.invitation.update({
+    });
+    // #2 — accès projet pré-attribués, seulement à la 1re acceptation.
+    // Ce chemin (acceptation depuis le LIEN E-MAIL) ne les appliquait pas alors
+    // que les deux autres le font : l'inviteur cochait des projets, l'invité
+    // arrivait sans aucun accès, en silence.
+    if (!existing) {
+      await applyInvitationProjectAccess(
+        tx,
+        invitation.organizationId,
+        invitation.projectAccess,
+        me.id,
+        invitation.role,
+      );
+    }
+    await tx.invitation.update({
       where: { id: invitation.id },
       data: { acceptedAt: new Date() },
-    }),
-  ]);
+    });
+  });
 
   logAction({
     action: "MEMBER_INVITE_ACCEPT",

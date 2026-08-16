@@ -1,7 +1,7 @@
 // Authentification partagée des endpoints opérateur de confiance (crons métier,
 // rotation N8n, rapports de backup VPS).
 //
-// Deux tiers de privilège (cf. docs/steps-docs/todo/cron-secret-hardening.md, Phase 1) :
+// Deux tiers de privilège (cf. documentation/plans/done/cron-secret-hardening.md, Phase 1) :
 //   - "report" → CRON_SECRET_REPORT : bas privilège, n'autorise QUE
 //     POST /api/admin/infra/backup (posé sur le maillon le plus exposé, les
 //     scripts de backup du VPS secondaire).

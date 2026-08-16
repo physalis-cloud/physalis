@@ -66,6 +66,8 @@ const ADMIN_ONLY_MIGRATIONS = new Set([
   "20260626160000_client_social_login_enabled",
   "20260722130000_client_trial_consumed",
   "20260802120000_client_seat_freeze_at",
+  "20260814130000_client_mobile_deploy_addon",
+  "20260815130000_policies_mobile_kind_admin",
 ]);
 
 const prisma = new PrismaClient();

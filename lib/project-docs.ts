@@ -18,9 +18,26 @@ import { loadProjectCiSecrets, bitbucketAuthHeader } from "./ci-connection";
 import { effectiveRepo } from "./ci-provider";
 import type { ProjectDocKind } from "@prisma/client";
 
+export type MarkdownOptions = {
+  /**
+   * Traduit un href du markdown en URL INTERNE à l'application. Rend `null`
+   * pour laisser le lien tel quel — il est alors traité comme sortant.
+   *
+   * Sert au corpus de pilotage interne, dont les liens sont des chemins de
+   * fichiers relatifs : sans traduction, le navigateur les résout contre l'URL
+   * courante et fabrique un 404. Aucun appelant ne le passe côté self-host —
+   * le rendu qui s'en sert (`lib/tasks/markdown.ts`) n'y est pas synchronisé.
+   */
+  resolveHref?: (href: string) => string | null;
+};
+
 /** Markdown → HTML SANITISÉ (le contenu vient du repo de l'équipe = semi-confiance).
- *  Bloque script/style/handlers, restreint les schémas d'URL, ouvre les liens en _blank. */
-export async function renderMarkdownSafe(md: string): Promise<string> {
+ *  Bloque script/style/handlers, restreint les schémas d'URL, ouvre les liens
+ *  sortants en _blank — un lien traduit en URL interne reste, lui, dans l'onglet. */
+export async function renderMarkdownSafe(
+  md: string,
+  opts: MarkdownOptions = {},
+): Promise<string> {
   const raw = await marked.parse(md, { gfm: true, breaks: false });
   const clean = sanitizeHtml(raw, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img", "h1", "h2"]),
@@ -34,10 +51,14 @@ export async function renderMarkdownSafe(md: string): Promise<string> {
     },
     allowedSchemes: ["http", "https", "mailto"],
     transformTags: {
-      a: (tagName, attribs) => ({
-        tagName,
-        attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer" },
-      }),
+      a: (tagName, attribs) => {
+        const interne = attribs.href ? opts.resolveHref?.(attribs.href) : null;
+        // Un lien interne ne s'ouvre PAS dans un onglet neuf : naviguer dans sa
+        // propre documentation ne doit pas semer une fenêtre par clic.
+        return interne
+          ? { tagName, attribs: { ...attribs, href: interne } }
+          : { tagName, attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer" } };
+      },
     },
   });
 

@@ -35,7 +35,7 @@ const TENANT_DOMAIN = process.env.PHYSALIS_TENANT_DOMAIN ?? "physalis.cloud";
  * une victime potentielle : les dériver d'un en-tête de requête (`Host`,
  * `X-Forwarded-Host`) laisse l'émetteur du mail choisir le domaine de
  * destination, donc envoyer un lien de phishing signé par notre DKIM avec le
- * branding réel (cf. docs/failles.md §2.11). Le slug, lui, vient de la session
+ * branding réel (cf. documentation/rapports/failles.md §2.11). Le slug, lui, vient de la session
  * authentifiée — il n'est pas forgeable par un en-tête.
  *
  * `tenantSlug` null → instance mono-tenant (self-host) : repli sur l'URL

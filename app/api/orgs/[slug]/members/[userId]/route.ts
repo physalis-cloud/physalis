@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { readJson, requireOrgMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 
@@ -102,24 +103,31 @@ export async function DELETE(req: Request, { params }: Params) {
   });
   const projectIds = orgProjects.map((p) => p.id);
 
-  const [
-    ,
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  // Ici l'atomicité N'EST PAS cosmétique : §2.7 et §2.19 déclarent l'offboarding
+  // clos en s'appuyant dessus. Sans elle, un échec en cours de route commitait
+  // une partie et abandonnait le reste — un membre retiré pouvait conserver des
+  // machine tokens vivants sur les secrets de prod, ou son accès aux coffres
+  // d'équipe. La forme tableau du client étendu ne la donnait pas.
+  // L'ordre est conservé : révocations d'abord, retrait de l'appartenance en
+  // dernier — de sorte qu'un rollback ne laisse jamais l'inverse.
+  const {
     revokedTokens,
     revokedOrgTokens,
     revokedVaultShares,
     revokedInvitations,
-  ] = await prisma.$transaction([
-    prisma.projectMember.deleteMany({
+  } = await withTenantSchema(access.tenantSlug, async (tx) => {
+    await tx.projectMember.deleteMany({
       where: { userId, projectId: { in: projectIds } },
-    }),
-    prisma.machineToken.updateMany({
+    });
+    const revokedTokens = await tx.machineToken.updateMany({
       where: {
         createdById: userId,
         projectId: { in: projectIds },
         revokedAt: null,
       },
       data: { revokedAt: new Date() },
-    }),
+    });
     // §2.19 — OrgToken émis par le partant : la garde DEV (portée ⊆ projets
     // membres non masqués) n'est validée QU'À l'émission ; sans ceci, un DEV
     // offboardé gardait jusqu'à 90 j un `sv_org_*` lisant les secrets de prod.
@@ -132,7 +140,7 @@ export async function DELETE(req: Request, { params }: Params) {
     // AUSSI révoqué. Over-révocation ASSUMÉE — direction fail-safe (rompt une
     // intégration, n'ouvre jamais d'accès) ; l'alternative serait une colonne
     // `emitterLevel` (migration), non justifiée pour ce gain.
-    prisma.orgToken.updateMany({
+    const revokedOrgTokens = await tx.orgToken.updateMany({
       where: {
         createdById: userId,
         organizationId: access.organization.id,
@@ -141,13 +149,13 @@ export async function DELETE(req: Request, { params }: Params) {
         revokedAt: null,
       },
       data: { revokedAt: new Date() },
-    }),
+    });
     // Coffres d'équipe : sans ça, l'offboardé gardait l'accès aux collections
     // partagées après son retrait de l'org (TeamVaultMember survit à OrgMember,
     // et l'accès coffre ne re-dérive pas l'appartenance à l'org). Cf. §2.7.
     // Une collection est soit ORG-level, soit PROJET-level → on couvre les deux,
     // en restant scopé à CETTE org (les coffres d'autres orgs sont intouchés).
-    prisma.teamVaultMember.deleteMany({
+    const revokedVaultShares = await tx.teamVaultMember.deleteMany({
       where: {
         userId,
         collection: {
@@ -157,21 +165,27 @@ export async function DELETE(req: Request, { params }: Params) {
           ],
         },
       },
-    }),
+    });
     // §2.25f — invitations PENDANTES émises par le partant dans CETTE org : sans
     // ça, un ADMIN en cours d'offboarding s'auto-invitait puis acceptait dans la
     // fenêtre TTL (48 h) APRÈS son retrait (findActiveInvitation ne teste que
     // existence/acceptedAt/expiresAt). Scopé à l'org (les invitations qu'il a
     // émises dans d'autres orgs, où il reste membre, sont intactes).
-    prisma.invitation.deleteMany({
+    const revokedInvitations = await tx.invitation.deleteMany({
       where: {
         invitedById: userId,
         organizationId: access.organization.id,
         acceptedAt: null,
       },
-    }),
-    prisma.orgMember.delete({ where: { id: target.id } }),
-  ]);
+    });
+    await tx.orgMember.delete({ where: { id: target.id } });
+    return {
+      revokedTokens,
+      revokedOrgTokens,
+      revokedVaultShares,
+      revokedInvitations,
+    };
+  });
 
   // Purge prudente de l'orphelin : si l'user n'est plus membre d'AUCUNE org
   // ET n'a aucune donnée perso (coffre vide), on supprime son compte pour

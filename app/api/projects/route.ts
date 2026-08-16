@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ProjectRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   accessibleProjectsWhere,
@@ -9,9 +10,45 @@ import {
   requireUser,
   slugify,
 } from "@/lib/api";
+import {
+  desiredMembershipRow,
+  isDesiredProjectAccess,
+  type DesiredProjectAccess,
+} from "@/lib/project-access";
 import { logAction } from "@/lib/audit";
 
 const DEFAULT_ENVS = ["production", "staging", "development"];
+
+/**
+ * Accès des AUTRES membres de l'org, réglé dans le formulaire de création.
+ *
+ * Sans ça, un projet neuf naît accessible à tous les DEV de l'org (EDITOR
+ * implicite, règle 4) : le régler après coup suppose de ne pas l'oublier, et le
+ * projet est ouvert entre-temps. Le poser à la création est le seul moment où
+ * l'oubli est impossible.
+ *
+ * Parsing défensif, même parti pris que `parseInvitationProjectAccess` : toute
+ * entrée malformée est ignorée en silence plutôt que de faire échouer la
+ * création du projet.
+ */
+function parseMemberAccess(
+  raw: unknown,
+): Array<{ userId: string; role: DesiredProjectAccess }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ userId: string; role: DesiredProjectAccess }> = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const userId = (entry as { userId?: unknown }).userId;
+    const role = (entry as { role?: unknown }).role;
+    if (typeof userId !== "string" || !userId) continue;
+    if (!isDesiredProjectAccess(role)) continue;
+    if (seen.has(userId)) continue;
+    seen.add(userId);
+    out.push({ userId, role });
+  }
+  return out;
+}
 
 export async function GET(req: Request) {
   const userRes = await requireUser();
@@ -62,6 +99,7 @@ export async function POST(req: Request) {
         slug?: string;
         environments?: string[];
         organization?: string;
+        memberAccess?: unknown;
       }
     | null;
   if (!body || typeof body.name !== "string" || body.name.trim().length === 0) {
@@ -109,13 +147,44 @@ export async function POST(req: Request) {
     );
   }
 
+  // Accès des autres membres, posé dans la même création que le projet : pas de
+  // fenêtre pendant laquelle le projet existe sans ses barrières.
+  const requested = parseMemberAccess(body?.memberAccess).filter(
+    (e) => e.userId !== user.id,
+  );
+  const memberRows: Array<{
+    userId: string;
+    role: ProjectRole;
+    hidden: boolean;
+  }> = [{ userId: user.id, role: "OWNER", hidden: false }];
+  if (requested.length > 0) {
+    // Une entrée ne vaut que pour un membre de CETTE org (règle 6 : hors de
+    // l'org, aucune ligne ne doit subsister).
+    const orgMembers = await prisma.orgMember.findMany({
+      where: {
+        organizationId: access.organization.id,
+        userId: { in: requested.map((e) => e.userId) },
+      },
+      select: { userId: true, role: true },
+    });
+    const orgRoleByUser = new Map(orgMembers.map((m) => [m.userId, m.role]));
+    for (const e of requested) {
+      const orgRole = orgRoleByUser.get(e.userId);
+      if (!orgRole) continue;
+      // `null` = aucune ligne nécessaire (l'implicite du rôle d'org produit
+      // déjà le résultat voulu, ou la cible est OrgADMIN/OWNER : intouchable).
+      const row = desiredMembershipRow(orgRole, e.role);
+      if (row) memberRows.push({ userId: e.userId, ...row });
+    }
+  }
+
   const project = await prisma.project.create({
     data: {
       name,
       slug,
       organizationId: access.organization.id,
       environments: { create: uniqueEnvs.map((envName) => ({ name: envName })) },
-      members: { create: { userId: user.id, role: "OWNER" } },
+      members: { create: memberRows },
     },
     include: { environments: { select: { id: true, name: true } } },
   });
@@ -127,7 +196,23 @@ export async function POST(req: Request) {
     projectId: project.id,
     targetType: "Project",
     targetId: project.id,
-    metadata: { name: project.name, slug: project.slug, environments: uniqueEnvs },
+    metadata: {
+      name: project.name,
+      slug: project.slug,
+      environments: uniqueEnvs,
+      // Les lignes posées d'entrée, dont les barrières : sans ça, un membre
+      // bloqué dès la création n'apparaîtrait nulle part dans l'audit.
+      ...(memberRows.length > 1
+        ? {
+            memberAccess: memberRows
+              .filter((m) => m.userId !== user.id)
+              .map((m) => ({
+                userId: m.userId,
+                access: m.hidden ? "NONE" : m.role,
+              })),
+          }
+        : {}),
+    },
     req,
   });
 

@@ -1,0 +1,677 @@
+# .github/workflows/release-ios.yml
+#
+# Publie l'app iOS sur TestFlight SANS aucun secret GitHub. Deux bundles sont
+# recuperes a la volee depuis Physalis via un token OIDC signe par GitHub :
+#
+#   1. /api/deploy         -> les VITE_* de l'environnement production, injectees
+#                             dans le build Vite (frontend/.env.production)
+#   2. /api/deploy/mobile  -> le materiel de signature (certificat .p12, profil
+#                             de provisioning, cle d'API App Store Connect)
+#
+# Physalis ne construit ni ne stocke l'artefact : le build (vite + capacitor +
+# xcodebuild) se fait ICI, sur un runner macOS, et fastlane televerse
+# directement vers Apple.
+#
+# ─── Specificite de ce projet : Capacitor ────────────────────────────────
+#
+# `frontend/ios/` est gitignore et regenere a chaque run par `npx cap add`. Le
+# projet natif s'appelle donc TOUJOURS App.xcworkspace / scheme `App` (noms
+# imposes par Capacitor), et tout ce qui le personnalise (Info.plist, version,
+# icones) doit etre re-applique ici a chaque build — comme dans build-ios.yml.
+#
+# Le nom du profil de provisioning et le Team ID ne sont PAS codes en dur : ils
+# sont extraits du .mobileprovision fourni par Physalis. Changer de profil cote
+# Physalis suffit, aucun fichier a toucher ici.
+#
+# ─── Pre-requis cote Physalis ────────────────────────────────────────────
+#
+#   1. Onglet Mobile du projet active (Parametres du projet -> Deploiement mobile)
+#   2. Application iOS creee (com.exemple.monapp), avec son materiel :
+#        - Certificat de distribution (.p12)     -> ios_p12 + ios_p12_password
+#        - Profil de provisioning App Store      -> ios_profile
+#        - Cle d'API App Store Connect (.p8)     -> asc_api_key
+#          + Key ID (asc_key_id) + Issuer ID (asc_issuer_id)
+#   3. Connexion CI/CD reliee au projet (Parametres) + repo defini
+#   4. DEUX policies, toutes deux sur (repo, workflow, branche) :
+#        - Policy deploiement : (mon-org/mon-repo, release-ios.yml,
+#          production) -> (mon-projet, production)   [pour /api/deploy]
+#        - Policy mobile      : (mon-org/mon-repo, release-ios.yml,
+#          production) -> application iOS                 [pour /api/deploy/mobile]
+#   5. Physalis accessible en HTTPS depuis api.github.com
+#
+# ─── Versions : Physalis fait autorite ───────────────────────────────────
+#
+# Apple refuse un CFBundleVersion qui ne croit pas. Ce workflow n'invente donc
+# aucun numero : /api/deploy/mobile sert `buildNumber` (compteur incremente
+# atomiquement a chaque appel) et `versionName` (version marketing, fixee a la
+# main dans l'onglet Mobile de l'app — bumper une version est une decision
+# humaine). Aucun input de version cote GitHub : le compteur du vault est la
+# seule source, et se reajuste depuis la fiche de l'app si besoin.
+#
+# Aucun `secrets.*` n'est consomme — c'est volontaire.
+
+#
+# ═══ À ADAPTER POUR VOTRE PROJET ═════════════════════════════════════════
+#   - env VAULT_PROJECT / MOBILE_APP : slug du projet Physalis + bundleId
+#     (exemple : mon-projet / com.exemple.monapp).
+#   - Modèle pour une app Capacitor dont la racine web est `frontend/` :
+#     adaptez les chemins `frontend/...` si votre web vit ailleurs.
+#   - Étape "Configure Info.plist" : textes de permission + nom affiché.
+#   - Étape "Generate app icon" : chemin de l'icône source.
+# ═════════════════════════════════════════════════════════════════════════
+#
+# ═══ DÉCLENCHEMENT — À CHOISIR ═══════════════════════════════════════════
+#   Par défaut ci-dessous : manuel (workflow_dispatch) uniquement, pour que
+#   « mise à jour serveur ≠ déploiement mobile » — vous lancez la publication
+#   quand vous le décidez, plateforme par plateforme (2 workflows séparés).
+#   Pour publier AUTOMATIQUEMENT à chaque push, ajoutez sous `on:` :
+#       push:
+#         branches: [production]
+#   Pour n'auto-déclencher que sur des changements mobiles, ajoutez `paths:`.
+# ═════════════════════════════════════════════════════════════════════════
+name: Release iOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # requis pour core.getIDToken()
+  contents: read
+
+env:
+  VAULT_URL: https://vault.physalis.cloud
+  VAULT_AUDIENCE: vault.physalis.cloud
+  VAULT_PROJECT: mon-projet
+  VAULT_ENV: production
+  MOBILE_APP: com.exemple.monapp
+  IOS_SCHEME: App   # impose par Capacitor
+  # Plancher impose par GoogleMLKit 8 (@capacitor-mlkit/barcode-scanning) :
+  # en dessous, `pod install` refuse de resoudre. Capacitor genere un Podfile en
+  # 13.0, d'ou le patch a chaque build. Relever cette valeur exclut les appareils
+  # plus anciens — c'est une decision produit, pas un detail de CI.
+  IOS_DEPLOYMENT_TARGET: "15.5"
+  # IOS_WORKSPACE / IOS_PROJECT ne sont PAS fixes ici : l'etape "Prepare Xcode
+  # project" determine lequel existe et le pose dans $GITHUB_ENV. Une valeur au
+  # niveau du job primerait sur $GITHUB_ENV et figerait ce choix.
+
+jobs:
+  release:
+    name: Build, sign & upload to App Store Connect
+    # macos-latest et non macos-14 : cette derniere image livre Xcode 15.4, donc
+    # le SDK iOS 17.5, et App Store Connect refuse desormais tout binaire bati
+    # sous le SDK iOS 26 — l'IPA etait televerse puis rejete a la validation.
+    runs-on: macos-latest   # runner Apple : xcodebuild + fastlane
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 1. Bundles Physalis (fail fast : avant tout build) ───────────────
+      # Un token OIDC par appel : chaque endpoint a sa propre Policy et un
+      # token neuf evite tout probleme d'expiration ou de rejeu.
+      - name: Get OIDC token (deploy)
+        id: oidc_deploy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      # Les VITE_* sont ecrites dans frontend/.env.production, que Vite charge
+      # automatiquement en mode production — jamais dans $GITHUB_ENV, pour ne
+      # pas les exposer aux etapes qui n'en ont pas besoin.
+      - name: Fetch build secrets (VITE_*)
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_deploy.outputs.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/deploy.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"project\":\"${VAULT_PROJECT}\",\"environment\":\"${VAULT_ENV}\"}" \
+            "${VAULT_URL}/api/deploy")
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::HTTP $http_code from /api/deploy"
+            cat "$RUNNER_TEMP/deploy.json" || true
+            exit 1
+          fi
+
+          while IFS= read -r v; do
+            [ -n "$v" ] && echo "::add-mask::$v"
+          done < <(jq -r '.secrets | to_entries[] | select(.key | startswith("VITE_")) | .value' \
+                     "$RUNNER_TEMP/deploy.json")
+
+          jq -r '.secrets | to_entries[] | select(.key | startswith("VITE_")) | "\(.key)=\(.value)"' \
+            "$RUNNER_TEMP/deploy.json" > frontend/.env.production
+
+          echo "VITE_* injectees : $(wc -l < frontend/.env.production)"
+
+      - name: Get OIDC token (mobile)
+        id: oidc_mobile
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      # POST /api/deploy/mobile { app } -> { app, credentials: [ {kind, value,
+      # encoding, filename, ...} ] }. Chaque credential "fichier" arrive en
+      # base64 (a ecrire tel quel), chaque credential "texte" arrive decode.
+      # On masque TOUTES les valeurs avant tout traitement.
+      - name: Fetch signing bundle
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_mobile.outputs.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/bundle.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"app\":\"${MOBILE_APP}\"}" \
+            "${VAULT_URL}/api/deploy/mobile")
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::HTTP $http_code from /api/deploy/mobile"
+            cat "$RUNNER_TEMP/bundle.json" || true
+            exit 1
+          fi
+
+          while IFS= read -r v; do
+            [ -n "$v" ] && echo "::add-mask::$v"
+          done < <(jq -r '.credentials[].value' "$RUNNER_TEMP/bundle.json")
+
+          # La policy ASSIGNE l'app : si elle a ete creee sur la mauvaise, on
+          # recevrait un keystore Android ici. Mieux vaut le dire tout de suite
+          # que d'echouer au fond de xcodebuild.
+          platform=$(jq -r '.app.platform // empty' "$RUNNER_TEMP/bundle.json")
+          if [ "$platform" != "ios" ]; then
+            echo "::error::La policy mobile de release-ios.yml pointe une app '$platform', attendu 'ios'"
+            exit 1
+          fi
+
+          CRED_DIR="$RUNNER_TEMP/signing"
+          mkdir -p "$CRED_DIR"
+
+          sha_of() { # sha256sum cote GNU, shasum sur macOS
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+
+          get_file() { # $1 = kind, $2 = chemin de sortie ; decode le base64
+            # `openssl base64 -d -A` et NON `base64 --decode` : cette derniere
+            # est une option longue GNU que le base64 BSD de macOS ne traite pas
+            # de la meme facon, et un decodage silencieusement faux produit un
+            # fichier que `security import` avale sans rien ajouter au keychain.
+            jq -r --arg k "$1" '.credentials[] | select(.kind==$k) | .value' \
+              "$RUNNER_TEMP/bundle.json" | openssl base64 -d -A > "$2"
+
+            # Physalis calcule sha256 sur les octets DECODES (lib/mobile-
+            # fingerprint.ts) : l'empreinte est donc comparable telle quelle, et
+            # verifie le materiel de bout en bout — du vault jusqu'au disque du
+            # runner.
+            expected=$(jq -r --arg k "$1" \
+              '.credentials[] | select(.kind==$k) | .sha256 // empty' \
+              "$RUNNER_TEMP/bundle.json")
+            if [ -n "$expected" ]; then
+              actual=$(sha_of "$2")
+              if [ "$expected" != "$actual" ]; then
+                echo "::error::$1 corrompu au transport : sha256 attendu $expected, obtenu $actual ($(wc -c < "$2") octets ecrits)"
+                exit 1
+              fi
+            fi
+          }
+          get_text() { # $1 = kind ; renvoie la valeur decodee (deja en clair)
+            jq -r --arg k "$1" '.credentials[] | select(.kind==$k) | .value // empty' \
+              "$RUNNER_TEMP/bundle.json"
+          }
+
+          # Diagnostic : quels kinds le vault a servis. Aucune valeur n'est
+          # affichee — c'est deja ce que l'audit Physalis journalise de son cote.
+          echo "Credentials servis : $(jq -r '[.credentials[].kind] | join(", ")' "$RUNNER_TEMP/bundle.json")"
+
+          # Un credential absent du bundle arrive comme chaine VIDE et ne casse
+          # que bien plus loin, au fond de xcodebuild ou de l'upload. On refuse
+          # tout de suite, en nommant ce qui manque. `ios_p12_password` n'est PAS
+          # exige : un .p12 sans mot de passe est legitime.
+          missing=""
+          for k in ios_p12 ios_profile asc_api_key asc_key_id asc_issuer_id; do
+            if [ -z "$(get_text "$k")" ]; then
+              missing="$missing $k"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Credentials absents ou vides cote Physalis :$missing — a completer dans l'onglet Mobile de l'application"
+            exit 1
+          fi
+
+          get_file ios_p12       "$CRED_DIR/dist.p12"
+          get_file ios_profile   "$CRED_DIR/profile.mobileprovision"
+          get_file asc_api_key   "$CRED_DIR/AuthKey.p8"
+
+          # Le mot de passe du .p12 sert au deverrouillage du keychain -> masque
+          # une seconde fois, il transite par $GITHUB_ENV.
+          echo "::add-mask::$(get_text ios_p12_password)"
+
+          # Numero de build + version marketing servis par Physalis (compteur
+          # incremente atomiquement a chaque appel, cf. onglet Mobile de l'app).
+          # versionName peut etre vide : on retombe alors sur package.json.
+          BUILD_NUMBER=$(jq -r '.buildNumber // empty' "$RUNNER_TEMP/bundle.json")
+          if [ -z "$BUILD_NUMBER" ]; then
+            echo "::error::Physalis n'a pas servi de buildNumber"
+            exit 1
+          fi
+
+          {
+            echo "P12_PATH=$CRED_DIR/dist.p12"
+            echo "P12_PASSWORD=$(get_text ios_p12_password)"
+            echo "PROFILE_PATH=$CRED_DIR/profile.mobileprovision"
+            echo "ASC_KEY_PATH=$CRED_DIR/AuthKey.p8"
+            echo "ASC_KEY_ID=$(get_text asc_key_id)"
+            echo "ASC_ISSUER_ID=$(get_text asc_issuer_id)"
+            echo "CRED_DIR=$CRED_DIR"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "VERSION_NAME=$(jq -r '.versionName // empty' "$RUNNER_TEMP/bundle.json")"
+            echo "VENDOR_TEAM_ID=$(jq -r '.app.vendorTeamId // empty' "$RUNNER_TEMP/bundle.json")"
+          } >> "$GITHUB_ENV"
+
+          echo "Build $(jq -r '.versionName // "(version du projet)"' "$RUNNER_TEMP/bundle.json") ($BUILD_NUMBER)"
+
+      # Le .mobileprovision est un conteneur CMS signe : on l'ouvre pour en tirer
+      # le nom du profil et le Team ID, exigees par la signature manuelle. Rien
+      # n'est ainsi code en dur — changer de profil cote Physalis suffit.
+      - name: Inspect provisioning profile
+        run: |
+          set -euo pipefail
+          PLIST="$CRED_DIR/profile.plist"
+          security cms -D -i "$CRED_DIR/profile.mobileprovision" > "$PLIST"
+
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$PLIST")
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$PLIST")
+          APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$PLIST")
+          EXPIRES=$(/usr/libexec/PlistBuddy -c "Print :ExpirationDate" "$PLIST")
+
+          echo "Profil    : $PROFILE_NAME"
+          echo "Team      : $TEAM_ID"
+          echo "App ID    : $APP_ID"
+          echo "Expire le : $EXPIRES"
+
+          # Garde-fou : le profil doit bien correspondre au bundle id construit.
+          if [ "$APP_ID" != "$TEAM_ID.$MOBILE_APP" ]; then
+            echo "::error::Le profil couvre $APP_ID, attendu $TEAM_ID.$MOBILE_APP"
+            exit 1
+          fi
+
+          # Physalis connait aussi le Team ID (champ vendorTeamId de l'app).
+          # Le profil reste la source de verite — c'est lui qui signe — mais un
+          # ecart signale une fiche mal renseignee cote vault.
+          if [ -n "${VENDOR_TEAM_ID:-}" ] && [ "$VENDOR_TEAM_ID" != "$TEAM_ID" ]; then
+            echo "::warning::vendorTeamId Physalis ($VENDOR_TEAM_ID) != Team du profil ($TEAM_ID)"
+          fi
+
+          {
+            echo "PROFILE_NAME=$PROFILE_NAME"
+            echo "TEAM_ID=$TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      # xcodebuild ne dit pas « mauvais mot de passe » ni « pas de cle privee » :
+      # il dit, 30 s apres le debut de l'archive, "No signing certificate with a
+      # private key was found" — le meme message pour les deux causes, et pour
+      # une troisieme (keychain invisible). openssl tranche ici, en une seconde,
+      # avant meme d'installer node.
+      - name: Verify signing material
+        run: |
+          set -euo pipefail
+
+          # ⚠️ Ces sondes ORIENTENT, elles ne tranchent pas — le verdict revient a
+          # `security` (etape fastlane), seul outil qui lise a coup sur un .p12
+          # Apple. openssl n'est pas fiable ici : un .p12 exporte du Trousseau
+          # macOS est chiffre en RC2-40-CBC, qu'OpenSSL 3 refuse sans provider
+          # legacy — provider souvent absent des runners, ou le repli `-legacy`
+          # echoue a son tour. LibreSSL (/usr/bin/openssl sur macOS) le lit
+          # nativement, mais ignore `-legacy`. On essaie donc les combinaisons,
+          # et un echec de lecture ne fait qu'avertir : le faire echouer avait
+          # bloque un certificat parfaitement sain, en accusant le mot de passe.
+          # ── L'algorithme du MAC, avant toute autre chose ────────────────────
+          # `security import` de macOS ne lit QUE les PKCS12 dont le MAC est en
+          # SHA-1. Devant un MAC SHA-256 — ce que produit OpenSSL 3 par defaut —
+          # il repond « MAC verification failed (wrong password?) » alors que le
+          # mot de passe est parfaitement correct, et openssl, lui, ouvre le
+          # fichier sans broncher. Le piege a coute plusieurs runs a chercher un
+          # mot de passe qui n'avait rien.
+          #
+          # `-info` imprime le MAC AVANT de verifier le mot de passe : le
+          # controle ne depend donc d'aucun secret.
+          mac_line=$(openssl pkcs12 -in "$CRED_DIR/dist.p12" -info -nokeys -noout \
+                       -passin "pass:${P12_PASSWORD}" 2>&1 | grep -i "^MAC:" | head -1 || true)
+          echo "Algorithme du MAC : ${mac_line:-inconnu}"
+          if printf '%s' "$mac_line" | grep -qi "sha256"; then
+            echo "::error::Ce .p12 a un MAC SHA-256, que security import de macOS refuse. Regenerez-le au format attendu par le trousseau : openssl pkcs12 -export -legacy -macalg sha1 -inkey ios_distribution.key -in distribution.pem -out ios_distribution_macos.p12 — puis reimportez-le dans Physalis"
+            exit 1
+          fi
+
+          # On collecte la SORTIE, pas seulement le code de retour : « MAC verify
+          # error » et « unsupported algorithm » sont deux verdicts opposes, et
+          # les confondre envoie chercher le probleme du mauvais cote.
+          probe_out=""
+          p12_probe() { # $1 = -nokeys (certificats) | -nocerts (cle privee)
+            probe_out=""
+            for ossl in /usr/bin/openssl openssl; do
+              command -v "$ossl" >/dev/null 2>&1 || continue
+              for legacy in "" "-legacy"; do
+                out=$("$ossl" pkcs12 $legacy -in "$CRED_DIR/dist.p12" "$1" -noout \
+                        -passin "pass:${P12_PASSWORD}" 2>&1) && return 0
+                probe_out="$probe_out$out"
+              done
+            done
+            return 1
+          }
+
+          if p12_probe -nokeys; then
+            # Physalis ne lit jamais la cle privee (extractP12Expiry passe
+            # -nokeys) : une date d'expiration correcte dans l'interface ne
+            # prouve donc PAS sa presence.
+            if p12_probe -nocerts; then
+              echo "Certificat et cle privee lisibles avec le mot de passe fourni."
+            else
+              echo "::error::Le .p12 s'ouvre mais ne contient PAS de cle privee — reexportez-le depuis le trousseau en selectionnant le certificat ET sa cle"
+              exit 1
+            fi
+          elif printf '%s' "$probe_out" | grep -qiE "mac verify error|invalid password"; then
+            # Verdict FIABLE ici, et seulement ici : le sha256 du fichier a deja
+            # ete valide contre celui du bundle, donc les octets sont intacts.
+            # Des deux causes que couvre « MAC verify error » (passphrase fausse
+            # ou conteneur altere), il ne reste que la premiere.
+            echo "::error::ios_p12_password ne dechiffre pas le .p12. Le fichier est pourtant intact (sha256 conforme au bundle) : c'est bien le mot de passe enregistre dans Physalis qui est faux. Verifiez-le avec : openssl pkcs12 -in dist.p12 -nokeys -noout -passin pass:VOTRE_MDP"
+            exit 1
+          else
+            echo "::warning::Aucun openssl n'a su ouvrir ce .p12, sans erreur de mot de passe explicite (algorithme non supporte ?). Ce n'est PAS un verdict : l'import dans le keychain tranchera."
+          fi
+
+      # ── 2. Toolchain ─────────────────────────────────────────────────────
+      # L'image livre plusieurs Xcode et n'en selectionne pas forcement le plus
+      # recent. On prend le plus haut disponible, puis on VERIFIE le SDK : Apple
+      # exige au moins le SDK iOS 26. Sans ce controle, le rejet n'arrive qu'a la
+      # toute fin, apres l'archive et l'upload complet du binaire.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+
+          echo "=== Xcode installes ==="
+          ls -d /Applications/Xcode*.app
+
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
+          sdk_ver=$(xcodebuild -showsdks 2>/dev/null \
+            | sed -n 's/.*-sdk iphoneos\([0-9][0-9]*\).*/\1/p' | sort -n | tail -1)
+          echo "SDK iOS le plus recent : ${sdk_ver:-inconnu}"
+
+          if [ "${sdk_ver:-0}" -lt 26 ]; then
+            echo "::error::SDK iOS ${sdk_ver:-inconnu} — App Store Connect exige le SDK iOS 26 (Xcode 26+). L'image de runner ne le fournit pas : verifiez le label runs-on."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # fastlane est preinstalle sur les images macOS GitHub ; on ne l'installe
+      # que s'il manque, pour ne pas payer 2 min de compilation de gems.
+      - name: Set up fastlane
+        run: |
+          set -euo pipefail
+          if ! command -v fastlane >/dev/null 2>&1; then
+            gem install fastlane --no-document
+          fi
+          fastlane --version
+
+      # ── 3. Build web + projet natif Capacitor ────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build   # lit frontend/.env.production
+
+      - name: Add iOS platform and sync
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+
+          # --packagemanager CocoaPods : Capacitor 8 genere un projet Swift
+          # Package Manager PAR DEFAUT, dans lequel @capacitor/push-notifications
+          # ne compile pas — l'archive echouait sur « CAPPluginCall has no member
+          # 'reject' » et « JSTypes has no member coerceDictionaryToJSObject »,
+          # signe que le plugin est bati contre un CapacitorCore autre que celui
+          # de node_modules. `cap sync` avait prevenu : « Some installed packages
+          # are not compatable with SPM ».
+          #
+          # Avec CocoaPods, les podspecs pointent sur node_modules et les
+          # versions restent coherentes. C'est aussi le mode avec lequel ce
+          # projet a toujours ete construit (frontend/ios/App/Podfile) et que
+          # build-ios.yml supposait. `cap sync` n'a pas cette option : seul
+          # `cap add` decide du gestionnaire.
+          # `cap add` tente deja un pod install, qui echoue tant que la cible de
+          # deploiement n'est pas relevee : on l'ignore, on corrige, puis `cap
+          # sync` le relance pour de bon.
+          npx cap add ios --packagemanager CocoaPods || true
+
+          # GoogleMLKit 8 exige iOS 15.5. Capacitor ecrit `platform :ios, '13.0'`
+          # dans le Podfile, et CocoaPods echoue sur « Specs satisfying the
+          # GoogleMLKit/BarcodeScanning dependency were found, but they required
+          # a higher minimum deployment target » — un message qui ne nomme ni la
+          # version attendue, ni le fichier a corriger.
+          #
+          # `sed -i.bak` et non `sed -i ''` : la premiere forme marche avec le sed
+          # BSD du runner macOS comme avec GNU sed.
+          sed -i.bak "s/platform :ios, '[0-9.]*'/platform :ios, '$IOS_DEPLOYMENT_TARGET'/" \
+            ios/App/Podfile && rm -f ios/App/Podfile.bak
+
+          # Le target Xcode doit suivre : une app qui cible plus bas que ses
+          # dependances ne lie pas.
+          sed -i.bak "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = $IOS_DEPLOYMENT_TARGET;/g" \
+            ios/App/App.xcodeproj/project.pbxproj && rm -f ios/App/App.xcodeproj/project.pbxproj.bak
+
+          echo "=== cibles de deploiement ==="
+          grep "platform :ios" ios/App/Podfile
+          grep -m3 "IPHONEOS_DEPLOYMENT_TARGET" ios/App/App.xcodeproj/project.pbxproj
+
+          if ! grep -q "platform :ios, '$IOS_DEPLOYMENT_TARGET'" ios/App/Podfile; then
+            echo "::error::La cible de deploiement n'a pas ete posee dans le Podfile — sa forme a change"
+            exit 1
+          fi
+
+          npx cap sync ios
+
+      # Capacitor 8 genere un projet SWIFT PACKAGE MANAGER (Package.swift) : il
+      # n'y a plus de Podfile, et `pod install` echouait ici sur "No `Podfile'
+      # found". On installe les pods UNIQUEMENT s'il en reste (un plugin non
+      # compatible SPM peut en reintroduire), puis on vise le workspace ou le
+      # projet selon ce qui a reellement ete genere — la meme detection que
+      # build-ios.yml, plutot qu'un chemin fige.
+      - name: Prepare Xcode project
+        working-directory: frontend/ios/App
+        run: |
+          set -euo pipefail
+
+          if [ -f Podfile ]; then
+            echo "Podfile present -> pod install"
+            pod install
+          else
+            # Le projet a ete demande en CocoaPods : pas de Podfile signifie que
+            # l'option n'a pas ete honoree et qu'on retombe en SPM, ou les
+            # plugins ne compilent pas. Autant le dire ici plutot que de laisser
+            # xcodebuild echouer dans les sources d'un plugin.
+            echo "::warning::Aucun Podfile alors que CocoaPods etait demande : projet en SPM, la compilation des plugins Capacitor risque d'echouer"
+          fi
+
+          # Le .xcodeproj est toujours la, workspace ou pas : c'est LUI que la
+          # lane modifie pour y inscrire la signature du seul target App (les
+          # pods n'acceptent pas de profil de provisioning).
+          echo "IOS_XCODEPROJ=frontend/ios/App/App.xcodeproj" >> "$GITHUB_ENV"
+
+          if [ -d App.xcworkspace ]; then
+            echo "Cible xcodebuild : App.xcworkspace"
+            echo "IOS_WORKSPACE=frontend/ios/App/App.xcworkspace" >> "$GITHUB_ENV"
+          elif [ -d App.xcodeproj ]; then
+            echo "Cible xcodebuild : App.xcodeproj"
+            echo "IOS_PROJECT=frontend/ios/App/App.xcodeproj" >> "$GITHUB_ENV"
+          else
+            echo "::error::Ni App.xcworkspace ni App.xcodeproj dans frontend/ios/App"
+            ls -la
+            exit 1
+          fi
+
+      # ── 4. Personnalisation du projet natif ──────────────────────────────
+      # Info.plist est regenere par `cap add` : permissions, nom affiche et
+      # version doivent etre re-poses a chaque build.
+      #
+      # La version passe par PlistBuddy et NON par increment_build_number comme
+      # le gabarit Physalis : cette action fastlane s'appuie sur agvtool, qui
+      # exige un projet en VERSIONING_SYSTEM=apple-generic. Capacitor genere un
+      # Info.plist a valeurs litterales, ou agvtool echoue. On ecrit donc
+      # directement les valeurs servies par Physalis.
+      - name: Configure Info.plist
+        working-directory: frontend/ios/App
+        run: |
+          set -euo pipefail
+          PLIST=App/Info.plist
+
+          # BUILD_NUMBER vient de Physalis (toujours present, verifie plus haut).
+          # VERSION_NAME peut etre vide si l'app n'a pas de version marketing
+          # renseignee dans le vault : on retombe alors sur package.json, plus
+          # parlant que le 1.0 que Capacitor regenere.
+          MARKETING_VERSION="${VERSION_NAME:-}"
+          if [ -z "$MARKETING_VERSION" ]; then
+            MARKETING_VERSION=$(jq -r '.version' "$GITHUB_WORKSPACE/frontend/package.json")
+          fi
+
+          # plutil, et NON PlistBuddy : ce dernier prend toute l'operation dans
+          # une seule chaine -c, ou l'apostrophe d'un nom comme "L'Appli" ouvre
+          # une quote jamais fermee. Il repondait "Parse Error: Unclosed Quotes",
+          # laissait la cle inchangee ET rendait 0 — l'etape passait au vert avec
+          # un nom d'affichage faux. plutil prend la valeur en ARGUMENT : ni
+          # apostrophe, ni espace, ni accent ne peuvent casser le parsing, et
+          # -replace cree la cle si elle est absente.
+          plutil -replace NSCameraUsageDescription -string \
+            "L'Appli utilise la caméra pour scanner les codes QR." "$PLIST"
+          plutil -replace NSLocationWhenInUseUsageDescription -string \
+            "L'Appli utilise votre position pour afficher les points de vente proches." "$PLIST"
+          plutil -replace NSLocationAlwaysAndWhenInUseUsageDescription -string \
+            "L'Appli utilise votre position pour afficher les points de vente proches." "$PLIST"
+          plutil -replace CFBundleDisplayName -string "L'Appli" "$PLIST"
+          plutil -replace CFBundleShortVersionString -string "$MARKETING_VERSION" "$PLIST"
+          plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$PLIST"
+
+          # Relecture : ces valeurs partent chez Apple, une clé muette se voit
+          # sur la fiche du store, pas dans les logs.
+          echo "=== Info.plist ==="
+          for k in CFBundleDisplayName CFBundleShortVersionString CFBundleVersion \
+                   NSCameraUsageDescription NSLocationWhenInUseUsageDescription; do
+            printf '%s = %s\n' "$k" "$(plutil -extract "$k" raw -o - "$PLIST")"
+          done
+
+      - name: Generate app icon
+        run: |
+          set -euo pipefail
+          ICON=frontend/public/icon-512.png
+          ICONSET=frontend/ios/App/App/Assets.xcassets/AppIcon.appiconset
+          sips -z 1024 1024 "$ICON" --out "$ICONSET/AppIcon-512@2x.png"
+
+      # ── 5. Build signe + upload ──────────────────────────────────────────
+      # La logique vit dans fastlane/Fastfile (lane `ios release`), lancee depuis
+      # la racine du repo. Signature MANUELLE avec le profil de Physalis, dans un
+      # keychain temporaire detruit en fin de lane.
+      - name: Release with fastlane
+        id: release
+        env:
+          # Le reste du contrat (MOBILE_APP, IOS_SCHEME, IOS_WORKSPACE) vient du
+          # `env` du job ; le materiel de signature, de $GITHUB_ENV.
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: |
+          set -euo pipefail
+          fastlane ios release
+
+      - name: Upload IPA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mon-app-ios-build-${{ env.BUILD_NUMBER }}
+          path: build/ios/*.ipa
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # ── 6. Rapport a Physalis (registre de livraisons) ───────────────────
+      # Physalis a deja ouvert une ligne « materiel servi » en remettant le
+      # bundle : cette moitie-la, il la constate. Ce qu'il ne peut PAS savoir,
+      # c'est ce que le pipeline a fait ensuite — d'ou ce signalement.
+      #
+      # `if: always()` a dessein : un run qui echoue APRES avoir pris le
+      # materiel est precisement ce qu'on veut voir dans le registre. Sans lui,
+      # la ligne resterait en « materiel servi » sans qu'on sache si le build a
+      # casse ou si le pipeline a ete annule.
+      #
+      # L'echec du rapport ne fait pas echouer le run : l'.ipa est deja chez
+      # Apple, faire rougir la publication pour un probleme de journalisation
+      # serait absurde. On annonce en warning et on continue.
+      - name: Get OIDC token (report)
+        id: oidc_report
+        if: always() && env.BUILD_NUMBER != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      - name: Report release to Physalis
+        if: always() && env.BUILD_NUMBER != ''
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_report.outputs.token }}
+          # `testflight` : la lane appelle upload_to_testflight. Si vous passez
+          # a `upload_to_app_store`, rapportez `appstore`.
+          RELEASE_TRACK: testflight
+          # `uploaded` = l'.ipa est parti chez Apple. Le traitement et la revue
+          # sont asynchrones : Physalis les lira a App Store Connect en Phase 5.
+          RELEASE_STATUS: ${{ steps.release.outcome == 'success' && 'uploaded' || 'failed' }}
+        run: |
+          set -uo pipefail
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/report.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"app\":\"${MOBILE_APP}\",\"buildNumber\":${BUILD_NUMBER},\"track\":\"${RELEASE_TRACK}\",\"status\":\"${RELEASE_STATUS}\",\"detail\":\"${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}\"}" \
+            "${VAULT_URL}/api/deploy/mobile/report") || true
+
+          if [ "$http_code" != "200" ]; then
+            echo "::warning::Rapport de livraison refuse (HTTP $http_code) — la publication, elle, a suivi son cours"
+            cat "$RUNNER_TEMP/report.json" 2>/dev/null || true
+          else
+            echo "Livraison rapportee : build $BUILD_NUMBER, piste $RELEASE_TRACK, etat $RELEASE_STATUS"
+          fi
+
+      # ── 7. Cleanup ───────────────────────────────────────────────────────
+      # Le keychain temporaire est supprime par la lane fastlane elle-meme ; ce
+      # filet le rattrape si la lane a echoue avant sa fin.
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/bundle.json" "$RUNNER_TEMP/deploy.json" \
+                 "$RUNNER_TEMP/report.json" "$RUNNER_TEMP/signing" \
+                 frontend/.env.production
+          security delete-keychain physalis-ci.keychain 2>/dev/null || true

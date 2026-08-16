@@ -5,7 +5,8 @@
 //   - KEY="value avec espaces"        (double quotes : echappements actifs)
 //   - KEY='value single quotes'       (single quotes : literal, pas d'echappement)
 //   - export KEY=value                (prefixe shell, ignore)
-//   - # commentaire pleine ligne      (ignore)
+//   - # commentaire pleine ligne      (non importe, mais memorise comme
+//                                      `section` des entrees suivantes)
 //   - KEY=value # commentaire inline  (commentaire ignore APRES une valeur non-quotee)
 //   - KEY="multi\nline\nvalue"        (echappements \n \t \r \\ \" dans double quotes)
 //   - KEY="multi                       (valeurs multilignes physiques entre quotes
@@ -21,8 +22,20 @@
 // Retourne TOUJOURS un objet { entries, errors } — aucune throw, les
 // erreurs sont reportees par numero de ligne pour affichage UI.
 
-export type ParsedEntry = { key: string; value: string };
+export type ParsedEntry = {
+  key: string;
+  value: string;
+  /** Commentaire pleine ligne qui ouvre le bloc ou se trouve cette
+   *  entree, sans le `#` ni les espaces de bord. Sert a l'import pour
+   *  retrouver la categorie ecrite par l'export (`# infra`). Une ligne
+   *  vide referme le bloc ; les commentaires INLINE (apres une valeur)
+   *  ne comptent pas : ils decrivent la cle, pas une section. */
+  section?: string;
+};
 export type ParseError = { line: number; reason: string };
+
+/** Commentaire sans aucun caractere alphanumerique → pur decor. */
+const DECORATIVE_ONLY = /^[^\p{L}\p{N}]*$/u;
 export type ParseResult = { entries: ParsedEntry[]; errors: ParseError[] };
 
 /** Parse un texte .env. Tolerant : avance ligne par ligne et reporte les
@@ -37,6 +50,17 @@ export function parseEnv(text: string): ParseResult {
   const normalized = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
   const lines = normalized.split("\n");
 
+  // Section courante = dernier commentaire pleine ligne utile.
+  //
+  // Portee : le bloc d'entrees qui SUIT le commentaire. Une ligne vide
+  // ferme le bloc — sinon un `# Database` en tete de fichier finirait
+  // par ranger tout ce qui vient apres, y compris des paragraphes qui
+  // n'ont rien a voir. Exception : une ligne vide qui suit
+  // immediatement le commentaire ne ferme rien (style `# infra\n\nA=1`),
+  // d'ou le drapeau `sectionUsed`.
+  let section: string | undefined;
+  let sectionUsed = false;
+
   let i = 0;
   while (i < lines.length) {
     const lineNo = i + 1; // 1-based pour l'UI
@@ -45,7 +69,23 @@ export function parseEnv(text: string): ParseResult {
 
     // Trim leading whitespace pour reconnaitre commentaires / lignes vides.
     const trimmed = raw.trimStart();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    if (trimmed === "") {
+      if (sectionUsed) {
+        section = undefined;
+        sectionUsed = false;
+      }
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      const text = trimmed.replace(/^#+/, "").trim();
+      // Une ligne purement decorative (`# ----------`, `# ##########`)
+      // n'est pas un titre de section : on garde celui d'avant, sinon un
+      // encadrement ASCII effacerait le vrai en-tete juste au-dessus.
+      if (DECORATIVE_ONLY.test(text)) continue;
+      section = text;
+      sectionUsed = false;
+      continue;
+    }
 
     // Strip "export " optionnel.
     const noExport = trimmed.startsWith("export ")
@@ -117,9 +157,11 @@ export function parseEnv(text: string): ParseResult {
     // on conserve la derniere (comportement dotenv : last-write-wins),
     // mais on signale comme erreur "soft" pour info user.
     if (seenKeys.has(key)) {
-      // Remplace l'entree existante.
+      // Remplace l'entree existante (section incluse : la derniere
+      // occurrence gagne aussi sur le rangement).
       const existingIdx = entries.findIndex((e) => e.key === key);
-      if (existingIdx >= 0) entries[existingIdx] = { key, value };
+      if (existingIdx >= 0) entries[existingIdx] = { key, value, section };
+      sectionUsed = true;
       errors.push({
         line: lineNo,
         reason: `Cle "${key}" deja vue plus haut, derniere occurrence retenue`,
@@ -127,7 +169,8 @@ export function parseEnv(text: string): ParseResult {
       continue;
     }
     seenKeys.add(key);
-    entries.push({ key, value });
+    entries.push({ key, value, section });
+    sectionUsed = true;
   }
 
   return { entries, errors };

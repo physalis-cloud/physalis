@@ -201,6 +201,20 @@ html, body {
 }
 .btn-accent:not(:disabled):hover { background: #b8842a; }
 
+/* Bouton contour doré sur fond blanc — action secondaire qui doit se VOIR.
+   `.btn` seul est transparent avec une bordure transparente : posé sur le fond
+   beige de la page, il ne se distingue de rien et passe pour du texte. */
+.btn-outline-accent {
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.btn-outline-accent:not(:disabled):hover {
+  background: var(--accent-bg);
+  border-color: var(--accent-text);
+}
+
 .btn-danger {
   background: transparent;
   color: var(--danger);
@@ -300,6 +314,14 @@ h1.page-hero-title {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  /* Les titres portent du texte non maitrise (nom de projet, d'org, de tache).
+     Un mot insecable — « ActiveState/SubState/NRestarts » — depassait du cadre
+     et se faisait couper a droite en mobile.
+     `anywhere` et pas `break-word` : le titre est un conteneur flex, son texte
+     un item anonyme dont le `min-width: auto` vaut la taille min-content. Seul
+     `anywhere` fait compter les coupures dans ce calcul ; `break-word` laisse
+     le min-content a la longueur du plus long mot, donc ne corrigerait rien. */
+  overflow-wrap: anywhere;
 }
 .page-hero-subtitle {
   font-size: 13px;
@@ -309,9 +331,25 @@ h1.page-hero-title {
 }
 .page-hero-subtitle strong { color: var(--fg); }
 .page-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+/* Variante `stackActions` : les actions prennent une ligne à elles, sous le
+   titre, calées à droite. Le titre récupère toute la largeur et tient alors sur
+   une seule ligne — au lieu d'être comprimé par des boutons en `flex-shrink: 0`
+   qui, eux, ne cèdent jamais un pixel. */
+.page-hero-stacked { flex-wrap: wrap; }
+.page-hero-stacked .page-hero-actions {
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
 @media (max-width: 640px) {
   .page-hero-icon { width: 44px; height: 44px; }
   h1.page-hero-title { font-size: 22px; }
+
+  /* Les actions passent SOUS le titre. Elles sont en `flex-shrink: 0` : sur une
+     seule ligne elles gardent leur largeur et c'est le titre qui encaisse,
+     jusqu'a se retrouver a un mot par ligne des qu'il y a deux boutons (vu sur
+     la fiche d'un chantier clos : « Rouvrir le chantier » + « Epingler »). */
+  .page-hero { flex-wrap: wrap; }
+  .page-hero-actions { flex-basis: 100%; }
 }
 
 /* ─── Sections ────────────────────────────────────────────────────── */
@@ -366,6 +404,34 @@ h1.page-hero-title {
 .create-card-title {
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--muted); font-weight: 600; margin-bottom: 10px;
+}
+
+/* Formulaire d'édition d'une fiche de tâche.
+   ⚠️ Classes PROPRES, pas une surcharge de `.create-card` : celle-ci sert aussi
+   aux panneaux du tableau de bord (projets, orgs, jetons), qu'un fond doré
+   repeindrait au passage.
+   La carte prend le doré, et chaque groupe de champs vit sur un panneau blanc —
+   le contraste sépare les groupes sans multiplier les bordures. */
+.task-edit-card {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.task-edit-block {
+  display: flex; flex-direction: column; gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.task-edit-block:last-of-type { margin-bottom: 0; }
+/* Le bouton à droite ; le message d'issue reste à sa gauche, sur la même ligne. */
+.task-edit-actions {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 12px; margin-top: 14px;
 }
 /* Carte « Créer un groupe » : ligne du haut (titre + label « Nom » à gauche,
    crayon de gestion à droite) puis ligne du bas (input + bouton Créer). Le
@@ -533,6 +599,15 @@ h1.page-hero-title {
   transition: border-color 0.15s;
 }
 .row:hover { border-color: var(--accent-soft); }
+/* Ligne AVEC case à cocher : quatre enfants (case, icône, infos, action) là où
+ * `.row` n'en prévoit que trois. Sans cette variante, le placement automatique
+ * de la grille met l'icône dans la colonne `1fr` (donc les infos repoussées à
+ * droite dans la colonne `auto`) et **rejette le 4ᵉ enfant sur une rangée
+ * implicite**, dans la colonne de 36 px : un `<select>` s'y retrouve écrasé à
+ * ~42 px, largeur inférieure à son propre padding, et le chevron de `.select`
+ * (`background-position: right 14px`) se peint par-dessus le texte.
+ * Mesuré le 2026-08-10 sur le formulaire de création de projet. */
+.row-checkable { grid-template-columns: auto 36px 1fr auto; }
 .row-no-icon {
   display: flex; align-items: center; justify-content: space-between;
   gap: 14px;
@@ -900,6 +975,17 @@ h1.page-hero-title {
 }
 .admin-split > div > .section-title { margin-top: 0; }
 
+/* Ligne « Bonus offerts » de la fiche client : libelle, champ, et le detail du
+   calcul (insecable). Le repli mobile est dans le bloc responsive en fin de
+   fichier — sur une seule ligne a 390px, le detail mangeait toute la largeur et
+   le champ tombait a ~40px, illisible pendant la saisie. */
+.admin-bonus-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
 .pill {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   padding: 2px 8px; border-radius: 4px; font-weight: 700;
@@ -908,6 +994,26 @@ h1.page-hero-title {
 .pill.danger { background: var(--danger-bg); color: var(--danger-fg); }
 
 /* ─── Tables ──────────────────────────────────────────────────────── */
+
+/* Cadre d'une liste : bord ocre doré, fond blanc. Le padding est nul : ce sont
+   les cellules du `.table` qui portent l'espacement.
+
+   L'axe vertical reste `hidden` pour que les coins de la première et de la
+   dernière ligne suivent l'arrondi, sinon un fond de ligne dépasse du cadre.
+   L'axe horizontal, lui, SCROLLE : un `overflow: hidden` sur les deux axes
+   coupait purement et simplement les dernières colonnes dès que le tableau
+   dépassait son cadre (mobile, ou fenêtre étroite), sans laisser le moindre
+   moyen de les atteindre — les données disparaissaient en silence.
+   `auto` : aucune barre ne s'affiche quand le tableau tient, donc rien ne
+   change sur les largeurs où ça passait déjà. */
+.table-card-accent {
+  background: var(--surface);
+  border: 1px solid var(--accent-soft);
+  border-radius: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th {
@@ -1028,12 +1134,37 @@ h1.page-hero-title {
   font-weight: 700;
   letter-spacing: -0.02em;
 }
+/* Valeur d'un état de service (« ● OK », « ● streaming ») : ce n'est pas un
+   chiffre-clé, elle n'a pas besoin de la taille d'un compteur. */
+.stat-card-status {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
 .stat-card-link {
   font-size: 12px;
   color: var(--accent-text);
   text-decoration: none;
 }
 .stat-card-link:hover { text-decoration: underline; }
+
+/* Bloc doré regroupant plusieurs sections de stats (Infrastructure + Backups
+   sur l'accueil admin) : un seul cadre, sections resserrées à l'intérieur. */
+.stat-group-accent {
+  border: 1px solid var(--accent-soft);
+  border-radius: 14px;
+  background: var(--accent-bg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stat-group-accent > section > h2 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
 
 /* ─── Tabs ────────────────────────────────────────────────────────── */
 
@@ -1047,7 +1178,10 @@ h1.page-hero-title {
 .tab {
   background: transparent;
   border: none;
-  padding: 12px 16px;
+  /* 15px et non 16 : sur la page projet, la barre porte jusqu'à 8 onglets
+   * répartis en trois groupes — 1px de moins de chaque côté resserre chaque
+   * groupe sans rapprocher visiblement les libellés. */
+  padding: 12px 15px;
   font-size: 13px;
   color: var(--muted);
   cursor: pointer;
@@ -1118,6 +1252,17 @@ h1.page-hero-title {
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   border-radius: 14px 14px 0 0;
+}
+/* Modale longue (Paramètres d'un projet) : c'est `.dialog` qui défile, donc
+ * l'en-tête — titre + croix de fermeture — sortait de l'écran dès qu'on
+ * descendait dans le formulaire, et il fallait remonter tout en haut pour
+ * fermer. On l'ancre en haut du conteneur qui défile.
+ * `> .dialog-header` et pas un descendant quelconque : une modale imbriquée
+ * (confirmation de suppression) porte son propre en-tête et n'a rien à ancrer. */
+.dialog-sticky-header > .dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .dialog-title {
   font-size: 16px; font-weight: 600; margin: 0;
@@ -2071,4 +2216,106 @@ a.text-accent { text-decoration: underline; }
 
   /* Touch targets : btn-xs un peu plus grand pour eviter mistaps */
   .btn-xs { padding: 5px 10px; font-size: 11px; }
+}
+
+/* ─── Responsive : panneau d'admin ────────────────────────────────────
+ * Le bloc generique ci-dessus couvre le dashboard ; l'admin a ses propres
+ * conteneurs (.admin-split, .table-card-accent) et ses tableaux larges.
+ * Cible : iPhone 14 (390px) et sa famille (Pro 393, Plus/Pro Max 428), avec
+ * 375px (SE / mini) garde comme plancher.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* Le bloc compte du menu n'existe QUE dans le burger : sur desktop l'e-mail et
+   la deconnexion vivent a droite du header (cf. .admin-header-account). */
+.admin-nav-account { display: none; }
+
+@media (max-width: 900px) {
+  /* Header admin colle en haut : les listes sont longues, et sans ca il faut
+   * remonter tout en haut pour changer d'onglet. `sticky` plutot que `fixed` —
+   * l'element reste dans le flux, donc aucune hauteur a compenser a la main
+   * (le header se replie selon la largeur, une compensation figee mentirait). */
+  .admin-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  /* Burger a gauche du logo, comme partout ailleurs (Material, iOS). L'ordre
+   * DOM garde le logo en premier — c'est le titre de la page, il doit rester
+   * en tete pour un lecteur d'ecran ; seul l'ordre visuel change. */
+  .admin-header .app-nav-wrap { order: -1; }
+
+  /* Le dropdown s'aligne sur le bord GAUCHE du burger. Le defaut `right: 0`
+   * date de l'epoque ou le burger etait a droite : garde tel quel, le menu
+   * partirait vers la gauche et sortirait de l'ecran. */
+  .admin-header .app-nav.is-open {
+    left: 0;
+    right: auto;
+  }
+
+  /* L'e-mail et la deconnexion descendent dans le menu : on masque le bloc de
+   * droite plutot que de le laisser wrapper sur une 2e ligne de header. */
+  .admin-header-account { display: none; }
+
+  .app-nav.is-open .admin-nav-account {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .app-nav.is-open .admin-nav-account hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 6px 0;
+  }
+  /* Le bouton prend la largeur du menu : une cible tactile pleine largeur
+   * plutot qu'un bouton flottant a gauche. */
+  .app-nav.is-open .admin-nav-account form { display: flex; }
+  .app-nav.is-open .admin-nav-account .btn { flex: 1; justify-content: center; }
+
+  /* Les colonnes du split admin sont des items de grid, dont le `min-width`
+   * implicite vaut `auto` = taille min-content. Un tableau au contenu
+   * insecable (slugs d'org, e-mails) imposait donc a l'item une largeur
+   * superieure a sa piste : l'item debordait, et toute la PAGE partait en
+   * scroll horizontal (fiche client mesuree a 439px pour un viewport de 375).
+   * `min-width: 0` autorise l'item a se retrecir ; c'est le tableau qui
+   * scrolle dans son cadre (cf. .table-card-accent). */
+  .admin-split > * { min-width: 0; }
+
+  /* iOS masque les barres de defilement tant qu'on n'a pas commence a scroller :
+   * un tableau plus large que son cadre y est indiscernable d'un tableau
+   * complet. On pose une ombre portee sur le bord qui a du rab.
+   * Les deux premieres couches sont des caches opaques en `local` (ils suivent
+   * le contenu, donc ils recouvrent l'ombre quand on atteint l'extremite) ; les
+   * deux suivantes sont les ombres en `scroll` (fixes par rapport au cadre).
+   * Resultat : l'ombre gauche n'apparait qu'une fois defile, la droite
+   * disparait en fin de course. */
+  .table-card-accent {
+    background-image:
+      linear-gradient(to right, var(--surface), transparent),
+      linear-gradient(to left, var(--surface), transparent),
+      radial-gradient(farthest-side at 0 50%, rgba(31, 31, 31, 0.13), transparent),
+      radial-gradient(farthest-side at 100% 50%, rgba(31, 31, 31, 0.13), transparent);
+    background-position: 0 0, 100% 0, 0 0, 100% 0;
+    background-repeat: no-repeat;
+    background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Les cellules serrent leur padding pour qu'une colonne de plus tienne
+   * avant d'avoir a scroller. */
+  .table th { padding: 9px 10px; }
+  .table td { padding: 10px 10px; }
+
+  /* Bonus offerts : le libelle prend sa propre ligne, puis le champ et le
+   * detail du calcul se partagent la seconde. Sur une seule ligne, le detail
+   * (insecable, ~180px) laissait au champ une largeur ou le chiffre saisi
+   * n'etait meme plus visible. */
+  .admin-bonus-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+  .admin-bonus-row > :first-child { grid-column: 1 / -1; }
 }

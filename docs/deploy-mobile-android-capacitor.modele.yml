@@ -1,0 +1,492 @@
+# .github/workflows/release-android.yml
+#
+# Publie l'app Android sur Google Play SANS aucun secret GitHub. Deux bundles
+# sont recuperes a la volee depuis Physalis via un token OIDC signe par GitHub :
+#
+#   1. /api/deploy         -> les VITE_* de l'environnement production, injectees
+#                             dans le build Vite (frontend/.env.production)
+#   2. /api/deploy/mobile  -> le materiel de signature (keystore, mots de passe,
+#                             compte de service Google Play)
+#
+# Physalis ne construit ni ne stocke l'artefact : le build (vite + capacitor +
+# gradle) se fait ICI et `fastlane supply` televerse directement vers Play.
+#
+# ─── Specificite de ce projet : Capacitor ────────────────────────────────
+#
+# `frontend/android/` est gitignore et regenere a chaque run par `npx cap add`.
+# Tout ce qui touche au projet natif (version, icones, permissions du manifeste)
+# doit donc etre re-applique ici a chaque build — comme dans build-android.yml.
+#
+# ─── Pre-requis cote Physalis ────────────────────────────────────────────
+#
+#   1. Onglet Mobile du projet active (Parametres du projet -> Deploiement mobile)
+#   2. Application Android creee (com.exemple.monapp), avec son materiel :
+#        - Keystore (JKS/PKCS12) + mot de passe du keystore   -> android_keystore
+#        - Alias de cle + mot de passe de la cle              -> android_key_alias
+#        - Compte de service Google Play (JSON)               -> play_service_account
+#   3. Connexion CI/CD reliee au projet (Parametres) + repo defini
+#   4. DEUX policies, toutes deux sur (repo, workflow, branche) :
+#        - Policy deploiement : (mon-org/mon-repo, release-android.yml,
+#          production) -> (mon-projet, production)   [pour /api/deploy]
+#        - Policy mobile      : (mon-org/mon-repo, release-android.yml,
+#          production) -> application Android             [pour /api/deploy/mobile]
+#   5. Physalis accessible en HTTPS depuis api.github.com
+#
+# ─── Cote Google Play ────────────────────────────────────────────────────
+#
+# Ce qui est manuel, une fois : CREER LA FICHE de l'app dans la Play Console.
+# L'API Play travaille sur un packageName existant, elle ne sait pas creer une
+# app. Le premier AAB, lui, part par l'API comme les suivants : cochez
+# `first_release` au lancement (-> release_status draft + changesNotSentForReview,
+# cf. fastlane/Fastfile), puis envoyez cette premiere release en revue depuis la
+# console. Les runs suivants se lancent sans cette case.
+#
+# ⚠️ Ne televersez PAS ce premier AAB a la main : Play App Signing enrole la cle
+# d'upload a partir de la cle qui signe la premiere release. Si ce n'est pas le
+# keystore detenu par Physalis, tous les runs suivants seront rejetes.
+#
+# ─── Versions : Physalis fait autorite ───────────────────────────────────
+#
+# Google refuse un versionCode qui ne croit pas. Ce workflow n'invente donc
+# aucun numero : /api/deploy/mobile sert `buildNumber` (compteur incremente
+# atomiquement a chaque appel) et `versionName` (version marketing, fixee a la
+# main dans l'onglet Mobile de l'app — bumper une version est une decision
+# humaine). Aucun input de version cote GitHub : le compteur du vault est la
+# seule source, et se reajuste depuis la fiche de l'app si besoin.
+#
+# Aucun `secrets.*` n'est consomme — c'est volontaire.
+
+#
+# ═══ À ADAPTER POUR VOTRE PROJET ═════════════════════════════════════════
+#   - env VAULT_PROJECT / MOBILE_APP : slug du projet Physalis + applicationId
+#     (exemple : mon-projet / com.exemple.monapp).
+#   - Modèle pour une app Capacitor dont la racine web est `frontend/`.
+#   - Étape "Add permissions to AndroidManifest" : permissions propres à l'app.
+#   - Étape "Generate app icons" : chemin de l'icône source.
+# ═════════════════════════════════════════════════════════════════════════
+#
+# ═══ DÉCLENCHEMENT — À CHOISIR ═══════════════════════════════════════════
+#   Par défaut ci-dessous : manuel (workflow_dispatch) uniquement, pour que
+#   « mise à jour serveur ≠ déploiement mobile » — vous lancez la publication
+#   quand vous le décidez, plateforme par plateforme (2 workflows séparés).
+#   Pour publier AUTOMATIQUEMENT à chaque push, ajoutez sous `on:` :
+#       push:
+#         branches: [production]
+#   Pour n'auto-déclencher que sur des changements mobiles, ajoutez `paths:`.
+# ═════════════════════════════════════════════════════════════════════════
+name: Release Android
+
+# Lancement manuel (onglet Actions -> Run workflow), piste au choix. Le run doit
+# partir de la branche declaree dans la policy Physalis, celle-ci etant liee au
+# triplet (repo, workflow, branche) — un dispatch depuis une autre branche est
+# refuse. Pour publier a chaque push, voir « DÉCLENCHEMENT » ci-dessus.
+on:
+  workflow_dispatch:
+    inputs:
+      play_track:
+        description: "Piste Google Play"
+        required: false
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production]
+      first_release:
+        description: "Toute premiere publication de ce package (app encore en brouillon)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write   # requis pour core.getIDToken()
+  contents: read
+
+env:
+  VAULT_URL: https://vault.physalis.cloud
+  VAULT_AUDIENCE: vault.physalis.cloud
+  VAULT_PROJECT: mon-projet
+  VAULT_ENV: production
+  MOBILE_APP: com.exemple.monapp
+
+jobs:
+  release:
+    name: Build, sign & upload to Google Play
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 1. Bundles Physalis (fail fast : avant tout build) ───────────────
+      # Un token OIDC par appel : chaque endpoint a sa propre Policy et un
+      # token neuf evite tout probleme d'expiration ou de rejeu.
+      - name: Get OIDC token (deploy)
+        id: oidc_deploy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      # Les VITE_* sont ecrites dans frontend/.env.production, que Vite charge
+      # automatiquement en mode production — jamais dans $GITHUB_ENV, pour ne
+      # pas les exposer aux etapes qui n'en ont pas besoin.
+      - name: Fetch build secrets (VITE_*)
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_deploy.outputs.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/deploy.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"project\":\"${VAULT_PROJECT}\",\"environment\":\"${VAULT_ENV}\"}" \
+            "${VAULT_URL}/api/deploy")
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::HTTP $http_code from /api/deploy"
+            cat "$RUNNER_TEMP/deploy.json" || true
+            exit 1
+          fi
+
+          while IFS= read -r v; do
+            [ -n "$v" ] && echo "::add-mask::$v"
+          done < <(jq -r '.secrets | to_entries[] | select(.key | startswith("VITE_")) | .value' \
+                     "$RUNNER_TEMP/deploy.json")
+
+          jq -r '.secrets | to_entries[] | select(.key | startswith("VITE_")) | "\(.key)=\(.value)"' \
+            "$RUNNER_TEMP/deploy.json" > frontend/.env.production
+
+          echo "VITE_* injectees : $(wc -l < frontend/.env.production)"
+
+      - name: Get OIDC token (mobile)
+        id: oidc_mobile
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      # POST /api/deploy/mobile { app } -> { app, credentials: [ {kind, value,
+      # encoding, filename, ...} ] }. Chaque credential "fichier" arrive en
+      # base64 (a ecrire tel quel), chaque credential "texte" arrive decode.
+      # On masque TOUTES les valeurs avant tout traitement.
+      - name: Fetch signing bundle
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_mobile.outputs.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/bundle.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"app\":\"${MOBILE_APP}\"}" \
+            "${VAULT_URL}/api/deploy/mobile")
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::HTTP $http_code from /api/deploy/mobile"
+            cat "$RUNNER_TEMP/bundle.json" || true
+            exit 1
+          fi
+
+          while IFS= read -r v; do
+            [ -n "$v" ] && echo "::add-mask::$v"
+          done < <(jq -r '.credentials[].value' "$RUNNER_TEMP/bundle.json")
+
+          # La policy ASSIGNE l'app : si elle a ete creee sur la mauvaise, on
+          # recevrait un .p12 Apple ici. Mieux vaut le dire tout de suite que
+          # d'echouer au fond de gradle.
+          platform=$(jq -r '.app.platform // empty' "$RUNNER_TEMP/bundle.json")
+          if [ "$platform" != "android" ]; then
+            echo "::error::La policy mobile de release-android.yml pointe une app '$platform', attendu 'android'"
+            exit 1
+          fi
+
+          CRED_DIR="$RUNNER_TEMP/signing"
+          mkdir -p "$CRED_DIR"
+
+          sha_of() { # sha256sum cote GNU, shasum sur macOS
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+
+          get_file() { # $1 = kind, $2 = chemin de sortie ; decode le base64
+            # `openssl base64 -d -A` plutot que `base64 --decode` : option longue
+            # GNU, absente du base64 BSD de macOS. Ce workflow tourne sur Linux,
+            # mais les deux gabarits doivent rester identiques sur ce point — un
+            # decodage silencieusement faux ne se voit qu'a la signature.
+            jq -r --arg k "$1" '.credentials[] | select(.kind==$k) | .value' \
+              "$RUNNER_TEMP/bundle.json" | openssl base64 -d -A > "$2"
+
+            # Physalis calcule sha256 sur les octets DECODES (lib/mobile-
+            # fingerprint.ts) : l'empreinte verifie le materiel de bout en bout,
+            # du vault jusqu'au disque du runner.
+            expected=$(jq -r --arg k "$1" \
+              '.credentials[] | select(.kind==$k) | .sha256 // empty' \
+              "$RUNNER_TEMP/bundle.json")
+            if [ -n "$expected" ]; then
+              actual=$(sha_of "$2")
+              if [ "$expected" != "$actual" ]; then
+                echo "::error::$1 corrompu au transport : sha256 attendu $expected, obtenu $actual ($(wc -c < "$2") octets ecrits)"
+                exit 1
+              fi
+            fi
+          }
+          get_text() { # $1 = kind ; renvoie la valeur decodee (deja en clair)
+            jq -r --arg k "$1" '.credentials[] | select(.kind==$k) | .value // empty' \
+              "$RUNNER_TEMP/bundle.json"
+          }
+
+          # Diagnostic : quels kinds le vault a servis. Aucune valeur n'est
+          # affichee — c'est deja ce que l'audit Physalis journalise de son cote.
+          echo "Credentials servis : $(jq -r '[.credentials[].kind] | join(", ")' "$RUNNER_TEMP/bundle.json")"
+
+          # Un credential texte absent du bundle arrive comme chaine VIDE : gradle
+          # ne s'en plaint qu'a la signature, apres plusieurs minutes de build, et
+          # sur un laconique "keystore password was incorrect". On refuse tout de
+          # suite, en nommant ce qui manque.
+          missing=""
+          for k in android_keystore android_keystore_password android_key_alias \
+                   android_key_password play_service_account; do
+            if [ -z "$(get_text "$k")" ]; then
+              missing="$missing $k"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Credentials absents ou vides cote Physalis :$missing — a completer dans l'onglet Mobile de l'application"
+            exit 1
+          fi
+
+          get_file android_keystore       "$CRED_DIR/release.keystore"
+          get_file play_service_account   "$CRED_DIR/play-service-account.json"
+
+          # Masque les mots de passe une seconde fois : ils transitent par
+          # $GITHUB_ENV et par la ligne de commande gradle.
+          echo "::add-mask::$(get_text android_keystore_password)"
+          echo "::add-mask::$(get_text android_key_password)"
+
+          # versionCode + versionName servis par Physalis (compteur incremente
+          # atomiquement a chaque appel, cf. onglet Mobile de l'app). Un
+          # versionName vide => on garde celui du build.gradle du projet.
+          BUILD_NUMBER=$(jq -r '.buildNumber // empty' "$RUNNER_TEMP/bundle.json")
+          if [ -z "$BUILD_NUMBER" ]; then
+            echo "::error::Physalis n'a pas servi de buildNumber"
+            exit 1
+          fi
+
+          {
+            echo "KEYSTORE_PATH=$CRED_DIR/release.keystore"
+            echo "KEYSTORE_PASSWORD=$(get_text android_keystore_password)"
+            echo "KEY_ALIAS=$(get_text android_key_alias)"
+            echo "KEY_PASSWORD=$(get_text android_key_password)"
+            echo "PLAY_JSON_PATH=$CRED_DIR/play-service-account.json"
+            echo "CRED_DIR=$CRED_DIR"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "VERSION_NAME=$(jq -r '.versionName // empty' "$RUNNER_TEMP/bundle.json")"
+          } >> "$GITHUB_ENV"
+
+          echo "Build $(jq -r '.versionName // "(version du projet)"' "$RUNNER_TEMP/bundle.json") ($BUILD_NUMBER)"
+
+      # ── 2. Toolchain ─────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"   # requis par Capacitor 8
+
+      # gradle ne verifie l'alias qu'a `signReleaseBundle`, sa toute derniere
+      # tache : un alias errone coute ~4 min de build avant de se manifester.
+      # keytool exige le JDK, d'ou cette place juste apres son installation.
+      - name: Verify keystore alias
+        run: |
+          set -euo pipefail
+
+          if keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" \
+               -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "Alias present dans le keystore."
+            exit 0
+          fi
+
+          # On ne LISTE pas les alias reels : Physalis les traite comme des
+          # credentials (ils sont masques dans ces logs), leur nombre suffit a
+          # distinguer « keystore vide » de « alias mal orthographie ».
+          count=$(keytool -list -keystore "$KEYSTORE_PATH" \
+                    -storepass "$KEYSTORE_PASSWORD" 2>/dev/null \
+                    | grep -c "PrivateKeyEntry" || true)
+          echo "::error::android_key_alias ne correspond a aucune entree du keystore, qui contient $count cle(s) privee(s). Listez les alias reels en local : keytool -list -keystore release-keystore.jks"
+          exit 1
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Ruby & fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: |
+          set -euo pipefail
+          gem install fastlane --no-document
+          fastlane --version
+
+      # ── 3. Build web + projet natif Capacitor ────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build   # lit frontend/.env.production
+
+      - name: Add Android platform and sync
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npx cap add android || true
+          npx cap sync android
+
+      # ── 4. Personnalisation du projet natif ──────────────────────────────
+      # `android.injected.version.*`, que recommande le gabarit Physalis, est
+      # ignore par ce build : l'AAB partait avec le `versionCode 1` du
+      # build.gradle genere par Capacitor, malgre la propriete passee en ligne de
+      # commande — Google l'a rejete sur "Version code 1 has already been used",
+      # apres un build complet et un upload. On patche donc le fichier, comme le
+      # fait build-android.yml, et on RELIT le resultat : une substitution sed
+      # qui ne matche rien ne dit rien.
+      - name: Set app version
+        working-directory: frontend/android/app
+        run: |
+          set -euo pipefail
+
+          sed -i "s/versionCode [0-9]*/versionCode $BUILD_NUMBER/" build.gradle
+          if [ -n "${VERSION_NAME:-}" ]; then
+            sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION_NAME\"/" build.gradle
+          fi
+
+          echo "=== build.gradle ==="
+          grep -E 'versionCode|versionName' build.gradle
+
+          # Garde-fou : sans lui, un build.gradle dont la forme changerait (AGP,
+          # nouvelle version de Capacitor) laisserait passer le versionCode 1 et
+          # l'on redecouvrirait le probleme cote Google, 5 min plus tard.
+          if ! grep -qE "versionCode +$BUILD_NUMBER\b" build.gradle; then
+            echo "::error::versionCode $BUILD_NUMBER absent de build.gradle apres substitution — la forme du fichier a change"
+            exit 1
+          fi
+
+      - name: Generate app icons
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y imagemagick
+          ICON=frontend/public/icon-512.png
+          RES=frontend/android/app/src/main/res
+          for entry in "mdpi 48 108" "hdpi 72 162" "xhdpi 96 216" "xxhdpi 144 324" "xxxhdpi 192 432"; do
+            set -- $entry
+            convert "$ICON" -resize "$2x$2"  "$RES/mipmap-$1/ic_launcher.png"
+            convert "$ICON" -resize "$2x$2"  "$RES/mipmap-$1/ic_launcher_round.png"
+            convert "$ICON" -resize "$3x$3"  "$RES/mipmap-$1/ic_launcher_foreground.png"
+          done
+
+      - name: Add permissions to AndroidManifest
+        working-directory: frontend/android/app/src/main
+        run: |
+          set -euo pipefail
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />' AndroidManifest.xml
+          grep uses-permission AndroidManifest.xml
+
+      # ── 5. Build signe + upload ──────────────────────────────────────────
+      # La logique vit dans fastlane/Fastfile (lane `android release`), lancee
+      # depuis la racine du repo. La signature passe par les proprietes gradle
+      # `android.injected.signing.*` — rien n'est ecrit dans le depot.
+      - name: Release with fastlane
+        id: release
+        env:
+          # MOBILE_APP vient du `env` du job ; le materiel de signature, de
+          # $GITHUB_ENV. `inputs.play_track` est vide sur un push -> internal.
+          PLAY_TRACK: ${{ inputs.play_track || 'internal' }}
+          # Laisse le Fastfile basculer en release draft + changesNotSentForReview
+          # le temps que l'app sorte du brouillon. Vide sur un push -> "false".
+          PLAY_FIRST_RELEASE: ${{ inputs.first_release || 'false' }}
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: |
+          set -euo pipefail
+          fastlane android release
+
+      - name: Upload AAB artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mon-app-android-build-${{ env.BUILD_NUMBER }}
+          path: frontend/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # ── 6. Rapport a Physalis (registre de livraisons) ───────────────────
+      # Physalis a deja ouvert une ligne « materiel servi » en remettant le
+      # bundle : cette moitie-la, il la constate. Ce qu'il ne peut PAS savoir,
+      # c'est ce que le pipeline a fait ensuite — d'ou ce signalement.
+      #
+      # `if: always()` a dessein : un run qui echoue APRES avoir pris le
+      # materiel est precisement ce qu'on veut voir dans le registre. Sans lui,
+      # la ligne resterait en « materiel servi » sans qu'on sache si le build a
+      # casse ou si le pipeline a ete annule.
+      #
+      # L'echec du rapport, lui, ne fait pas echouer le run : l'AAB est deja
+      # chez Google, faire rougir la publication pour un probleme de
+      # journalisation serait absurde. On annonce en warning et on continue.
+      - name: Get OIDC token (report)
+        id: oidc_report
+        if: always() && env.BUILD_NUMBER != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      - name: Report release to Physalis
+        if: always() && env.BUILD_NUMBER != ''
+        env:
+          OIDC_TOKEN: ${{ steps.oidc_report.outputs.token }}
+          PLAY_TRACK: ${{ inputs.play_track || 'internal' }}
+          # `uploaded` = l'AAB est parti chez Google. La suite (revue, mise en
+          # ligne) est asynchrone : Physalis la lira aux magasins en Phase 5,
+          # ou vous la rapporterez depuis un autre workflow.
+          RELEASE_STATUS: ${{ steps.release.outcome == 'success' && 'uploaded' || 'failed' }}
+        run: |
+          set -uo pipefail
+
+          http_code=$(curl -s -o "$RUNNER_TEMP/report.json" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"app\":\"${MOBILE_APP}\",\"buildNumber\":${BUILD_NUMBER},\"track\":\"${PLAY_TRACK}\",\"status\":\"${RELEASE_STATUS}\",\"detail\":\"${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}\"}" \
+            "${VAULT_URL}/api/deploy/mobile/report") || true
+
+          if [ "$http_code" != "200" ]; then
+            echo "::warning::Rapport de livraison refuse (HTTP $http_code) — la publication, elle, a suivi son cours"
+            cat "$RUNNER_TEMP/report.json" 2>/dev/null || true
+          else
+            echo "Livraison rapportee : build $BUILD_NUMBER, piste $PLAY_TRACK, etat $RELEASE_STATUS"
+          fi
+
+      # ── 7. Cleanup ───────────────────────────────────────────────────────
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/bundle.json" "$RUNNER_TEMP/deploy.json" \
+                 "$RUNNER_TEMP/report.json" "$RUNNER_TEMP/signing" \
+                 frontend/.env.production

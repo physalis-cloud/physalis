@@ -1,5 +1,5 @@
 // Coût bcrypt des mots de passe de compte + calibrage du hash factice
-// anti-timing (docs/rapport-security.md F3.1, docs/security.md §1).
+// anti-timing (documentation/rapports/rapport-security.md F3.1, docs/security.md §1).
 //
 // La mitigation anti-timing du login ne vaut QUE si le hash factice et les
 // hashs réels ont le même facteur de coût. Ils avaient divergé (10 contre 12)

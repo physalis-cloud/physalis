@@ -169,7 +169,7 @@ export type VerifyError =
   | "missing_claims"
   | "unparseable_ref"
   /** Le ref n'est pas une BRANCHE (tag, PR merge-ref…). Les policies ne
-   *  s'expriment qu'en branches — cf. docs/failles.md §2.5. */
+   *  s'expriment qu'en branches — cf. documentation/rapports/failles.md §2.5. */
   | "ref_not_branch"
   | "jwks_unreachable";
 
@@ -225,7 +225,7 @@ function mapJoseError(err: unknown): { ok: false; reason: VerifyError } {
 // DISTINCTS côté forge : par défaut les rulesets de branche GitHub ne couvrent
 // pas les tags, et la liste des tags protégés GitLab est vide. Confondre les
 // deux laissait un dev sans droit de push sur `main` pousser un TAG nommé
-// `main` → policy matchée → secrets de prod + clé SSH. Cf. docs/failles.md §2.5.
+// `main` → policy matchée → secrets de prod + clé SSH. Cf. documentation/rapports/failles.md §2.5.
 //
 // On refuse donc tout ref qui n'est pas une branche (tag, ref de merge de PR…).
 // Le type vient du claim `ref_type` ("branch" | "tag", posé par GitHub ET

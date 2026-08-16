@@ -36,6 +36,25 @@ Physalis utilise une hiérarchie à 4 niveaux : `MEMBER` < `DEV` < `ADMIN` < `OW
 > de l'organisation : il voit tout, peut créer/modifier secrets et envs,
 > mais ne peut pas supprimer un projet ni inviter des ProjectMember.
 
+### Restreindre un DEV à certains projets
+
+Cet accès par défaut se règle projet par projet. Décocher un projet pour un
+DEV le lui **interdit vraiment** : le projet disparaît de sa liste, l'accès
+est refusé, et ses jetons machine sur ce projet sont révoqués.
+
+Trois endroits pour le faire, selon le moment :
+
+- **À l'invitation** — bouton « Droits d'accès » à côté du rôle, dans le
+  formulaire d'invitation. Le nouveau membre arrive déjà cantonné.
+- **À la création d'un projet** — section « Droits d'accès des membres » du
+  formulaire de création. C'est le seul moment où l'oubli est impossible :
+  un projet neuf est sinon visible d'emblée par tous les DEV de l'org.
+- **Après coup** — `/orgs/<slug>` → onglet « Membres » → « Droits d'accès »
+  en face du membre, ou l'onglet « Membres » du projet lui-même.
+
+Les cases y montrent toujours l'accès **réel** du membre : un DEV s'ouvre
+tout coché, puisque c'est ce qu'il a.
+
 ### Quand utiliser quel rôle ?
 
 - **MEMBER** → un employé non-tech qui n'a accès qu'à un coffre d'équipe

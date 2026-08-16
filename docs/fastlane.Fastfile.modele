@@ -1,0 +1,271 @@
+# fastlane/Fastfile — lanes de release mobile Physalis (apps Capacitor/hybrides).
+#
+# Utilisé par docs/deploy-mobile-{ios,android}-capacitor.modele.yml.
+#
+# Ne stocke AUCUN secret : tout arrive par variables d'environnement, posees par
+# les workflows depuis les bundles Physalis (materiel de signature).
+#
+# Les deux plateformes vivent dans le meme Fastfile, a la RACINE du repo, parce
+# que les projets natifs (`frontend/ios/`, `frontend/android/`) sont gitignores
+# et regeneres a chaque build par `npx cap add` : y deposer un Fastfile
+# n'aurait pas survecu. Les lanes se lancent donc depuis la racine et pointent
+# vers les projets natifs par chemin relatif.
+#
+#   fastlane ios release
+#   fastlane android release
+
+require "securerandom"
+require "shellwords"
+
+default_platform(:ios)
+
+# ─────────────────────────────────────────────────────────────────────────────
+platform :ios do
+  # Variables attendues (posees par release-ios.yml) :
+  #   P12_PATH        chemin du certificat de distribution .p12
+  #   P12_PASSWORD    mot de passe du .p12
+  #   PROFILE_PATH    chemin du profil .mobileprovision
+  #   PROFILE_NAME    nom du profil, extrait du .mobileprovision par le workflow
+  #   TEAM_ID         Team ID, extrait du .mobileprovision par le workflow
+  #   ASC_KEY_PATH    chemin de la cle d'API App Store Connect .p8
+  #   ASC_KEY_ID      Key ID App Store Connect
+  #   ASC_ISSUER_ID   Issuer ID App Store Connect
+  #   MOBILE_APP      bundle id (com.exemple.monapp)
+  #   IOS_SCHEME      scheme Xcode (App, impose par Capacitor)
+  #   IOS_WORKSPACE   .xcworkspace  ┐ l'UN ou l'AUTRE, pose par le workflow selon
+  #   IOS_PROJECT     .xcodeproj    ┘ ce que Capacitor a genere (SPM ou pods)
+
+  desc "Build, signe et televerse sur App Store Connect (TestFlight)"
+  lane :release do
+    bundle_id    = ENV.fetch("MOBILE_APP")
+    profile_name = ENV.fetch("PROFILE_NAME")
+    team_id      = ENV.fetch("TEAM_ID")
+
+    # Capacitor 8 genere un projet SPM : selon les plugins installes, il peut ne
+    # pas y avoir de workspace CocoaPods. Le workflow a detecte lequel existe.
+    workspace = ENV["IOS_WORKSPACE"].to_s
+    project   = ENV["IOS_PROJECT"].to_s
+    if workspace.empty? && project.empty?
+      UI.user_error!("Ni IOS_WORKSPACE ni IOS_PROJECT n'est defini")
+    end
+
+    # ── Authentification App Store Connect par cle d'API (.p8) ──────────────
+    # Pas d'Apple ID, pas de 2FA : la cle d'API suffit pour deliver/pilot.
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      in_house: false,
+    )
+
+    # ── Keychain temporaire, detruit en fin de lane ────────────────────────
+    keychain_name = "physalis-ci.keychain"
+    keychain_password = SecureRandom.hex(16)
+    create_keychain(
+      name: keychain_name,
+      password: keychain_password,
+      default_keychain: true,
+      unlock: true,
+      timeout: 3600,
+      lock_when_sleeps: true,
+    )
+
+    begin
+      # Importe le certificat de distribution dans ce keychain. log_output pour
+      # voir la sortie de `security import` : sans elle, un import qui n'a rien
+      # ajoute ressemble a un import reussi.
+      import_certificate(
+        certificate_path: ENV.fetch("P12_PATH"),
+        certificate_password: ENV.fetch("P12_PASSWORD", ""),
+        keychain_name: keychain_name,
+        keychain_password: keychain_password,
+        log_output: true,
+      )
+
+      # Chemin REEL du keychain, et non son nom : `security` interroge sinon un
+      # fichier qui n'existe pas et repond « 0 identities » — indiscernable d'un
+      # import rate. Le tilde est expanse AVANT shellescape, qui l'empecherait
+      # d'etre interprete, et macOS suffixe volontiers le fichier en `-db`.
+      raw_path = lane_context[SharedValues::KEYCHAIN_PATH].to_s
+      keychain_path = raw_path.empty? ? keychain_name : File.expand_path(raw_path)
+      keychain_path = "#{keychain_path}-db" if !File.exist?(keychain_path) && File.exist?("#{keychain_path}-db")
+      UI.message("Keychain interroge : #{keychain_path} (existe : #{File.exist?(keychain_path)})")
+
+      # `import_certificate` reussit meme quand le .p12 ne contient QUE le
+      # certificat, sans sa cle privee — xcodebuild ne s'en apercoit que 30 s
+      # plus tard, sur "No signing certificate ... with a private key was
+      # found", qui ne dit pas ou est le vrai probleme. On verifie donc tout de
+      # suite que le keychain expose une identite de signature complete.
+      # Quatre vues, parce qu'aucune ne suffit seule :
+      #   - sans -v : TOUTES les identites ; avec -v : les VALIDES. L'ecart
+      #     separe « rien d'importe » de « importe mais invalide » (chaine WWDR).
+      #   - dans le keychain CI, puis dans toute la search list : si le
+      #     certificat n'apparait que dans la seconde, c'est le keychain qui est
+      #     hors de portee de xcodebuild, pas le certificat qui manque.
+      keychain_arg = keychain_path.shellescape
+      all_identities   = `security find-identity -p codesigning #{keychain_arg} 2>&1`
+      valid_identities = `security find-identity -v -p codesigning #{keychain_arg} 2>&1`
+      valid_anywhere   = `security find-identity -v -p codesigning 2>&1`
+      UI.message("Search list :\n#{`security list-keychains -d user`}")
+      UI.message("Identites du keychain CI (toutes) :\n#{all_identities}")
+      UI.message("Identites VALIDES du keychain CI :\n#{valid_identities}")
+      UI.message("Identites VALIDES, tous keychains :\n#{valid_anywhere}")
+
+      if valid_identities.include?("0 valid identities found")
+        if !valid_anywhere.include?("0 valid identities found")
+          UI.important(
+            "Le certificat n'est pas vu dans le keychain CI mais l'est ailleurs " \
+            "dans la search list : c'est un probleme de ciblage de keychain, pas " \
+            "de materiel. On laisse xcodebuild tenter.",
+          )
+        elsif all_identities.match?(/\b0 identities found/)
+          UI.user_error!(
+            "Aucune identite nulle part apres import. Relisez la sortie de " \
+            "`security import` ci-dessus : `import_certificate` NE FAIT PAS " \
+            "echouer la lane quand elle echoue, elle se contente de l'afficher " \
+            "en rouge. « MAC verification failed (wrong password?) » y designe " \
+            "ios_p12_password ; toute autre erreur designe le fichier lui-meme.",
+          )
+        else
+          UI.user_error!(
+            "Le certificat est dans le keychain, mais AUCUNE identite n'est " \
+            "valide : chaine de certification incomplete (intermediaire Apple " \
+            "WWDR G3 absent) ou certificat expire. Ce n'est PAS la cle privee.",
+          )
+        end
+      end
+
+      # Installe le profil de provisioning fourni par Physalis.
+      install_provisioning_profile(path: ENV.fetch("PROFILE_PATH"))
+
+      # ── Signature MANUELLE, inscrite dans le seul target App ─────────────
+      # Capacitor genere le projet en signature automatique, qui exigerait un
+      # compte Xcode connecte. Le reglage ne peut PAS passer par xcargs : un
+      # build setting en ligne de commande s'applique a TOUS les targets, pods
+      # compris, et l'archive echoue aussitot sur « GoogleToolboxForMac does not
+      # support provisioning profiles ». Une bibliotheque n'a pas de profil.
+      #
+      # update_code_signing_settings ecrit dans le .xcodeproj, pour le target
+      # nomme uniquement — les pods gardent leur signature automatique.
+      update_code_signing_settings(
+        use_automatic_signing: false,
+        path: ENV.fetch("IOS_XCODEPROJ"),
+        team_id: team_id,
+        code_sign_identity: "Apple Distribution",
+        profile_name: profile_name,
+        bundle_identifier: bundle_id,
+        targets: [ENV.fetch("IOS_SCHEME")],
+      )
+
+      # ── Build signe ──────────────────────────────────────────────────────
+      # Aucun xcargs de signature ici : tout est deja dans le projet.
+      build_app(
+        workspace: workspace.empty? ? nil : workspace,
+        project: project.empty? ? nil : project,
+        scheme: ENV.fetch("IOS_SCHEME"),
+        configuration: "Release",
+        export_method: "app-store",
+        output_directory: "build/ios",
+        export_options: {
+          signingStyle: "manual",
+          teamID: team_id,
+          provisioningProfiles: { bundle_id => profile_name },
+          uploadSymbols: true,
+          uploadBitcode: false,
+        },
+      )
+
+      # ── Upload vers TestFlight ───────────────────────────────────────────
+      # CFBundleVersion / CFBundleShortVersionString ont deja ete poses par le
+      # workflow (etape "Configure Info.plist") avec le buildNumber servi par
+      # Physalis — pas d'increment_build_number ici : agvtool ne sait pas lire
+      # l'Info.plist a valeurs litterales que genere Capacitor.
+      upload_to_testflight(
+        api_key: api_key,
+        app_identifier: bundle_id,
+        skip_waiting_for_build_processing: true,
+      )
+
+      # Pour une publication App Store directe plutot que TestFlight, remplacez
+      # l'appel ci-dessus par `upload_to_app_store(api_key: api_key, ...)`.
+    ensure
+      delete_keychain(name: keychain_name)
+    end
+  end
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+platform :android do
+  # Variables attendues (posees par release-android.yml) :
+  #   KEYSTORE_PATH      chemin du keystore (JKS/PKCS12)
+  #   KEYSTORE_PASSWORD  mot de passe du keystore
+  #   KEY_ALIAS          alias de la cle de signature
+  #   KEY_PASSWORD       mot de passe de la cle
+  #   PLAY_JSON_PATH     chemin du compte de service Google Play (JSON)
+  #   PLAY_TRACK         piste Play (internal | alpha | beta | production)
+  #   MOBILE_APP         applicationId (com.exemple.monapp)
+  #   BUILD_NUMBER       versionCode autoritatif, servi par Physalis
+  #   VERSION_NAME       version marketing (vide => celle du build.gradle)
+  #   PLAY_FIRST_RELEASE "true" au tout premier envoi d'un package (cf. plus bas)
+
+  desc "Build signe (AAB) et televerse sur Google Play"
+  lane :release do
+    # ── Build de l'App Bundle signe ────────────────────────────────────────
+    # Les proprietes `android.injected.*` signent ET versionnent sans toucher au
+    # build.gradle genere par Capacitor : rien n'est ecrit dans le depot.
+    # ⚠️ Pas de `android.injected.version.*` ici, contrairement au gabarit
+    # Physalis : sur ce projet, l'AGP les ignore et l'AAB sortait avec le
+    # versionCode 1 du build.gradle, jusqu'au rejet par Google. La version est
+    # donc posee dans build.gradle par le workflow (etape "Set app version"),
+    # qui relit le fichier pour s'assurer que la substitution a mordu.
+    gradle(
+      project_dir: "frontend/android",
+      task: "bundle",
+      build_type: "Release",
+      properties: {
+        "android.injected.signing.store.file" => ENV.fetch("KEYSTORE_PATH"),
+        "android.injected.signing.store.password" => ENV.fetch("KEYSTORE_PASSWORD"),
+        "android.injected.signing.key.alias" => ENV.fetch("KEY_ALIAS"),
+        "android.injected.signing.key.password" => ENV.fetch("KEY_PASSWORD"),
+      },
+    )
+
+    # ── Upload vers Google Play ────────────────────────────────────────────
+    # `supply` s'authentifie avec le compte de service fourni par Physalis.
+    #
+    # PREMIERE PUBLICATION d'un package. Ce qui est reellement manuel, c'est la
+    # CREATION DE LA FICHE dans la console : l'API Play travaille sur un
+    # packageName existant, elle n'a aucun endpoint de creation. L'AAB, lui,
+    # monte tres bien par l'API des le premier envoi — a deux conditions, tant
+    # que l'app est en « brouillon » (jamais publiee) :
+    #
+    #   release_status: "draft"        sinon « Only releases with status draft
+    #                                  may be created on draft app »
+    #   changes_not_sent_for_review    sinon « Changes cannot be sent for review
+    #                                  automatically. Please set the query
+    #                                  parameter changesNotSentForReview to true »
+    #
+    # Reste ensuite UN clic humain, une fois : envoyer la premiere release en
+    # revue depuis la console. Tant que l'app est en brouillon, les testeurs ne
+    # recoivent rien, quoi qu'ait fait le pipeline.
+    #
+    # ⚠️ Faire passer ce premier AAB par le pipeline n'est pas qu'une commodite :
+    # Play App Signing enrole la cle d'upload a partir de la cle qui signe la
+    # PREMIERE release. Un premier AAB televerse a la main avec un autre
+    # keystore que celui detenu par Physalis condamne tous les runs suivants.
+    first_release = ENV["PLAY_FIRST_RELEASE"].to_s == "true"
+
+    upload_to_play_store(
+      package_name: ENV.fetch("MOBILE_APP"),
+      track: ENV.fetch("PLAY_TRACK", "internal"),
+      json_key: ENV.fetch("PLAY_JSON_PATH"),
+      aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH],
+      release_status: first_release ? "draft" : "completed",
+      changes_not_sent_for_review: first_release,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

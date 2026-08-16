@@ -9,6 +9,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { requireOrgMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { createOrgSecretVersion } from "@/lib/versioning";
@@ -47,7 +48,8 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Version not found" }, { status: 404 });
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  const result = await withTenantSchema(access.tenantSlug, async (tx) => {
     const { version: snapshotVersion } = await createOrgSecretVersion({
       tx,
       orgSecretId: secret.id,

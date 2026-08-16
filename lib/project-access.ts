@@ -1,5 +1,5 @@
 /**
- * Source unique des règles d'accès aux projets (§4 de docs/failles.md).
+ * Source unique des règles d'accès aux projets (§4 de documentation/rapports/failles.md).
  *
  * ── Pourquoi ce module ──
  * Les 6 règles d'accès existaient en prose, ré-implémentées à la main sous
@@ -220,4 +220,69 @@ export function filterAccessibleProjects<
       }) !== null
     );
   });
+}
+
+/**
+ * Ce qu'un gestionnaire DEMANDE pour un membre sur un projet. `"NONE"` = aucun
+ * accès, y compris contre l'EDITOR implicite d'un DEV (règle 4) — c'est la
+ * seule valeur qui n'est pas un `ProjectRole`.
+ */
+export type DesiredProjectAccess = ProjectRole | "NONE";
+
+/** Valide une valeur venue du réseau. */
+export function isDesiredProjectAccess(
+  value: unknown,
+): value is DesiredProjectAccess {
+  return (
+    value === "NONE" ||
+    value === "VIEWER" ||
+    value === "EDITOR" ||
+    value === "OWNER"
+  );
+}
+
+/**
+ * Forme ÉCRITURE — la ligne `ProjectMember` à poser pour que l'accès effectif
+ * du membre soit exactement `desired`. `null` = AUCUNE ligne ne doit exister
+ * (l'implicite du rôle d'org fait déjà le travail, ou aucune ligne ne peut
+ * donner ce résultat).
+ *
+ * C'est la réciproque d'`effectiveProjectRole`, et l'invariant qui les lie est
+ * asserté dans `tests/lib/project-access.test.ts` sur toute la matrice :
+ *
+ *   effectiveProjectRole({orgRole, membership: desiredMembershipRow(orgRole, d)})
+ *     === (d === "NONE" ? null : d)          // sauf OrgADMIN/OWNER, cf. ci-dessous
+ *
+ * Deux rôles d'org échappent à cet invariant, et c'est voulu :
+ *   • OrgOWNER/ADMIN — OWNER implicite partout, `hidden` ignoré (règle 1) :
+ *     aucune ligne ne change quoi que ce soit → toujours `null`. Les appelants
+ *     REFUSENT ces cibles plutôt que d'écrire une ligne sans effet.
+ *   • Pas membre de l'org (`null`) — règle 6 : il ne doit PAS subsister de
+ *     ligne. Les appelants vérifient l'appartenance AVANT d'arriver ici.
+ *
+ * Le « ne rien écrire quand l'implicite suffit » n'est pas une micro-optim :
+ * figer une ligne EDITOR explicite sur chaque projet d'un DEV la lui laisserait
+ * après une rétrogradation en MEMBER, qui devrait au contraire tout lui retirer.
+ */
+export function desiredMembershipRow(
+  orgRole: OrgRole | null,
+  desired: DesiredProjectAccess,
+): { role: ProjectRole; hidden: boolean } | null {
+  if (!orgRole) return null;
+  if (ORG_ROLE_IGNORES_HIDDEN[orgRole]) return null;
+
+  const implicit = ORG_ROLE_IMPLICIT_GRANT[orgRole];
+
+  if (desired === "NONE") {
+    // Rien à bloquer si le rôle d'org ne donne déjà rien (MEMBER, règle 5) :
+    // l'absence de ligne EST le refus. Une barrière n'est utile que contre un
+    // accès implicite (DEV/ADMIN_DEV).
+    if (implicit === null) return null;
+    // `role` est inerte tant que `hidden` est vrai ; VIEWER = le plancher, pour
+    // qu'un dé-masquage accidentel ne donne pas plus que le minimum.
+    return { role: "VIEWER", hidden: true };
+  }
+
+  if (desired === implicit) return null;
+  return { role: desired, hidden: false };
 }

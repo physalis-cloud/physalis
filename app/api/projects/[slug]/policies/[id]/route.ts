@@ -62,7 +62,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   // Charge la policy actuelle (scope projet) pour audit.
   const existing = await prisma.policy.findFirst({
-    where: { id, projectId: access.project.id },
+    where: { id, projectId: access.project.id, kind: "server" },
     select: {
       id: true,
       repo: true,
@@ -78,8 +78,8 @@ export async function PATCH(req: Request, { params }: Params) {
 
   // Si l'env name change, résout le nouvel environmentId par (projectId, name).
   let newEnvironmentId = existing.environmentId;
-  let newEnvName = existing.environment.name;
-  if (envName !== undefined && envName !== existing.environment.name) {
+  let newEnvName = existing.environment!.name;
+  if (envName !== undefined && envName !== existing.environment!.name) {
     const newEnv = await prisma.environment.findFirst({
       where: { projectId: access.project.id, name: envName },
       select: { id: true, name: true },
@@ -113,7 +113,7 @@ export async function PATCH(req: Request, { params }: Params) {
         repo: existing.repo,
         workflow: existing.workflow,
         branch: existing.branch,
-        environment: existing.environment.name,
+        environment: existing.environment!.name,
       },
     });
   }
@@ -162,7 +162,7 @@ export async function PATCH(req: Request, { params }: Params) {
     actor: { kind: "user", userId: access.user.id, email: access.user.email },
     organizationId: access.project.organizationId,
     projectId: access.project.id,
-    environmentId: updated.environment.id,
+    environmentId: updated.environment!.id,
     targetType: "Policy",
     targetId: updated.id,
     metadata: {
@@ -170,13 +170,13 @@ export async function PATCH(req: Request, { params }: Params) {
         repo: existing.repo,
         workflow: existing.workflow,
         branch: existing.branch,
-        environment: existing.environment.name,
+        environment: existing.environment!.name,
       },
       after: {
         repo: updated.repo,
         workflow: updated.workflow,
         branch: updated.branch,
-        environment: updated.environment.name,
+        environment: updated.environment!.name,
       },
     },
     req,
@@ -206,7 +206,7 @@ export async function DELETE(req: Request, { params }: Params) {
   }
 
   const existing = await prisma.policy.findFirst({
-    where: { id, projectId: access.project.id },
+    where: { id, projectId: access.project.id, kind: "server" },
     select: {
       id: true,
       repo: true,
@@ -234,7 +234,7 @@ export async function DELETE(req: Request, { params }: Params) {
       repo: existing.repo,
       workflow: existing.workflow,
       branch: existing.branch,
-      environment: existing.environment.name,
+      environment: existing.environment!.name,
     },
     req,
   });

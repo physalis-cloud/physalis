@@ -11,7 +11,7 @@
 // (sans le wDEK ni le blob, elle n'ouvre rien d'atteignable), donc il n'y a
 // aucun compromis à faire — seulement un piège à éviter.
 //
-// Cf. lib/kms.ts et docs/steps-docs/todo/suppression-compte.md §D.
+// Cf. lib/kms.ts et documentation/plans/suppression-compte.md §D.
 
 import { describe, expect, it } from "vitest";
 import {

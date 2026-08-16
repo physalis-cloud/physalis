@@ -1,6 +1,6 @@
 // Tests integ — versioning des secrets (Phase 10).
 //
-// Spec : docs/versionning-secrets.md
+// Spec : documentation/plans/done/versionning-secrets.md
 //
 // Ce fichier valide la pièce centrale du versioning : à chaque PATCH/
 // upsert qui REMPLACE la valeur d'un Secret ou OrgSecret existant,

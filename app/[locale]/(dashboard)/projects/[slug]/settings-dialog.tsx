@@ -33,6 +33,8 @@ export default function SettingsDialog({
   ciConnectionId,
   ciRepo,
   environments,
+  mobileDeployEnabled = false,
+  mobileEnabled = false,
   onClose,
 }: {
   slug: string;
@@ -43,6 +45,18 @@ export default function SettingsDialog({
   ciConnectionId: string | null;
   ciRepo: string | null;
   environments: EnvSummary[];
+  /** Le plan du tenant couvre `mobile_deploy` (payant, refusé en FREE) : sinon
+   *  la section n'a pas lieu d'être — il n'y a rien à activer.
+   *
+   *  OPTIONNEL À DESSEIN : le jumeau overlay de `project-view.tsx`
+   *  (scripts/public-overlay/, build self-host) monte cette modale sans ces
+   *  deux props. Les rendre obligatoires casserait le `tsc` du build public
+   *  sans qu'aucun test de ce dépôt ne le voie — cf. mémoire
+   *  overlay-forward-port-trap. Le défaut `false` = section masquée, ce qui
+   *  est l'état correct tant que le self-host n'a pas reçu l'onglet. */
+  mobileDeployEnabled?: boolean;
+  /** État courant de l'interrupteur du projet (Project.mobileEnabled). */
+  mobileEnabled?: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations("projects.settings");
@@ -72,7 +86,7 @@ export default function SettingsDialog({
 
   return (
     <div className="dialog-overlay">
-      <div className="dialog dialog-lg">
+      <div className="dialog dialog-lg dialog-sticky-header">
         <div className="dialog-header">
           <h2 className="dialog-title">{t("title")}</h2>
           <button
@@ -96,6 +110,9 @@ export default function SettingsDialog({
               initialGithubWorkflow={githubWorkflow}
               initialCiRepo={ciRepo}
             />
+          )}
+          {mobileDeployEnabled && (
+            <MobileSection slug={slug} initialEnabled={mobileEnabled} />
           )}
           <EnvironmentsSection
             slug={slug}
@@ -252,6 +269,74 @@ type CiConnectionOption = {
   name: string;
   provider: string;
 };
+
+// Interrupteur « Mobile » du projet. Deux verrous en série : le plan du tenant
+// (feature `mobile_deploy`, payante) décide si cette section s'affiche, ce
+// drapeau décide si l'onglet apparaît sur CE projet. Défaut OFF — la majorité
+// des projets ne publie rien sur les stores.
+function MobileSection({
+  slug,
+  initialEnabled,
+}: {
+  slug: string;
+  initialEnabled: boolean;
+}) {
+  const t = useTranslations("projects.settings");
+  const router = useRouter();
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function toggle(next: boolean) {
+    setError(null);
+    setEnabled(next); // optimiste : rendu immédiat, rollback si l'API refuse
+    startTransition(async () => {
+      const res = await fetch(`/api/projects/${slug}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mobileEnabled: next }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setEnabled(!next);
+        setError(data?.error ?? t("saveError"));
+        return;
+      }
+      // L'onglet vit dans un composant serveur (page.tsx) → refresh nécessaire
+      // pour qu'il apparaisse/disparaisse sans rechargement manuel.
+      router.refresh();
+    });
+  }
+
+  return (
+    <section>
+      <h3 className="section-title" style={{ fontSize: 14, marginBottom: 8 }}>
+        {t("mobileSection")}
+      </h3>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={pending}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+        <span>{t("mobileToggle")}</span>
+      </label>
+      <p className="help">{t("mobileHint")}</p>
+      {error && <p className="error-text">{error}</p>}
+    </section>
+  );
+}
 
 function CiSection({
   slug,

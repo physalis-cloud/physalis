@@ -1,5 +1,5 @@
 // KMS — interface mince Physalis → OpenBao (moteur transit) pour les backups
-// clients (système ①). Cf. docs/steps-docs/todo/backup-clients-kms-plan.md (Phase 1.3)
+// clients (système ①). Cf. documentation/plans/done/backup-clients-kms-plan.md (Phase 1.3)
 // + backup-kms-architecture.md. Module SERVEUR uniquement.
 //
 // Posture (right-sized 2026-06-23) : on parle au OpenBao single-node existant

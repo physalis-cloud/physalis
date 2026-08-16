@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import {
   getCurrentOrgSlug,
   readJson,
@@ -91,20 +92,31 @@ export async function POST(req: Request) {
   const updates = assignments
     .filter((a) => okProjects.has(a.projectId as string))
     .filter((a) => a.groupId === null || okGroups.has(a.groupId as string))
-    .map((a) =>
-      prisma.project.update({
-        where: { id: a.projectId as string },
-        data: { groupId: a.groupId ?? null, position: Math.trunc(a.position as number) },
-      }),
-    );
+    .map((a) => ({
+      id: a.projectId as string,
+      groupId: a.groupId ?? null,
+      position: Math.trunc(a.position as number),
+    }));
 
-  const groupUpdates = groupOrder
-    .filter((g) => okGroups.has(g))
-    .map((g, i) =>
-      prisma.projectGroup.update({ where: { id: g }, data: { position: i } }),
-    );
+  const groupUpdates = groupOrder.filter((g) => okGroups.has(g));
 
-  await prisma.$transaction([...updates, ...groupUpdates]);
+  // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
+  // Un réordonnancement partiellement appliqué laisse la liste dans un état
+  // qu'aucun écran n'a demandé (positions dupliquées, projet orphelin de son
+  // groupe) — c'est tout ou rien. Les requêtes sont construites À L'INTÉRIEUR
+  // du callback : bâties dehors sur le client étendu, elles s'exécuteraient
+  // hors transaction, ce qui était précisément le défaut.
+  await withTenantSchema(access.tenantSlug, async (tx) => {
+    for (const u of updates) {
+      await tx.project.update({
+        where: { id: u.id },
+        data: { groupId: u.groupId, position: u.position },
+      });
+    }
+    for (const [i, g] of groupUpdates.entries()) {
+      await tx.projectGroup.update({ where: { id: g }, data: { position: i } });
+    }
+  });
 
   return NextResponse.json({ ok: true, updated: updates.length });
 }

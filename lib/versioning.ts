@@ -1,6 +1,6 @@
 // Phase 10 — Versioning des secrets (Secret + OrgSecret).
 //
-// Spec : docs/versionning-secrets.md
+// Spec : documentation/plans/done/versionning-secrets.md
 //
 // Helpers `createSecretVersion` et `createOrgSecretVersion` à appeler
 // dans une transaction Prisma juste avant un UPDATE de la valeur du
@@ -12,19 +12,18 @@
 // Pas appelé pour les CREATE (pas d'historique sur la valeur initiale).
 
 import { Prisma } from "@prisma/client";
-import type { prisma } from "./prisma";
 
 const MAX_VERSIONS = 50;
 const MAX_RETRIES = 3;
 
 /**
- * Type du `tx` passé par `prisma.$transaction(async (tx) => ...)`. Le
- * `prisma` du repo est étendu via `$extends` (cf. `lib/prisma.ts`), son
- * `tx` n'est donc pas exactement `Prisma.TransactionClient` standard.
- * On infère le type à partir de la signature réelle pour rester
- * type-safe sans cast.
+ * Type du `tx` passé par `withTenantSchema(slug, async (tx) => ...)`
+ * (`lib/tenant.ts`), c.-à-d. une transaction ouverte sur le PrismaClient
+ * du tenant. Ce type était auparavant inféré depuis
+ * `prisma.$transaction` du client étendu — lequel n'ouvrait aucune
+ * transaction réelle (F5.1) et n'existe plus dans son type.
  */
-export type TenantTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+export type TenantTx = Prisma.TransactionClient;
 
 export interface CreateSecretVersionOpts {
   /** Identifiant du Secret parent. */
@@ -121,6 +120,22 @@ async function insertWithRetry(
   const model = (tx as any)[modelName];
   const whereClause = { [parentField]: parentId };
 
+  // ⚠️ Sérialise les créations de version concurrentes sur le MÊME parent.
+  //
+  // Nécessaire depuis F5.1 : tant que `prisma.$transaction` était inerte, le
+  // `catch (P2002) → continue` ci-dessous rattrapait la course sur MAX+1. Dans
+  // une VRAIE transaction, il ne le peut plus — en PostgreSQL, la moindre
+  // erreur avorte la transaction, et la tentative suivante échouerait en 25P02
+  // (« current transaction is aborted ») au lieu de réessayer. Le retry n'est
+  // donc plus le garde-fou : ce verrou l'est. Il est pris AVANT la lecture du
+  // MAX, et relâché au commit/rollback (`_xact_`) — pas de fuite possible.
+  //
+  // Deux clés int4 plutôt qu'une bigint : signature exacte, aucune conversion
+  // implicite, et le nom de modèle évite qu'un `Secret` et un `OrgSecret` de
+  // même id se bloquent l'un l'autre. L'espace de verrous consultatifs est
+  // global à la base : le nom de modèle est ce qui le partitionne ici.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${modelName}), hashtext(${parentId}))`;
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     // 1. Récupère le numéro de version actuel max (ou 0 si aucun).
     const aggregate = await model.aggregate({
@@ -136,8 +151,11 @@ async function insertWithRetry(
       });
     } catch (err) {
       // P2002 = unique constraint violation (deux UPDATE concurrents
-      // ont calculé le même nextVersion). On retry avec MAX+1 actuel
-      // qui sera donc plus élevé.
+      // ont calculé le même nextVersion). Le verrou consultatif ci-dessus
+      // rend ce cas inatteignable pour les écritures qui passent par ici ;
+      // le retry ne subsiste que comme filet pour un écrivain qui ne le
+      // prendrait pas. Dans une transaction déjà avortée il ne réussira
+      // pas — mais il échouera bruyamment, sans écriture partielle.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002" &&

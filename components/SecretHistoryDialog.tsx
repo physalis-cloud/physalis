@@ -2,7 +2,7 @@
 
 // Dialog historique d'un secret (Secret env-level OU OrgSecret).
 // Liste les versions, permet de révéler une valeur historique et de
-// restaurer une version. Cf. docs/versionning-secrets.md.
+// restaurer une version. Cf. documentation/plans/done/versionning-secrets.md.
 //
 // Générique sur le type de secret via la prop `apiBaseUrl` qui pointe
 // sur la racine `/versions` de la route REST :

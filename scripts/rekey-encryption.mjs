@@ -141,6 +141,14 @@ export const REGISTRY = [
   { model: "AppAccount", triplets: [["encryptedData", "iv", "tag"]] },
   { model: "Secret", triplets: [["encryptedValue", "iv", "tag"]] },
   { model: "SecretVersion", triplets: [["encryptedValue", "iv", "tag"]] },
+  // Matériel de signature mobile (keystore, .p12, clés d'API magasin) —
+  // chantier déploiement mobile, Phase 1. Tenant-only, colonnes = champs
+  // Prisma (pas de `@map`), donc rien à préciser côté `columns`.
+  { model: "MobileCredential", triplets: [["encryptedValue", "iv", "tag"]] },
+  {
+    model: "MobileCredentialVersion",
+    triplets: [["encryptedValue", "iv", "tag"]],
+  },
   {
     model: "VaultEntry",
     triplets: [

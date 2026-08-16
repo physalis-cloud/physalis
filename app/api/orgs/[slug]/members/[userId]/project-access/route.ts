@@ -1,39 +1,47 @@
 // PUT /api/orgs/[slug]/members/[userId]/project-access
 //
 // #2 — pose EN BLOC les accès projet d'un membre d'org (modale « Droits d'accès »).
-// Réservé OWNER/ADMIN d'org. Ne gère QUE les lignes ProjectMember EXPLICITES et
-// NON MASQUÉES : c'est l'outil de « donner accès à ces projets avec ce rôle ».
+// Réservé OWNER/ADMIN d'org. Chaque entrée du payload dit l'accès VOULU sur un
+// projet : `VIEWER|EDITOR|OWNER`, ou `NONE` = aucun accès.
 //
 // ── Ce que cet endpoint ne fait PAS, à dessein ──
-//   • Le rôle d'org : il a ses propres gardes critiques (dernier OWNER, seul un
-//     OWNER promeut OWNER) dans PATCH members/[userId]. Les dupliquer ici serait
-//     la dérive que les tripwires §4/audit interdisent. La modale appelle les
-//     deux endpoints.
-//   • Les barrières (`hidden=true`, §2.15) : elles se posent/retirent dans le
-//     panneau membres du projet, avec sa cascade de révocation de tokens propre.
-//     Ici on ne crée jamais de barrière ; on ne touche pas une ligne masquée
-//     absente du set désiré (elle reste bloquante).
+//   Le rôle d'org : il a ses propres gardes critiques (dernier OWNER, seul un
+//   OWNER promeut OWNER) dans PATCH members/[userId]. Les dupliquer ici serait
+//   la dérive que les tripwires §4/audit interdisent. La modale appelle les
+//   deux endpoints.
 //
 // ── Sémantique de réconciliation (rôle cible DEV/ADMIN_DEV/MEMBER) ──
-//   désiré + pas de ligne         → create {hidden:false, role}
-//   désiré + ligne (même masquée) → update {hidden:false, role}  (re-grant OWNER/ADMIN)
-//   non désiré + ligne non masquée → delete
-//   non désiré + ligne masquée    → intacte
+// La ligne à poser n'est PAS dérivée ici : `desiredMembershipRow` (§4) la donne,
+// et c'est la réciproque testée d'`effectiveProjectRole`. On se contente de
+// converger vers elle.
+//   ligne cible = null, ligne existante  → delete
+//   ligne cible ≠ null, pas de ligne     → create
+//   ligne cible ≠ null, ligne différente → update
+//   projet ABSENT du payload             → intact si masqué, sinon la ligne
+//                                          explicite est retirée (contrat
+//                                          historique : « non désiré = retiré »)
 //
-// Retirer une ligne peut retirer un accès (OrgMEMBER : pas d'accès implicite) ou
-// simplement retomber sur l'accès implicite (DEV/ADMIN_DEV : EDITOR partout,
-// règle 4). On ne révoque les MachineTokens de la cible sur le projet QUE dans
-// le premier cas — miroir de projects/[slug]/members/[userId] qui ne révoque
-// qu'au masquage, jamais à une simple bascule de rôle.
+// `NONE` sur un DEV/ADMIN_DEV pose une BARRIÈRE (`hidden=true`) : c'est la seule
+// façon d'annuler l'EDITOR implicite de la règle 4. `NONE` sur un OrgMEMBER
+// n'écrit rien — l'absence de ligne EST déjà le refus.
+//
+// ── Révocation des MachineTokens ──
+// Déclenchée sur la PERTE D'ACCÈS EFFECTIF (avant ≠ null, après = null), pas sur
+// la suppression d'une ligne : un DEV qui perd sa ligne EDITOR garde l'accès
+// implicite (rien à révoquer), un DEV qu'on masque le perd vraiment (à révoquer,
+// sinon son Bearer continue de lire).
 //
 // Écritures séquentielles sur le client ambient `prisma` (tenant-aware), comme
 // projects/[slug]/members/[userId] : même primitive, aucun jumeau overlay requis.
 
 import { NextResponse } from "next/server";
+import type { ProjectRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { readJson, requireOrgMember } from "@/lib/api";
-import { hasDevPrivileges } from "@/lib/roles";
-import { effectiveProjectRole } from "@/lib/project-access";
+import {
+  desiredMembershipRow,
+  effectiveProjectRole,
+} from "@/lib/project-access";
 import { parseInvitationProjectAccess } from "@/lib/invitation-project-access";
 import { logAction } from "@/lib/audit";
 
@@ -138,92 +146,108 @@ export async function PUT(req: Request, { params }: Params) {
       .map((e) => [e.projectId, e.role] as const),
   );
 
-  // Un OrgMEMBER n'a AUCUN accès implicite ; un DEV/ADMIN_DEV a l'EDITOR
-  // implicite (règle 4) → retirer sa ligne ne lui retire pas l'accès.
-  const targetHasImplicitAccess = hasDevPrivileges(target.role);
-
   const existing = await prisma.projectMember.findMany({
     where: { userId, projectId: { in: orgProjectIds } },
   });
   const existingByProject = new Map(existing.map((m) => [m.projectId, m]));
 
-  type Grant = { projectId: string; memberId: string; from: string | null; to: string };
-  type Revoke = { projectId: string; memberId: string; from: string; revokedTokens: number };
-  const grants: Grant[] = [];
-  const revokes: Revoke[] = [];
+  // Projets à examiner : ceux du payload + ceux qui portent déjà une ligne
+  // (pour appliquer le retrait des lignes absentes du payload).
+  const touched = new Set<string>([
+    ...desiredMap.keys(),
+    ...existing.map((m) => m.projectId),
+  ]);
 
-  // Grants : create / update vers {hidden:false, role}.
-  for (const [projectId, role] of desiredMap) {
-    const cur = existingByProject.get(projectId);
-    if (!cur) {
+  type Change = {
+    projectId: string;
+    memberId: string;
+    before: ProjectRole | null;
+    after: ProjectRole | null;
+    revokedTokens: number;
+  };
+  const changes: Change[] = [];
+
+  for (const projectId of touched) {
+    const cur = existingByProject.get(projectId) ?? null;
+
+    let targetRow: { role: ProjectRole; hidden: boolean } | null;
+    if (desiredMap.has(projectId)) {
+      targetRow = desiredMembershipRow(target.role, desiredMap.get(projectId)!);
+    } else if (cur?.hidden) {
+      // Barrière posée ailleurs (panneau membres du projet) : un payload qui
+      // ignore ce projet ne doit pas la lever silencieusement.
+      continue;
+    } else {
+      targetRow = null;
+    }
+
+    const sameAsCurrent = cur
+      ? targetRow !== null &&
+        targetRow.role === cur.role &&
+        targetRow.hidden === cur.hidden
+      : targetRow === null;
+    if (sameAsCurrent) continue;
+
+    const membershipOf = (row: { role: ProjectRole; hidden: boolean } | null) =>
+      effectiveProjectRole({ orgRole: target.role, membership: row });
+    const before = membershipOf(cur);
+    const after = membershipOf(targetRow);
+
+    let memberId: string;
+    if (!targetRow) {
+      await prisma.projectMember.delete({ where: { id: cur!.id } });
+      memberId = cur!.id;
+    } else if (!cur) {
       const created = await prisma.projectMember.create({
-        data: { userId, projectId, role, hidden: false },
+        data: { userId, projectId, role: targetRow.role, hidden: targetRow.hidden },
       });
-      grants.push({ projectId, memberId: created.id, from: null, to: role });
-    } else if (cur.hidden || cur.role !== role) {
+      memberId = created.id;
+    } else {
       await prisma.projectMember.update({
         where: { id: cur.id },
-        data: { hidden: false, role },
+        data: { role: targetRow.role, hidden: targetRow.hidden },
       });
-      grants.push({
-        projectId,
-        memberId: cur.id,
-        from: cur.hidden ? `hidden:${cur.role}` : cur.role,
-        to: role,
-      });
+      memberId = cur.id;
     }
-  }
 
-  // Retraits : lignes explicites NON masquées absentes du set désiré.
-  for (const m of existing) {
-    if (m.hidden || desiredMap.has(m.projectId)) continue;
-    await prisma.projectMember.delete({ where: { id: m.id } });
+    // §2.15 — la cible perd réellement l'accès : ses MachineTokens sur ce projet
+    // doivent être révoqués, sinon un Bearer continue de lire.
     let revokedTokens = 0;
-    if (!targetHasImplicitAccess) {
-      // §2.15 — la cible perd réellement l'accès : ses MachineTokens sur ce
-      // projet doivent être révoqués, sinon un Bearer continue de lire.
+    if (before !== null && after === null) {
       const revoked = await prisma.machineToken.updateMany({
-        where: { createdById: userId, projectId: m.projectId, revokedAt: null },
+        where: { createdById: userId, projectId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       revokedTokens = revoked.count;
     }
-    revokes.push({ projectId: m.projectId, memberId: m.id, from: m.role, revokedTokens });
+
+    changes.push({ projectId, memberId, before, after, revokedTokens });
   }
 
   // Audit — vocabulaire existant, aucune nouvelle valeur d'enum AccessAction.
-  for (const g of grants) {
+  // Une perte d'accès est une VISIBILITY_CHANGE (c'est ce que lit le panneau
+  // d'audit comme « n'a plus accès »), le reste une ROLE_CHANGE.
+  for (const c of changes) {
+    const lost = c.after === null;
     logAction({
-      action: "PROJECT_MEMBER_ROLE_CHANGE",
+      action: lost
+        ? "PROJECT_MEMBER_VISIBILITY_CHANGE"
+        : "PROJECT_MEMBER_ROLE_CHANGE",
       actor: { kind: "user", userId: access.user.id, email: access.user.email },
       organizationId: access.organization.id,
-      projectId: g.projectId,
+      projectId: c.projectId,
       targetType: "ProjectMember",
-      targetId: g.memberId,
+      targetId: c.memberId,
       metadata: {
         targetUserId: userId,
         targetEmail: target.user.email,
-        from: g.from,
-        to: g.to,
-        via: "bulk_project_access",
-      },
-      req,
-    });
-  }
-  for (const r of revokes) {
-    logAction({
-      action: "PROJECT_MEMBER_VISIBILITY_CHANGE",
-      actor: { kind: "user", userId: access.user.id, email: access.user.email },
-      organizationId: access.organization.id,
-      projectId: r.projectId,
-      targetType: "ProjectMember",
-      targetId: r.memberId,
-      metadata: {
-        targetUserId: userId,
-        targetEmail: target.user.email,
-        removed: true,
-        previousRole: r.from,
-        cascadedRevokedTokens: r.revokedTokens,
+        // Accès EFFECTIF avant/après, pas l'état de la ligne : c'est ce qui
+        // compte pour relire un audit six mois plus tard.
+        from: c.before ?? "NONE",
+        to: c.after ?? "NONE",
+        ...(lost
+          ? { removed: true, cascadedRevokedTokens: c.revokedTokens }
+          : {}),
         via: "bulk_project_access",
       },
       req,
@@ -232,7 +256,7 @@ export async function PUT(req: Request, { params }: Params) {
 
   return NextResponse.json({
     ok: true,
-    granted: grants.length,
-    revoked: revokes.length,
+    granted: changes.filter((c) => c.after !== null).length,
+    revoked: changes.filter((c) => c.after === null).length,
   });
 }

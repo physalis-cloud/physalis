@@ -30,6 +30,7 @@ export default async function ProjectPage({
       githubWorkflow: true,
       ciConnectionId: true,
       ciRepo: true,
+      mobileEnabled: true,
       organizationId: true,
       members: { where: { userId: session.user.id } },
       organization: {
@@ -131,6 +132,7 @@ export default async function ProjectPage({
           }))}
           role={role}
           orgRole={orgRole}
+          mobileProjectEnabled={project.mobileEnabled}
         />
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
+import { RiSmartphoneLine } from "@remixicon/react";
 import type { ProjectRole } from "@prisma/client";
 import { hasDevPrivileges } from "@/lib/roles";
 import SecretsPanel from "./secrets-panel";
@@ -10,6 +11,7 @@ import ComposePanel from "./compose-panel";
 import InfosPanel from "./infos-panel";
 import PoliciesPanel from "./policies-panel";
 import MembersPanel from "./members-panel";
+import MobilePanel from "./mobile-panel";
 import SettingsDialog from "./settings-dialog";
 import TeamVaultPanel from "../../team-vault-panel";
 
@@ -50,6 +52,7 @@ type MainTab =
   | { kind: "vault" }
   | { kind: "policies" }
   | { kind: "members" }
+  | { kind: "mobile" }
   | { kind: "env"; envName: string };
 
 export default function ProjectView({
@@ -63,6 +66,7 @@ export default function ProjectView({
   environments,
   role,
   orgRole,
+  mobileProjectEnabled,
 }: {
   projectName: string;
   slug: string;
@@ -76,6 +80,10 @@ export default function ProjectView({
   /** OrgRole transversal — OrgDEV peut gérer les policies au même titre
    *  qu'un ProjectOWNER, contrairement à un ProjectEDITOR explicite. */
   orgRole: "OWNER" | "ADMIN" | "ADMIN_DEV" | "DEV" | "MEMBER" | null;
+  /** Onglet Mobile activé sur CE projet (Project.mobileEnabled, défaut OFF),
+   *  réglé dans la modale Paramètres. Pas de second verrou ici : le gate de
+   *  plan `mobile_deploy` du SaaS n'a pas d'équivalent en mono-tenant. */
+  mobileProjectEnabled: boolean;
 }) {
   const t = useTranslations("projects");
   const sortedEnvs = [...environments].sort(sortEnvs);
@@ -157,6 +165,20 @@ export default function ProjectView({
           >
             {t("tabs.policies")}
           </button>
+          {mobileProjectEnabled && (
+            <button
+              type="button"
+              className={`tab ${tab.kind === "mobile" ? "active" : ""}`}
+              onClick={() => setTab({ kind: "mobile" })}
+            >
+              <RiSmartphoneLine
+                size={14}
+                aria-hidden
+                style={{ verticalAlign: "text-bottom", marginRight: 4 }}
+              />
+              {t("tabs.mobile")}
+            </button>
+          )}
           {canEditProjectSettings && (
             <button
               type="button"
@@ -164,7 +186,7 @@ export default function ProjectView({
               className="tab"
               aria-label={t("settingsAriaLabel")}
               title={t("settingsTitle")}
-              style={{ padding: "10px 14px" }}
+              style={{ padding: "10px 13px" }}
             >
               <SettingsIcon />
             </button>
@@ -194,6 +216,8 @@ export default function ProjectView({
           environments={sortedEnvs}
           defaultGithubRepo={githubRepo}
         />
+      ) : tab.kind === "mobile" ? (
+        mobileProjectEnabled ? <MobilePanel slug={slug} role={role} /> : null
       ) : tab.kind === "members" ? (
         canManageMembers ? (
           <MembersPanel slug={slug} />
@@ -258,6 +282,8 @@ export default function ProjectView({
 
       {settingsOpen && canEditProjectSettings && (
         <SettingsDialog
+          mobileDeployEnabled
+          mobileEnabled={mobileProjectEnabled}
           slug={slug}
           orgSlug={orgSlug}
           projectName={projectName}

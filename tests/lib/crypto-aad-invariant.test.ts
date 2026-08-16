@@ -1,4 +1,4 @@
-// Test statique — garde-fou de la piste d'audit P4 (docs/failles.md §5/P4, §36).
+// Test statique — garde-fou de la piste d'audit P4 (documentation/rapports/failles.md §5/P4, §36).
 //
 // Contexte : `lib/crypto.ts` chiffre en AES-256-GCM SANS AAD sous une
 // `ENCRYPTION_KEY` globale → un triplet {encryptedValue, iv, tag} déchiffre
@@ -79,7 +79,7 @@ describe("P4 — invariant AAD (pas de transplant de triplet)", () => {
       expect(
         ALLOWLIST.has(f),
         `Copie verbatim d'un triplet de version détectée dans un fichier non audité: ${f}. ` +
-          `Si c'est intentionnel et intra-secret, ajoute-le à l'allowlist ET à docs/failles.md §5/P4. ` +
+          `Si c'est intentionnel et intra-secret, ajoute-le à l'allowlist ET à documentation/rapports/failles.md §5/P4. ` +
           `Sinon, re-chiffre (decrypt→encrypt).`,
       ).toBe(true);
     }

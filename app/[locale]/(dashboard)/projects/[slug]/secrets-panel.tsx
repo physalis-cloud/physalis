@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { ProjectRole } from "@prisma/client";
 import { RiDownload2Line, RiHistoryLine, RiKey2Line, RiUpload2Line } from "@remixicon/react";
 import EmptyCard from "@/components/EmptyCard";
@@ -50,6 +51,7 @@ export default function SecretsPanel({
 }) {
   const t = useTranslations("projects.secrets");
   const confirm = useConfirm();
+  const router = useRouter();
   const [secrets, setSecrets] = useState<SecretListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -59,6 +61,16 @@ export default function SecretsPanel({
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const [rotationKey, setRotationKey] = useState<string | null>(null);
   const [rotationCategory, setRotationCategory] = useState<string | null>(null);
+
+  // ─── Mode « Réorganiser » ────────────────────────────────────────
+  // Hors de ce mode, la liste ne montre aucune case à cocher : on vient
+  // le plus souvent y lire une valeur, pas ranger. Le mode est donc
+  // explicite, et le bouton qui l'ouvre devient sa propre sortie.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Ancre de la sélection par plage (shift+clic).
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [bulkPending, setBulkPending] = useState(false);
 
   const canEdit = ROLE_RANK[role] >= ROLE_RANK.EDITOR;
 
@@ -80,6 +92,15 @@ export default function SecretsPanel({
     const data = (await res.json()) as { secrets: SecretListItem[] };
     setSecrets(data.secrets);
   }, [slug, env]);
+
+  // Le compteur affiché dans l'onglet d'environnement (`production (12)`)
+  // vient du rendu serveur : recharger la liste côté client ne le bouge
+  // pas. Tout ce qui change le NOMBRE de secrets doit donc demander en
+  // plus un refresh RSC — inutile pour un simple changement de catégorie.
+  const reloadWithCount = useCallback(async () => {
+    await reload();
+    router.refresh();
+  }, [reload, router]);
 
   useEffect(() => {
     setSecrets(null);
@@ -117,6 +138,78 @@ export default function SecretsPanel({
     return result;
   }, [secrets]);
 
+  // Ordre d'affichage aplati — c'est lui qui définit ce qu'est une
+  // « plage » pour shift+clic (l'ordre à l'écran, pas celui de l'API).
+  const orderedKeys = useMemo(
+    () => grouped.flatMap((g) => g.items.map((s) => s.key)),
+    [grouped],
+  );
+
+  function exitSelection() {
+    setSelecting(false);
+    setSelected(new Set());
+    setAnchor(null);
+  }
+
+  function toggleKey(key: string, shift: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const from = anchor ? orderedKeys.indexOf(anchor) : -1;
+      const to = orderedKeys.indexOf(key);
+      if (shift && from >= 0 && to >= 0) {
+        // La plage prend l'état que reçoit la ligne cliquée.
+        const turnOn = !prev.has(key);
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        for (let i = lo; i <= hi; i++) {
+          const k = orderedKeys[i];
+          if (!k) continue;
+          if (turnOn) next.add(k);
+          else next.delete(k);
+        }
+        return next;
+      }
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setAnchor(key);
+  }
+
+  function toggleGroup(items: SecretListItem[]) {
+    const allIn = items.every((s) => selected.has(s.key));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const s of items) {
+        if (allIn) next.delete(s.key);
+        else next.add(s.key);
+      }
+      return next;
+    });
+    setAnchor(null);
+  }
+
+  async function applyBulkCategory(value: SecretCategory | "" | "__none__") {
+    if (selected.size === 0 || value === "") return;
+    setError(null);
+    setBulkPending(true);
+    const res = await fetch(`/api/projects/${slug}/${env}/secrets/bulk`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        keys: Array.from(selected),
+        category: value === "__none__" ? null : value,
+      }),
+    });
+    setBulkPending(false);
+    if (!res.ok) {
+      setError(t("updateError"));
+      return;
+    }
+    setSelected(new Set());
+    setAnchor(null);
+    reload();
+  }
+
   async function reveal(key: string) {
     if (revealed[key] !== undefined) {
       setRevealed((r) => {
@@ -152,7 +245,7 @@ export default function SecretsPanel({
       delete copy[key];
       return copy;
     });
-    reload();
+    reloadWithCount();
   }
 
   async function updateCategory(key: string, category: SecretCategory | "") {
@@ -173,6 +266,51 @@ export default function SecretsPanel({
   }
 
   function renderRow(s: SecretListItem) {
+    // En mode réorganisation, la ligne entière est une case à cocher :
+    // pas d'actions, pas de valeur à révéler — juste le rangement.
+    if (selecting) {
+      const checked = selected.has(s.key);
+      return (
+        <label
+          className="row"
+          style={{ cursor: "pointer" }}
+          onClick={(e) => {
+            // Clic sur la case elle-même → c'est `onChange` qui gère,
+            // sinon on toglerait deux fois. Clic ailleurs sur la ligne →
+            // on prend la main pour capter le shift+clic.
+            if ((e.target as HTMLElement).tagName === "INPUT") return;
+            e.preventDefault();
+            toggleKey(s.key, e.shiftKey);
+          }}
+        >
+          <div className="row-icon">
+            <input
+              type="checkbox"
+              checked={checked}
+              // Reste focusable et actionnable à la barre d'espace : le
+              // mode doit s'utiliser entièrement au clavier.
+              onChange={(e) =>
+                toggleKey(
+                  s.key,
+                  (e.nativeEvent as MouseEvent).shiftKey === true,
+                )
+              }
+              aria-label={s.key}
+            />
+          </div>
+          <div className="row-info">
+            <div className="row-name code-mono">{s.key}</div>
+            <div className="row-meta">
+              <span>
+                {s.category
+                  ? SECRET_CATEGORY_LABELS[s.category]
+                  : UNCATEGORIZED_LABEL}
+              </span>
+            </div>
+          </div>
+        </label>
+      );
+    }
     if (editKey === s.key && canEdit) {
       return (
         <div className="card">
@@ -324,9 +462,53 @@ export default function SecretsPanel({
                 type="button"
                 onClick={() => setAdding(true)}
                 className="btn btn-primary btn-sm"
+                disabled={selecting}
               >
                 {t("addBtn")}
               </button>
+            )}
+            {canEdit && secrets && secrets.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selecting) {
+                    exitSelection();
+                    return;
+                  }
+                  setEditKey(null);
+                  setSelecting(true);
+                }}
+                className="btn btn-ghost btn-sm"
+                title={t("reorganizeHint")}
+              >
+                {selecting ? t("reorganizeCancel") : t("reorganizeBtn")}
+              </button>
+            )}
+            {selecting && (
+              <select
+                value=""
+                onChange={(e) =>
+                  applyBulkCategory(
+                    e.target.value as SecretCategory | "" | "__none__",
+                  )
+                }
+                disabled={selected.size === 0 || bulkPending}
+                className="select"
+                style={{ width: "auto", padding: "6px 40px 6px 10px", fontSize: 12 }}
+                aria-label={t("bulkCategoryAria")}
+              >
+                <option value="">
+                  {bulkPending
+                    ? t("bulkPending")
+                    : t("bulkPlaceholder", { count: selected.size })}
+                </option>
+                {SECRET_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {SECRET_CATEGORY_LABELS[c]}
+                  </option>
+                ))}
+                <option value="__none__">— {UNCATEGORIZED_LABEL} —</option>
+              </select>
             )}
           </div>
         )}
@@ -337,7 +519,7 @@ export default function SecretsPanel({
           slug={slug}
           env={env}
           onClose={() => setImporting(false)}
-          onImported={() => reload()}
+          onImported={() => reloadWithCount()}
         />
       )}
 
@@ -349,11 +531,13 @@ export default function SecretsPanel({
             onCancel={() => setAdding(false)}
             onSaved={() => {
               setAdding(false);
-              reload();
+              reloadWithCount();
             }}
           />
         </div>
       )}
+
+      {selecting && <p className="help">{t("reorganizeHint")}</p>}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -383,6 +567,15 @@ export default function SecretsPanel({
               className="flex flex-col gap-1.5"
             >
               <div className="cat-header">
+                {selecting && (
+                  <input
+                    type="checkbox"
+                    checked={group.items.every((s) => selected.has(s.key))}
+                    onChange={() => toggleGroup(group.items)}
+                    aria-label={t("selectGroupAria", { label: group.label })}
+                    style={{ cursor: "pointer" }}
+                  />
+                )}
                 <span>{group.label}</span>
                 <span className="cat-count">({group.items.length})</span>
               </div>

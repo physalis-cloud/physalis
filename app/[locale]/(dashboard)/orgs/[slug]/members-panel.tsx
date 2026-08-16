@@ -396,7 +396,15 @@ export default function OrgMembersPanel({
                 <label>{t("roleLabel")}</label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as OrgRole)}
+                  onChange={(e) => {
+                    setInviteRole(e.target.value as OrgRole);
+                    // La sélection a été faite CONTRE l'ancien rôle : « tout
+                    // coché en EDITOR » ne veut rien dire pour un DEV (c'est
+                    // son défaut) et veut dire « EDITOR partout » pour un
+                    // MEMBER. La reporter telle quelle donnerait des droits que
+                    // personne n'a demandés.
+                    setInviteProjectAccess([]);
+                  }}
                   className="select"
                 >
                   {ROLES.filter((r) => r !== "OWNER" || isOwner).map((r) => (
@@ -425,8 +433,10 @@ export default function OrgMembersPanel({
                   }}
                 >
                   {t("access.openBtn")}
+                  {/* Compte les projets AUTORISÉS : la sélection contient
+                      désormais aussi les refus (`NONE`). */}
                   {inviteProjectAccess.length > 0
-                    ? ` (${inviteProjectAccess.length})`
+                    ? ` (${inviteProjectAccess.filter((s) => s.role !== "NONE").length})`
                     : ""}
                 </button>
               )}

@@ -85,6 +85,7 @@ export async function POST(req: Request, { params }: Params) {
       invitation.organizationId,
       invitation.projectAccess,
       created.id,
+      invitation.role,
     );
     await tx.invitation.update({
       where: { id: invitation.id },
