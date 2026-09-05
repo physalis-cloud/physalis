@@ -13,9 +13,50 @@ services:
       DATABASE_URL: postgresql://physalis:${DB_PASSWORD}@db:5432/physalis
       PORT: "3000"
     ports:
-      - "${PORT:-3000}:3000"
+      # ⚠️ Défaut volontairement FERMÉ. Sans adresse, Docker publie sur 0.0.0.0
+      # ET contourne le pare-feu de l'hôte (la chaîne DOCKER-USER est vide par
+      # défaut) : un gestionnaire de secrets devient joignable depuis l'Internet
+      # public dès que l'IP du serveur est connue — et une IP se découvre
+      # (historique DNS, journaux de transparence des certificats).
+      #
+      # Sur ta machine, 127.0.0.1 suffit : http://localhost:3000 fonctionne.
+      # Sur un serveur distant, mets Physalis derrière un reverse proxy (nginx,
+      # Caddy, Traefik) qui termine le TLS et parle au conteneur en local.
+      # Si tu dois vraiment publier le port, pose `BIND_IP` dans `.env` :
+      # l'adresse d'une interface privée (VPN, réseau interne) de préférence,
+      # `0.0.0.0` en dernier recours et seulement derrière un pare-feu.
+      - "${BIND_IP:-127.0.0.1}:${PORT:-3000}:3000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # Aucune capability n'est nécessaire : le process écoute sur 3000 (> 1024,
+    # donc pas de NET_BIND_SERVICE) et tourne en `nextjs` uid 1001, pas en root.
+    # À NE PAS reporter sur `db` : l'entrypoint postgres démarre en root et a
+    # besoin de SETUID/SETGID/CHOWN pour redescendre sur l'utilisateur postgres.
+    cap_drop:
+      - ALL
     tmpfs:
-      - /app/.next/cache
+      - /tmp
+    volumes:
+      # Next.js écrit le cache d'images optimisées ici, et le rootfs est en
+      # lecture seule → un tmpfs est obligatoire. Syntaxe LONGUE avec
+      # `mode: 01777` (world-writable + sticky) : la syntaxe courte laisse le
+      # montage non inscriptible par l'utilisateur non-root `nextjs`, d'où un
+      # "EACCES: mkdir '/app/.next/cache/images'" au démarrage.
+      - type: tmpfs
+        target: /app/.next/cache
+        tmpfs:
+          mode: 01777
+    # Limites de ressources — décommente et ajuste à ta machine. Volontairement
+    # absentes par défaut : une limite mémoire trop basse fait tuer le conteneur
+    # par l'OOM killer sur une grosse instance, et l'inverse d'un durcissement,
+    # c'est une indisponibilité. Ces valeurs conviennent à un usage courant.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #       pids: 100
     depends_on:
       db:
         condition: service_healthy

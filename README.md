@@ -94,6 +94,14 @@ docker compose up -d --build
 → http://localhost:3001 (port par défaut ; 3000 souvent déjà pris — ajustable
 via `PORT` dans `.env`, en alignant `NEXTAUTH_URL` sur le même port).
 
+Le port n'est publié que sur `127.0.0.1` — joignable depuis la machine hôte
+seulement. Sur un serveur distant, mets Physalis derrière un reverse proxy
+(nginx, Caddy, Traefik) qui termine le TLS et parle au conteneur en local. Si tu
+dois vraiment publier le port, pose `BIND_IP` dans `.env` : de préférence
+l'adresse d'une interface privée (VPN, réseau interne), `0.0.0.0` en dernier
+recours seulement. ⚠️ Un port publié sans adresse contourne le pare-feu de
+l'hôte — la chaîne `DOCKER-USER` est vide par défaut.
+
 Le premier démarrage applique les migrations Prisma et crée l'admin défini par
 `ADMIN_EMAIL` / `ADMIN_PASSWORD` ([scripts/bootstrap-admin.mjs](scripts/bootstrap-admin.mjs)).
 
