@@ -11,6 +11,12 @@
 
 > **Version 1.6.0** · Version hébergée et gérée : [physalis.cloud](https://physalis.cloud) · Bugs et retours : [ouvrir une issue](https://github.com/physalis-cloud/physalis/issues)
 
+> ⚠️ **Vous mettez à jour depuis une version antérieure ?** Le port n'est plus
+> publié sur toutes les interfaces mais sur `127.0.0.1`. Si vous joignez votre
+> instance **directement par l'IP du serveur, sans reverse proxy**, elle
+> deviendra injoignable tant que `BIND_IP` n'est pas posé dans votre `.env`.
+> Voir le [journal des versions](CHANGELOG.md).
+
 ---
 
 Gestionnaire de secrets self-hosted (Next.js + Postgres + AES-256-GCM) pour
