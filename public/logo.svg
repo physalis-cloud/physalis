@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Physalis">
+  <title>Physalis</title>
+  <defs>
+    <radialGradient id="p-bg" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#3a2b19"/>
+      <stop offset="1" stop-color="#0b0906"/>
+    </radialGradient>
+    <linearGradient id="p-husk" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#e8c97a"/>
+      <stop offset="0.5" stop-color="#c9943f"/>
+      <stop offset="1" stop-color="#8a5f24"/>
+    </linearGradient>
+    <radialGradient id="p-berry" cx="0.36" cy="0.3" r="0.78">
+      <stop offset="0" stop-color="#ffe9a8"/>
+      <stop offset="0.45" stop-color="#e5b243"/>
+      <stop offset="1" stop-color="#a4701f"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="58" fill="url(#p-bg)"/>
+
+  <!-- Calice : enveloppe extérieure -->
+  <path
+    d="M128 40 C 72 62, 40 102, 40 142 C 40 186, 79 216, 128 216 C 177 216, 216 186, 216 142 C 216 102, 184 62, 128 40 Z"
+    fill="none" stroke="url(#p-husk)" stroke-width="7" stroke-linejoin="round"/>
+
+  <!-- Nervures -->
+  <g fill="none" stroke="url(#p-husk)" stroke-width="5" stroke-linecap="round" opacity="0.92">
+    <path d="M128 42 C 88 68, 68 106, 68 145 C 68 184, 94 212, 128 216"/>
+    <path d="M128 42 C 106 74, 96 110, 96 147 C 96 185, 110 209, 128 216"/>
+    <path d="M128 42 L 128 216"/>
+    <path d="M128 42 C 150 74, 160 110, 160 147 C 160 185, 146 209, 128 216"/>
+    <path d="M128 42 C 168 68, 188 106, 188 145 C 188 184, 162 212, 128 216"/>
+  </g>
+
+  <!-- Pédoncule -->
+  <path d="M128 40 L 128 20" fill="none" stroke="#e8c97a" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Baie — le halo détache la sphère des nervures qui passent derrière -->
+  <circle cx="128" cy="150" r="46" fill="#0b0906" opacity="0.55"/>
+  <circle cx="128" cy="150" r="42" fill="url(#p-berry)"/>
+</svg>
