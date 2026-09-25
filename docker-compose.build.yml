@@ -1,0 +1,11 @@
+# Installation depuis les sources — à superposer à docker-compose.yml :
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Remplace l'image publiée (épinglée par digest) par un build local du
+# Dockerfile. Le tag `physalis:local` reste sur ta machine, il n'est jamais
+# poussé. Sans ce fichier, `docker compose up` tire l'image de la release.
+services:
+  app:
+    build: .
+    image: physalis:local

@@ -410,8 +410,14 @@ L'analyse de sécurité détaillée est dans [security.md](security.md).
 cp .env.example .env
 # renseigner ENCRYPTION_KEY, AUTH_SECRET, NEXTAUTH_SECRET, DB_PASSWORD,
 # ADMIN_PASSWORD
-docker compose up -d --build
+docker compose up -d
 ```
+
+`docker-compose.yml` référence l'image publiée de la version du dépôt, épinglée
+par digest (`ghcr.io/physalis-cloud/physalis:<version>@sha256:…`) : aucun
+`:latest`, donc aucune image qui change sous vos pieds. Pour construire depuis
+les sources, superposez `docker-compose.build.yml` :
+`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 
 Au premier démarrage, le conteneur applique les migrations Prisma puis crée le
 compte administrateur. Les migrations suivantes s'appliquent automatiquement au
@@ -456,6 +462,11 @@ L'API, le schéma de base de données et le flux d'installation suivent le
 versioning sémantique : un changement cassant passe par une version majeure.
 Prenez un dump avant toute montée de version — les migrations s'appliquent
 automatiquement au démarrage et ne sont pas conçues pour être annulées.
+
+Monter de version = récupérer le dépôt à la nouvelle version (`git pull` ou
+checkout du tag), puis `docker compose pull && docker compose up -d`. C'est le
+`docker-compose.yml` de la version qui porte le nouveau digest ; un `pull` sans
+mise à jour du dépôt ne change rien.
 
 ---
 

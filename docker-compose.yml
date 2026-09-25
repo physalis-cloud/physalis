@@ -1,11 +1,15 @@
 services:
   app:
-    # `build: .` → `docker compose up --build` construit l'image en local depuis
-    # le Dockerfile (install from source). Sans `--build`, l'image `image:` est
-    # utilisée (buildée localement si absente ; `docker compose pull` pour tirer
-    # la version publiée du registre en prod).
-    build: .
-    image: ghcr.io/physalis-cloud/physalis:latest
+    # Image publiée, épinglée par DIGEST sur la version de ce dépôt : un
+    # `docker compose pull` tire exactement l'image de la release, jamais une
+    # image poussée depuis. Pour mettre à jour, récupère la nouvelle version du
+    # dépôt (`git pull`) : ce fichier y porte le digest suivant.
+    #
+    # Installation depuis les sources : `build:` vit dans docker-compose.build.yml.
+    # Docker refuse de taguer un build local avec une référence qui contient un
+    # digest (« build tag cannot contain a digest ») — les deux ne peuvent pas
+    # cohabiter dans ce fichier.
+    image: ghcr.io/physalis-cloud/physalis:1.6.0@sha256:dd3b857fb8f55cc0244185fd981e0034536abb96882c687f65e70efe58daaa28
     container_name: physalis
     restart: unless-stopped
     env_file: .env
@@ -64,7 +68,10 @@ services:
       - internal
 
   db:
-    image: postgres:16-alpine
+    # Version précise de postgres. Une montée arrive avec une nouvelle version
+    # de Physalis ; ne change jamais la majeure (16) à la main, c'est une
+    # migration de données, pas un changement de tag.
+    image: postgres:16.15-alpine
     container_name: physalis-db
     restart: always
     environment:

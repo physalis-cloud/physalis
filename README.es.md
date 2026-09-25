@@ -128,8 +128,12 @@ cp .env.example .env
 # Rellenar los valores vacíos: ENCRYPTION_KEY, AUTH_SECRET, NEXTAUTH_SECRET,
 #   DB_PASSWORD, ADMIN_PASSWORD (ADMIN_EMAIL tiene un valor por defecto).
 #   ENCRYPTION_KEY = openssl rand -hex 32 ; los secretos = openssl rand -base64 32.
-docker compose up -d --build
+docker compose up -d
 ```
+
+`docker-compose.yml` descarga la imagen publicada de esta versión, fijada por digest.
+Para compilar desde el código fuente:
+`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 
 → http://localhost:3001 (puerto por defecto; el 3000 suele estar ocupado —
 ajustable con `PORT` en `.env`, alineando `NEXTAUTH_URL` con el mismo puerto).
