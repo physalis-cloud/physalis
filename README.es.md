@@ -9,7 +9,7 @@
 
 [Français](README.md) · [English](README.en.md) · **Español**
 
-> **Versión 1.6.0** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
+> **Versión 1.6.1** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
 
 > ⚠️ **¿Actualizas desde una versión anterior?** El puerto ya no se publica en
 > todas las interfaces, sino en `127.0.0.1`. Si accedes a tu instancia

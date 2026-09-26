@@ -9,7 +9,7 @@
 
 [Français](README.md) · **English** · [Español](README.es.md)
 
-> **Version 1.6.0** · Hosted, managed version: [physalis.cloud](https://physalis.cloud) · Bugs and feedback: [open an issue](https://github.com/physalis-cloud/physalis/issues)
+> **Version 1.6.1** · Hosted, managed version: [physalis.cloud](https://physalis.cloud) · Bugs and feedback: [open an issue](https://github.com/physalis-cloud/physalis/issues)
 
 > ⚠️ **Upgrading from an earlier version?** The port is no longer published on
 > every interface, but on `127.0.0.1`. If you reach your instance **directly by

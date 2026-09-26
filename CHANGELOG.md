@@ -9,7 +9,7 @@ pendant la mise à jour. Lisez-les avant de lancer `docker compose up -d`.
 
 ---
 
-## Non publié
+## [1.6.1] — 2026-09-26
 
 ### ⚠️ Rupture — le port n'est plus publié sur toutes les interfaces
 
@@ -64,6 +64,24 @@ défendable pour ce type d'application.
   (XSS stockée via SVG SMIL). L'avis n'était pas exploitable dans Physalis — il
   suppose que les balises `svg`, `animate`/`set` et `text` soient autorisées, ce
   que notre configuration d'assainissement ne fait pas.
+- Dépendances mises à jour pour fermer les failles connues (OSV.dev) :
+  `next` 15.5.26, `next-auth` 5.0.0-beta.32 (`@auth/core` 0.41.3), `sharp`
+  0.35.4, `js-yaml` 4.3.2, `deepmerge-ts` 8, et côté outillage de dev `vitest`
+  3.2.7, `vite` 7.3.6, `browserslist` 4.29.1, `brace-expansion`.
+
+### Modifié
+
+- L'image est épinglée par **digest** dans le `docker-compose.yml`
+  (`physalis:1.6.1@sha256:…`) : `docker compose pull` tire exactement l'image de
+  cette version, jamais une image publiée depuis sous le même tag. Pour mettre à
+  jour, récupérez la nouvelle version du dépôt (`git pull`), qui porte le digest
+  suivant.
+- PostgreSQL est épinglé sur `16.15-alpine` au lieu de `16-alpine`.
+- L'installation **depuis les sources** passe par un fichier dédié, Docker
+  refusant de construire une image dont la référence contient un digest :
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+  ```
 
 ### Ajouté
 
