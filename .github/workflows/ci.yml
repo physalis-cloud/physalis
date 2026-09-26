@@ -3,6 +3,13 @@ name: CI & Publish
 on:
   push:
     branches: [main]
+    # Le commit d'épinglage d'une release (scripts/ops/pin-selfhost-image.mjs
+    # dans la source) ne touche que les composes et le journal. Sans ce filtre,
+    # il relançait un build qui republiait `:<version>` sous un AUTRE digest que
+    # celui épinglé : le tag de version ne désignait plus l'image de la release.
+    paths-ignore:
+      - "docker-compose*.yml"
+      - "CHANGELOG.md"
   pull_request:
     branches: [main]
 
