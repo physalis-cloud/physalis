@@ -9,7 +9,7 @@ services:
     # Docker refuse de taguer un build local avec une référence qui contient un
     # digest (« build tag cannot contain a digest ») — les deux ne peuvent pas
     # cohabiter dans ce fichier.
-    image: ghcr.io/physalis-cloud/physalis:1.6.0@sha256:dd3b857fb8f55cc0244185fd981e0034536abb96882c687f65e70efe58daaa28
+    image: ghcr.io/physalis-cloud/physalis:1.6.1@sha256:fd1032ae7436759782b4b2e2c921d779b88ca989fa7655afdcbc9f11d618b254
     container_name: physalis
     restart: unless-stopped
     env_file: .env
