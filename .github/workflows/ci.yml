@@ -42,13 +42,13 @@ jobs:
         run: npm run prisma:generate
 
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
 
       - name: Unit tests
-        run: npm test
+        run: npm run test
 
   publish:
     name: Build & Push
