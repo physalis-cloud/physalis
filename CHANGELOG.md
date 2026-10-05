@@ -59,6 +59,11 @@ modifiée, à une exception près, voulue — les projets existants sont marqué
 
 - Import de clé SSH : le nombre de tours `bcrypt-pbkdf` est plafonné — une clé
   forgée pouvait bloquer le serveur.
+- `axios` monte en 1.20.0 (dépendance de `mailgun.js`, envoi des emails
+  transactionnels), ce qui ferme sept avis de sévérité haute et cinq de
+  sévérité moyenne. Reste `braces` 3.0.3 (GHSA-vfj7-8cjw-p6xm), sans version
+  corrigée publiée : il n'intervient qu'à la construction de l'image (via
+  Tailwind CSS), jamais à l'exécution.
 
 ## [1.6.1] — 2026-09-26
 
