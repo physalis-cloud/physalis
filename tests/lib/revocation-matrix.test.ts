@@ -46,7 +46,8 @@ type BearerKind =
   | "user_token" // sv_user_ — PAT au nom du user. revoked+exp, PAS sessionsValidFrom.
   | "org_token" // sv_org_ — institutionnel, scopé org. Survit au départ du créateur.
   | "agent_token" // sv_backup_ — agent rotation/backup, scopé (projet, env).
-  | "gateway_apikey"; // ph_live_sk_ — clé API Gateway (tiers externes).
+  | "gateway_apikey" // ph_live_sk_ — clé API Gateway (tiers externes).
+  | "cli_session"; // sv_cli_ — session CLI (C-0050). revoked+exp+sessionsValidFrom.
 
 // Les GESTES de retrait / changement d'état qui DEVRAIENT invalider (ou pas) un
 // porteur. Ajouter un geste OBLIGE à remplir sa colonne pour les 7 porteurs.
@@ -311,6 +312,45 @@ const MATRIX: Record<BearerKind, Record<Gesture, Cell>> = {
     web_logout: {
       expect: "survives",
       why: "clé API tiers, non liée à une session Physalis.",
+    },
+  },
+  cli_session: {
+    password_reset: {
+      expect: "dies",
+      why: "validateCliSession applique sessionsValidFrom (createdAt < borne → null), comme validatePluginToken.",
+      verifiedBy: "integ/cli-session",
+    },
+    twofa_disable: {
+      expect: "dies",
+      why: "même borne sessionsValidFrom.",
+    },
+    org_member_removal: {
+      expect: "dies",
+      why: "lib/cli-secrets.ts re-lit l'OrgMember à CHAQUE requête (resolveOrgRole) : plus membre → 403, même avec une ligne projet restante.",
+      verifiedBy: "integ/cli-session",
+    },
+    project_hidden: {
+      expect: "dies",
+      why: "l'accès passe par accessibleProjectsWhere, re-évalué par requête : hidden = barrière d'accès (403) pour un MEMBER/DEV.",
+      verifiedBy: "integ/cli-session",
+    },
+    role_downgrade: {
+      expect: "dies",
+      why: "le rôle d'org et la visibilité projet sont re-dérivés par requête ; aucune copie de droit dans la session.",
+    },
+    client_suspended: {
+      expect: "survives",
+      why: "comme les autres porteurs, Client.status ne révoque pas une session émise ; une NOUVELLE demande (device/start) est refusée pour un client SUSPENDED/CANCELLED (resolveCliTenant). Durcir = §2.24-famille.",
+    },
+    rotation_pause: { expect: "na", why: "sans objet." },
+    explicit_revoke: {
+      expect: "dies",
+      why: "revokedAt posé par DELETE /api/cli/sessions/[id] (panneau /account) ou DELETE /api/cli/session (physalis logout) ; validateCliSession le teste à chaque requête.",
+      verifiedBy: "integ/cli-session",
+    },
+    web_logout: {
+      expect: "survives",
+      why: "ARBITRAGE : la session CLI est une session d'APPAREIL (le terminal), distincte du navigateur qui l'a approuvée ; se déconnecter du dashboard ne coupe pas le terminal. Elle expire seule en 12 h et se coupe à la main depuis /account (« Sessions CLI ») ou par physalis logout.",
     },
   },
 };

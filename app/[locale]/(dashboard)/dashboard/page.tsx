@@ -37,6 +37,7 @@ import type { AccessAction } from "@prisma/client";
 // supprimés en self-host — uniquement SaaS).
 import ExtensionInstallPrompt from "./extension-install-prompt";
 import PendingInvitations from "./pending-invitations";
+import ActivityCollapse from "./activity-collapse";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const ACTIVITY_PAGE_SIZE = 5;
@@ -162,8 +163,8 @@ export default async function DashboardPage({
           select: { projectId: true },
         })
       : Promise.resolve([] as { projectId: string | null }[]),
-    // 3 derniers projets deployes : groupe distinct par projectId, ordonne
-    // par createdAt desc, take 3.
+    // 6 derniers projets deployes : groupe distinct par projectId, ordonne
+    // par createdAt desc, take 6.
     org && projectIds.length
       ? prisma.accessLog.findMany({
           where: {
@@ -173,7 +174,7 @@ export default async function DashboardPage({
           },
           orderBy: { createdAt: "desc" },
           distinct: ["projectId"],
-          take: 3,
+          take: 6,
           select: {
             projectId: true,
             environmentId: true,
@@ -225,17 +226,42 @@ export default async function DashboardPage({
     : [];
   const envNameById = new Map(recentProjectEnvs.map((e) => [e.id, e.name]));
 
-  const recentProjects: RecentProjectRow[] = lastDeploysByProject
+  const deployedProjects: RecentProjectRow[] = lastDeploysByProject
     .filter((d) => d.project)
     .map((d) => ({
       id: d.project!.id,
       name: d.project!.name,
       slug: d.project!.slug,
-      lastDeployAt: d.createdAt,
+      at: d.createdAt,
       lastEnvName: d.environmentId
         ? (envNameById.get(d.environmentId) ?? null)
         : null,
     }));
+
+  // Repli : aucun deploiement (donc aucun « projet recent ») → on garde le
+  // bloc et on montre les 6 derniers projets CREES, parmi ceux que l'user a
+  // le droit de voir. Le modele Project ne porte pas d'`updatedAt` :
+  // `createdAt` est la seule date de vie disponible cote projet.
+  const fallbackProjectRows =
+    deployedProjects.length === 0 && projectIds.length
+      ? await prisma.project.findMany({
+          where: { id: { in: projectIds } },
+          orderBy: { createdAt: "desc" },
+          take: 6,
+          select: { id: true, name: true, slug: true, createdAt: true },
+        })
+      : [];
+
+  const recentProjects: RecentProjectRow[] =
+    deployedProjects.length > 0
+      ? deployedProjects
+      : fallbackProjectRows.map((p) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          at: p.createdAt,
+          lastEnvName: null,
+        }));
 
   return (
     <div className="page">
@@ -385,7 +411,7 @@ function CountCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Projets récents (3 derniers projets déployés)
+// Projets récents (6 derniers projets déployés, ou 6 derniers créés en repli)
 // ─────────────────────────────────────────────────────────────────────
 
 type LastDeployRow = {
@@ -399,7 +425,9 @@ type RecentProjectRow = {
   id: string;
   name: string;
   slug: string;
-  lastDeployAt: Date;
+  /// Dernier deploiement, ou date de creation quand on est en repli (aucun
+  /// projet deploye) — le badge de la carte affiche cette date dans les deux cas.
+  at: Date;
   lastEnvName: string | null;
 };
 
@@ -424,7 +452,7 @@ function RecentProjects({ items, t }: { items: RecentProjectRow[]; t: DashT }) {
             }}
           >
             <span
-              title={p.lastDeployAt.toISOString()}
+              title={p.at.toISOString()}
               style={{
                 position: "absolute",
                 top: 12,
@@ -438,7 +466,7 @@ function RecentProjects({ items, t }: { items: RecentProjectRow[]; t: DashT }) {
                 whiteSpace: "nowrap",
               }}
             >
-              {relativeTime(p.lastDeployAt, t)}
+              {relativeTime(p.at, t)}
             </span>
             <div
               style={{
@@ -605,6 +633,10 @@ const ALL_ACCESS_ACTIONS: AccessAction[] = [
   "SHARE_REVOKE",
   "SHARE_SEND_EMAIL",
   "SHARE_PASSWORD_FAILURE",
+  "CLI_SESSION_APPROVED",
+  "CLI_SESSION_DENIED",
+  "CLI_SESSION_REVOKED",
+  "SSH_KEY_SIGN",
 ];
 
 function filterMatchesAction(filterId: FilterId, action: AccessAction): boolean {
@@ -682,151 +714,157 @@ function RecentActivity({
   const endIdx = Math.min(total, page * ACTIVITY_PAGE_SIZE);
 
   return (
-    <section className="section" id="activity">
-      <div className="section-header">
-        <h2 className="section-title">{t("activity.title")}</h2>
-        {total > 0 && (
-          <span className="help" style={{ fontSize: 12 }}>
-            {t("activity.pagination", { start: startIdx, end: endIdx, total })}
-          </span>
-        )}
-      </div>
-
-      <div
-        className="flex flex-wrap gap-2"
-        style={{ marginBottom: 12 }}
-        role="tablist"
-        aria-label={t("activity.ariaLabel")}
+    // Meme cadre que le bloc des stats : bordure + rayon, sans fond.
+    <section
+      className="section"
+      id="activity"
+      style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}
+    >
+      <ActivityCollapse
+        meta={
+          total > 0 ? (
+            <span className="help" style={{ fontSize: 12 }}>
+              {t("activity.pagination", { start: startIdx, end: endIdx, total })}
+            </span>
+          ) : null
+        }
       >
-        {filterDefs.map((def) => {
-          const active = def.id === filter;
-          const { Icon } = def;
-          return (
-            <Link
-              key={def.id}
-              href={buildActivityHref(def.id, 1)}
-              className={`btn btn-sm ${active ? "btn-primary" : "btn-ghost"}`}
-              role="tab"
-              aria-selected={active}
-              title={def.label}
-              style={{ scrollMargin: 8 }}
-            >
-              <Icon size={14} aria-hidden />
-              {def.label}
-            </Link>
-          );
-        })}
-      </div>
-
-      {items.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-title">
-            {filter === "all"
-              ? t("activity.emptyAll")
-              : t("activity.emptyFiltered")}
-          </div>
-        </div>
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {items.map((item, idx) => (
-              <li
-                key={item.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "32px 1fr auto",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 16px",
-                  borderTop: idx === 0 ? "none" : "1px solid var(--border)",
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{ fontSize: 18, textAlign: "center" }}
-                >
-                  {actionIcon(item.action)}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>
-                    {actionLabel(item.action, actionLabelsMap)}
-                  </div>
-                  <div
-                    className="help"
-                    style={{
-                      fontSize: 12,
-                      marginTop: 2,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {formatContext(item)}
-                    {formatActor(item) && (
-                      <>
-                        {" · "}
-                        {formatActor(item)}
-                      </>
-                    )}
-                  </div>
-                </div>
-                <span
-                  className="help"
-                  style={{ fontSize: 12, whiteSpace: "nowrap" }}
-                  title={item.createdAt.toISOString()}
-                >
-                  {relativeTime(item.createdAt, t)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {totalPages > 1 && (
         <div
-          className="flex items-center gap-2"
-          style={{ marginTop: 12, justifyContent: "flex-end" }}
+          className="flex flex-wrap gap-2"
+          style={{ marginBottom: 12 }}
+          role="tablist"
+          aria-label={t("activity.ariaLabel")}
         >
-          {page > 1 ? (
-            <Link
-              href={buildActivityHref(filter, page - 1)}
-              className="btn btn-ghost btn-sm"
-            >
-              {t("activity.prev")}
-            </Link>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="btn btn-ghost btn-sm"
-              style={{ opacity: 0.4 }}
-            >
-              {t("activity.prev")}
-            </button>
-          )}
-          <span className="help" style={{ fontSize: 12 }}>
-            {t("activity.pageOf", { page, total: totalPages })}
-          </span>
-          {page < totalPages ? (
-            <Link
-              href={buildActivityHref(filter, page + 1)}
-              className="btn btn-ghost btn-sm"
-            >
-              {t("activity.next")}
-            </Link>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="btn btn-ghost btn-sm"
-              style={{ opacity: 0.4 }}
-            >
-              {t("activity.next")}
-            </button>
-          )}
+          {filterDefs.map((def) => {
+            const active = def.id === filter;
+            const { Icon } = def;
+            return (
+              <Link
+                key={def.id}
+                href={buildActivityHref(def.id, 1)}
+                className={`btn btn-sm ${active ? "btn-primary" : "btn-ghost"}`}
+                role="tab"
+                aria-selected={active}
+                title={def.label}
+                style={{ scrollMargin: 8 }}
+              >
+                <Icon size={14} aria-hidden />
+                {def.label}
+              </Link>
+            );
+          })}
         </div>
-      )}
+
+        {items.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">
+              {filter === "all"
+                ? t("activity.emptyAll")
+                : t("activity.emptyFiltered")}
+            </div>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {items.map((item, idx) => (
+                <li
+                  key={item.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "32px 1fr auto",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "12px 16px",
+                    borderTop: idx === 0 ? "none" : "1px solid var(--border)",
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{ fontSize: 18, textAlign: "center" }}
+                  >
+                    {actionIcon(item.action)}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>
+                      {actionLabel(item.action, actionLabelsMap)}
+                    </div>
+                    <div
+                      className="help"
+                      style={{
+                        fontSize: 12,
+                        marginTop: 2,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatContext(item)}
+                      {formatActor(item) && (
+                        <>
+                          {" · "}
+                          {formatActor(item)}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <span
+                    className="help"
+                    style={{ fontSize: 12, whiteSpace: "nowrap" }}
+                    title={item.createdAt.toISOString()}
+                  >
+                    {relativeTime(item.createdAt, t)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div
+            className="flex items-center gap-2"
+            style={{ marginTop: 12, justifyContent: "flex-end" }}
+          >
+            {page > 1 ? (
+              <Link
+                href={buildActivityHref(filter, page - 1)}
+                className="btn btn-ghost btn-sm"
+              >
+                {t("activity.prev")}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="btn btn-ghost btn-sm"
+                style={{ opacity: 0.4 }}
+              >
+                {t("activity.prev")}
+              </button>
+            )}
+            <span className="help" style={{ fontSize: 12 }}>
+              {t("activity.pageOf", { page, total: totalPages })}
+            </span>
+            {page < totalPages ? (
+              <Link
+                href={buildActivityHref(filter, page + 1)}
+                className="btn btn-ghost btn-sm"
+              >
+                {t("activity.next")}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="btn btn-ghost btn-sm"
+                style={{ opacity: 0.4 }}
+              >
+                {t("activity.next")}
+              </button>
+            )}
+          </div>
+        )}
+      </ActivityCollapse>
     </section>
   );
 }
@@ -913,6 +951,10 @@ function getActionLabels(t: DashT): Partial<Record<AccessAction, string>> {
     DEPLOY_DENIED: t("actions.DEPLOY_DENIED"),
     PLUGIN_AUTH_SUCCESS: t("actions.PLUGIN_AUTH_SUCCESS"),
     PLUGIN_AUTH_FAILURE: t("actions.PLUGIN_AUTH_FAILURE"),
+    CLI_SESSION_APPROVED: t("actions.CLI_SESSION_APPROVED"),
+    CLI_SESSION_DENIED: t("actions.CLI_SESSION_DENIED"),
+    CLI_SESSION_REVOKED: t("actions.CLI_SESSION_REVOKED"),
+    SSH_KEY_SIGN: t("actions.SSH_KEY_SIGN"),
   };
 }
 

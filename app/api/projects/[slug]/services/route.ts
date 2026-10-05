@@ -17,6 +17,10 @@ export async function GET(_req: Request, { params }: Params) {
     where: { projectId: access.project.id },
     select: {
       id: true, name: true, url: true, tags: true, updatedAt: true, createdAt: true,
+      // Pastille rotation de la liste (RotationBadge) : champs en clair.
+      rotationEnabled: true,
+      rotationNextAt: true,
+      rotationLastStatus: true,
       // Hook de rotation des comptes (service backend). Le token n'est pas exposé ici.
       rotationWebhookUrl: true,
       rotationExecMode: true,

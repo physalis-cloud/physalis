@@ -131,17 +131,17 @@ export async function POST(req: Request, { params }: Params) {
     } else {
       // Le `.p8` est le seul point d'amorçage : Apple ne l'émet que dans son
       // portail, jamais par API. Sans lui, la chaîne ne peut pas démarrer.
-      const auth = await loadAscAuth(app.id);
-      if (!auth) {
+      const ascAuth = await loadAscAuth(app.id);
+      if (!ascAuth.ok) {
+        // Les `kind` manquants partent en CODES : c'est l'interface qui les
+        // traduit (elle a déjà les libellés), et elle seule sait dire « il
+        // manque le Key ID » plutôt que de réciter les trois.
         return NextResponse.json(
-          {
-            error: "asc_key_missing",
-            detail:
-              "Importez d'abord la clé d'API App Store Connect (.p8), son Key ID et son Issuer ID. Apple ne les émet que dans son portail.",
-          },
+          { error: "asc_key_missing", missing: ascAuth.missing },
           { status: 400 },
         );
       }
+      const auth = ascAuth.auth;
       if (profileOnly) {
         // Réemploi (§5.5) : le cas le plus fréquent, et celui qui évite de
         // brûler un slot. Un profil vaut 1 an, un certificat aussi, mais leurs
@@ -253,10 +253,20 @@ async function loadCredential(appId: string, kind: string): Promise<Buffer | nul
   );
 }
 
-/** Clé d'API ASC déjà déposée sur l'application (le point d'amorçage). */
+/**
+ * Clé d'API ASC déjà déposée sur l'application (le point d'amorçage).
+ *
+ * ⚠️ Rend la liste de ce qui MANQUE, et non un simple `null` : la clé ASC
+ * compte TROIS credentials, et déposer le seul fichier `.p8` — ce que tout le
+ * monde fait, puisque c'est lui qu'Apple fait télécharger — ne suffit pas.
+ * Un refus qui énumère les trois laisse croire qu'aucun n'a été pris.
+ */
 async function loadAscAuth(
   appId: string,
-): Promise<{ p8Pem: string; keyId: string; issuerId: string } | null> {
+): Promise<
+  | { ok: true; auth: { p8Pem: string; keyId: string; issuerId: string } }
+  | { ok: false; missing: string[] }
+> {
   const rows = await prisma.mobileCredential.findMany({
     where: {
       appId,
@@ -277,8 +287,14 @@ async function loadAscAuth(
   const p8Pem = byKind.get("asc_api_key");
   const keyId = byKind.get("asc_key_id")?.trim();
   const issuerId = byKind.get("asc_issuer_id")?.trim();
-  if (!p8Pem || !keyId || !issuerId) return null;
-  return { p8Pem, keyId, issuerId };
+
+  const missing: string[] = [];
+  if (!p8Pem) missing.push("asc_api_key");
+  if (!keyId) missing.push("asc_key_id");
+  if (!issuerId) missing.push("asc_issuer_id");
+  if (missing.length > 0) return { ok: false, missing };
+
+  return { ok: true, auth: { p8Pem: p8Pem!, keyId: keyId!, issuerId: issuerId! } };
 }
 
 /**

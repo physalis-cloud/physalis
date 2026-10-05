@@ -46,3 +46,31 @@ export function tenantBaseUrl(tenantSlug: string | null): string {
     ? `https://${tenantSlug}.${TENANT_DOMAIN}`
     : physalisBaseUrl();
 }
+
+/**
+ * Cet hôte est-il celui du SaaS — par opposition à une instance auto-hébergée ?
+ *
+ * ⚠️ **Sert à ce que l'app DIT d'elle-même**, pas à une décision d'accès : la
+ * description Open Graph annonçait « Self-hosted secrets manager » sur
+ * `vault.physalis.cloud`, qui est précisément l'offre hébergée. Ne JAMAIS s'en
+ * servir pour autoriser quoi que ce soit — un `Host` est choisi par l'appelant,
+ * et `tenantBaseUrl` explique juste au-dessus pourquoi on n'en dérive pas de
+ * lien sensible.
+ *
+ * ⚠️ **Elle est ICI et pas dans `lib/tenant-host.ts`, qui porte pourtant déjà
+ * `isTenantDomainHost`.** Ce module-là est RETIRÉ du dépôt public
+ * (`scripts/build-public.mjs`) : la notion de tenant n'existe pas en
+ * mono-tenant, et ses trois appelants ont tous un jumeau overlay qui ne
+ * l'importe pas. L'importer depuis un layout — qui, lui, n'a pas de jumeau —
+ * aurait casse la compilation du build self-host, sans que rien ici ne le
+ * signale. `app-url.ts` survit aux deux builds et porte déjà `TENANT_DOMAIN`.
+ *
+ * En auto-hébergé, l'hôte est celui du client et `PHYSALIS_TENANT_DOMAIN` n'est
+ * pas posée : la réponse est donc `false`, ce qui est la bonne.
+ */
+export function estHoteSaaS(host: string | null | undefined): boolean {
+  if (!host) return false;
+  // Port et casse ignorés : `vault.physalis.cloud:443` est le même hôte.
+  const nom = host.split(":")[0]?.toLowerCase() ?? "";
+  return nom === TENANT_DOMAIN || nom.endsWith(`.${TENANT_DOMAIN}`);
+}

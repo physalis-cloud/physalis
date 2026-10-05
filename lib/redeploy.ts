@@ -324,3 +324,70 @@ export async function triggerProjectRedeploy(
 
   return { triggered: true, result, provider, repo, workflow, ref };
 }
+
+// ── Relance d'un déploiement précis (C-0051) ────────────────────────────────
+// Depuis le sous-onglet « Déploiements » : relancer LE run d'une ligne de suivi.
+//   - GitHub : re-run du run lui-même (même commit, mêmes inputs) — valable pour
+//     tout workflow, y compris un `deploy.yml` déclenché par un push. GitHub ne
+//     le permet que dans les 30 jours ; son message d'erreur est remonté tel quel.
+//   - GitLab : `retry` d'un pipeline échoué/annulé ; un pipeline réussi n'a aucun
+//     job à relancer → nouveau pipeline sur la même branche.
+//   - Bitbucket : l'API ne relance pas un pipeline existant → nouveau pipeline
+//     sur la branche.
+
+export type RerunOpts = {
+  provider: CiProvider;
+  repo: string;
+  runId: string;
+  branch: string;
+  /** Statut de la ligne : décide retry ou nouveau pipeline chez GitLab. */
+  status: string;
+  envName: string;
+  token: string;
+  issuer: string | null;
+  identity?: string | null;
+};
+
+export type RerunMode = "rerun" | "retry" | "new_pipeline";
+
+export async function rerunDeployment(
+  opts: RerunOpts,
+): Promise<RedeployResult & { mode: RerunMode }> {
+  if (opts.provider === "github") {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(opts.repo) || !/^\d+$/.test(opts.runId)) {
+      return { ok: false, httpStatus: 400, error: "Run GitHub invalide", mode: "rerun" };
+    }
+    const res = await fetch(`${GITHUB_API}/repos/${opts.repo}/actions/runs/${opts.runId}/rerun`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opts.token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Physalis-Redeploy",
+      },
+    });
+    return { ...result(res, await readErr(res)), mode: "rerun" };
+  }
+  if (opts.provider === "gitlab" && opts.status === "failed" && /^\d+$/.test(opts.runId)) {
+    const base = stripTrailingSlash((opts.issuer ?? "").trim() || GITLAB_COM_BASE);
+    const res = await fetch(
+      `${base}/api/v4/projects/${encodeURIComponent(opts.repo)}/pipelines/${opts.runId}/retry`,
+      {
+        method: "POST",
+        headers: { "PRIVATE-TOKEN": opts.token, "User-Agent": "Physalis-Redeploy" },
+      },
+    );
+    return { ...result(res, await readErr(res)), mode: "retry" };
+  }
+  const r = await triggerRedeploy({
+    provider: opts.provider,
+    repo: opts.repo,
+    workflow: "",
+    ref: opts.branch,
+    envName: opts.envName,
+    token: opts.token,
+    issuer: opts.issuer,
+    identity: opts.identity,
+  });
+  return { ...r, mode: "new_pipeline" };
+}

@@ -236,11 +236,14 @@ se lance :
 1. Job **build** : récupère les `VITE_*`, build l'image, la pousse sur GHCR
 2. Job **deploy** : récupère le bundle, écrit `.env` + `docker-compose.yml`
    sur le VPS, fait `docker compose up -d`
+3. Dernière étape **« Report to Physalis »** : indique à Physalis si le
+   déploiement a réussi ou échoué
 
 ## Vérifier que tout fonctionne
 
 - Dans Physalis : page de l'organisation → **Audit log** → vous devez voir un
-  événement **`DEPLOY_AUTHORIZED`** avec le repo, la branche et l'environnement.
+  événement **`DEPLOY_AUTHORIZED`** avec le repo, la branche et l'environnement,
+  puis un **`DEPLOY_REPORTED`** avec `status: succeeded` en fin de run.
 - Votre application répond sur son URL publique.
 
 ## En cas de problème

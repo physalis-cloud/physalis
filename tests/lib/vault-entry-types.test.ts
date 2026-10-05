@@ -222,3 +222,32 @@ describe("itemCountFor", () => {
     expect(itemCountFor("LOGIN", {})).toBeNull();
   });
 });
+
+// ─── C-0050 : SSH_KEY, type réservé au coffre personnel ─────────────────────
+import {
+  isSshKeyEntry,
+  normalizePersonalEntryType,
+  SSH_KEY_EDITABLE_FIELDS,
+  VAULT_ENTRY_TYPES,
+} from "@/lib/vault-entry-types";
+
+describe("SSH_KEY — hors de la liste partagée avec le coffre d'équipe", () => {
+  it("n'est PAS un VaultEntryType : le POST générique et le coffre d'équipe le refusent", () => {
+    expect((VAULT_ENTRY_TYPES as readonly string[]).includes("SSH_KEY")).toBe(false);
+    expect(isVaultEntryType("SSH_KEY")).toBe(false);
+  });
+
+  it("est reconnu et gardé par la normalisation propre au coffre personnel", () => {
+    expect(isSshKeyEntry("SSH_KEY")).toBe(true);
+    expect(isSshKeyEntry("LOGIN")).toBe(false);
+    expect(normalizePersonalEntryType("SSH_KEY")).toBe("SSH_KEY");
+    expect(normalizePersonalEntryType("NOTE")).toBe("NOTE");
+    expect(normalizePersonalEntryType("inconnu")).toBe("LOGIN");
+  });
+
+  it("ne laisse modifier ni le type, ni les champs secrets", () => {
+    for (const f of ["type", "password", "url", "username", "items", "text", "totpSecret"]) {
+      expect((SSH_KEY_EDITABLE_FIELDS as readonly string[]).includes(f), f).toBe(false);
+    }
+  });
+});

@@ -26,7 +26,7 @@ import { logAction } from "@/lib/audit";
 import { hasVaultRole } from "@/lib/vault-access";
 import { effectiveProjectRole } from "@/lib/project-access";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
-import { normalizeEntryType } from "@/lib/vault-entry-types";
+import { normalizeEntryType, isSshKeyEntry } from "@/lib/vault-entry-types";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -211,16 +211,35 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // TeamVaultEntry et AppAccount n'ont ni colonne `type` ni blob de charge
-  // utile : deplacer une LIST ou une NOTE viderait l'entree en silence. On
-  // refuse tant que le coffre d'equipe n'a pas la parite des types. LOGIN et
-  // SECRET passent — leur contenu (url/login/mdp/2FA, ou le seul mot de
-  // passe) tient entierement dans la cible.
-  const sourceType = normalizeEntryType(source.type);
-  if (sourceType !== "LOGIN" && sourceType !== "SECRET") {
+  // ⚠️ La garde dépend de la CIBLE depuis C-0047, et plus du type seul.
+  //
+  // Le coffre d'équipe a désormais la parité des types (`TeamVaultEntry.type` +
+  // blob de charge utile) : une LIST ou une NOTE s'y déplace intégralement, ce
+  // qui était refusé jusque-là faute de colonnes pour l'accueillir.
+  //
+  // `AppAccount`, lui, n'a toujours ni type ni forme : son blob est un
+  // `{user, password}`. Y déplacer une LIST ou une NOTE la viderait EN SILENCE,
+  // et c'est exactement le refus qu'il faut garder. Élargir la garde à toutes
+  // les cibles « parce que le coffre d'équipe sait faire » serait la manière
+  // classique de perdre des données en croyant lever une limite.
+  // Clé SSH (C-0050) : elle reste dans le coffre personnel. Vers le coffre
+  // d'équipe, sa clé privée serait déchiffrable par la révélation d'équipe.
+  if (isSshKeyEntry(source.type)) {
     return NextResponse.json(
       {
-        error: `Les entrées de type ${sourceType} ne peuvent pas être déplacées vers un coffre d'équipe.`,
+        error: "Une clé SSH reste dans le coffre personnel : elle ne se déplace pas.",
+        code: "type_not_movable",
+        type: "SSH_KEY",
+      },
+      { status: 400 },
+    );
+  }
+  const sourceType = normalizeEntryType(source.type);
+  if (body.target === "project_account" && sourceType !== "LOGIN" && sourceType !== "SECRET") {
+    return NextResponse.json(
+      {
+        error: `Les entrées de type ${sourceType} ne peuvent pas devenir un compte de projet : `
+          + "un compte ne porte qu'un identifiant et un mot de passe.",
         code: "type_not_movable",
         type: sourceType,
       },
@@ -348,15 +367,40 @@ export async function POST(req: Request, { params }: Params) {
     totpSecretTag = reEnc.tag;
   }
 
+  // La charge utile d'une LIST ou d'une NOTE, re-chiffrée comme le reste
+  // (C-0047). ⚠️ Re-chiffrer et non recopier le blob : même clé, mais un IV
+  // neuf — c'est la règle posée en tête de ce fichier pour le mot de passe et
+  // le secret 2FA, et un blob qui y échapperait serait le seul de l'entrée à
+  // garder l'IV de son ancienne vie.
+  let encryptedData: string | null = null;
+  let dataIv: string | null = null;
+  let dataTag: string | null = null;
+  if (source.encryptedData && source.dataIv && source.dataTag) {
+    const plaintext = decrypt({
+      encryptedValue: source.encryptedData,
+      iv: source.dataIv,
+      tag: source.dataTag,
+    });
+    const reEnc = encrypt(plaintext);
+    encryptedData = reEnc.encryptedValue;
+    dataIv = reEnc.iv;
+    dataTag = reEnc.tag;
+  }
+
   // Transaction : create TeamVaultEntry → delete source.
   // withTenantSchema, pas prisma.$transaction : cf. F5.1 (lib/prisma.ts).
   const created = await withTenantSchema(userRes.tenantSlug, async (tx) => {
     const newEntry = await tx.teamVaultEntry.create({
       data: {
         collectionId: target.collectionId,
+        type: sourceType,
         name: source.name,
         url: source.url,
         username: source.username,
+        encryptedData,
+        dataIv,
+        dataTag,
+        itemCount: source.itemCount,
         encryptedPassword,
         passwordIv,
         passwordTag,

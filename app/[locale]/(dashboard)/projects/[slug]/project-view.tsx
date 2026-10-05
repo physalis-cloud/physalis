@@ -22,6 +22,9 @@ type EnvSummary = {
   serverId: string | null;
   deployPath: string | null;
   secretCount: number;
+  /** Ordre choisi dans les paramètres (glisser-déposer). Optionnel : absent,
+   *  seul l'ordre conventionnel ci-dessous s'applique. */
+  position?: number;
 };
 
 const ROLE_RANK: Record<ProjectRole, number> = {
@@ -38,7 +41,13 @@ function envDisplay(name: string): string {
   return ENV_DISPLAY_NAMES[name] ?? name;
 }
 
+// L'ordre choisi par l'utilisateur (`position`) prime ; l'ordre conventionnel
+// ne fait que départager les égalités — en pratique les projets jamais
+// réordonnés, tous à 0. Sans cela le glisser-déposer était enregistré mais
+// écrasé à l'affichage.
 function sortEnvs(a: EnvSummary, b: EnvSummary): number {
+  const byPosition = (a.position ?? 0) - (b.position ?? 0);
+  if (byPosition !== 0) return byPosition;
   const ai = ENV_ORDER.indexOf(a.name);
   const bi = ENV_ORDER.indexOf(b.name);
   if (ai === -1 && bi === -1) return 0; // preserve creation order

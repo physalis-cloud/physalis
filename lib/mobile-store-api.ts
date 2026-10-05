@@ -29,7 +29,7 @@ const HTTP_TIMEOUT_MS = 8_000;
 // failles.md §6). Google n'a qu'un endpoint de jetons ; on l'écrit en dur et on
 // ignore le champ. Même discipline côté Apple.
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const PLAY_API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3";
+export const PLAY_API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3";
 const PLAY_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
 const ASC_API_BASE = "https://api.appstoreconnect.apple.com/v1";
 
@@ -53,8 +53,22 @@ export type StoreProbe =
       detail?: string;
     };
 
-function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  return fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = HTTP_TIMEOUT_MS,
+): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+
+/** Appel Play authentifié, timeout paramétrable. Exporté pour lib/mobile-store-read.ts,
+ *  qui lit le numéro de build SUR LE CHEMIN CRITIQUE et exige un plafond plus bas. */
+export function playFetch(
+  url: string,
+  init: RequestInit,
+  timeoutMs = HTTP_TIMEOUT_MS,
+): Promise<Response> {
+  return fetchWithTimeout(url, init, timeoutMs);
 }
 
 /** Réduit un corps d'erreur à quelque chose de loggable : borné, sur une ligne. */
@@ -64,9 +78,9 @@ function briefly(text: string): string {
 
 // ── Google Play ────────────────────────────────────────────────────────────
 
-type ServiceAccount = { clientEmail: string; privateKey: string };
+export type ServiceAccount = { clientEmail: string; privateKey: string };
 
-function parseServiceAccount(json: string): ServiceAccount | null {
+export function parseServiceAccount(json: string): ServiceAccount | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -86,7 +100,10 @@ function parseServiceAccount(json: string): ServiceAccount | null {
 }
 
 /** Jeton d'accès OAuth2 par assertion JWT (flux « compte de service »). */
-async function googleAccessToken(sa: ServiceAccount): Promise<string | null> {
+export async function googleAccessToken(
+  sa: ServiceAccount,
+  timeoutMs?: number,
+): Promise<string | null> {
   let assertion: string;
   try {
     const key = await importPKCS8(sa.privateKey, "RS256");
@@ -102,14 +119,18 @@ async function googleAccessToken(sa: ServiceAccount): Promise<string | null> {
     return null;
   }
 
-  const res = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion,
-    }),
-  });
+  const res = await fetchWithTimeout(
+    GOOGLE_TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion,
+      }),
+    },
+    timeoutMs,
+  );
   if (!res.ok) return null;
   const body = (await res.json()) as { access_token?: unknown };
   return typeof body.access_token === "string" ? body.access_token : null;
@@ -294,11 +315,12 @@ export class AscApiError extends Error {
   }
 }
 
-/** Appel JSON:API authentifié. Lève `AscApiError` sur tout échec. */
-async function ascCall(
+/** Appel JSON:API authentifié. Lève `AscApiError` sur tout échec.
+ *  Exporté pour lib/mobile-store-read.ts (lecture) et la Phase 6 (actions). */
+export async function ascCall(
   auth: AscAuth,
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<Record<string, unknown>> {
   let jwt: string;
   try {
@@ -309,14 +331,18 @@ async function ascCall(
 
   let res: Response;
   try {
-    res = await fetchWithTimeout(`${ASC_API_BASE}${path}`, {
-      method: init.method ?? "GET",
-      headers: {
-        authorization: `Bearer ${jwt}`,
-        ...(init.body ? { "content-type": "application/json" } : {}),
+    res = await fetchWithTimeout(
+      `${ASC_API_BASE}${path}`,
+      {
+        method: init.method ?? "GET",
+        headers: {
+          authorization: `Bearer ${jwt}`,
+          ...(init.body ? { "content-type": "application/json" } : {}),
+        },
+        ...(init.body ? { body: JSON.stringify(init.body) } : {}),
       },
-      ...(init.body ? { body: JSON.stringify(init.body) } : {}),
-    });
+      init.timeoutMs,
+    );
   } catch (err) {
     throw new AscApiError({ status: 0, detail: `App Store Connect injoignable (${String(err)})` });
   }
@@ -501,4 +527,29 @@ export async function ascCreateAppStoreProfile(
     expiresAt: typeof a.expirationDate === "string" ? a.expirationDate : null,
     content: Buffer.from(content, "base64"),
   };
+}
+
+/**
+ * Résout un bundle id TEXTE en identifiant de RESSOURCE `apps`.
+ *
+ * Même piège que `ascFindBundleIdResource` : le filtre d'Apple se comporte
+ * comme un « contient ». `fr.argoweb.app` remonterait aussi
+ * `fr.argoweb.app.extension`, et on lirait alors les builds de l'extension.
+ * Égalité stricte exigée.
+ */
+export async function ascFindAppResource(
+  auth: AscAuth,
+  bundleId: string,
+  timeoutMs?: number,
+): Promise<string | null> {
+  const body = await ascCall(
+    auth,
+    `/apps?filter%5BbundleId%5D=${encodeURIComponent(bundleId)}&limit=200`,
+    { timeoutMs },
+  );
+  const data = Array.isArray(body.data) ? body.data : [];
+  for (const node of data) {
+    if (attrs(node).bundleId === bundleId) return idOf(node);
+  }
+  return null;
 }

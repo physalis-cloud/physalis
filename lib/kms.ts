@@ -368,15 +368,24 @@ export async function getAgentInjectionCreds(
  * Le token est destiné à l'**hôte de restauration** (le plaintext ne transite pas
  * par le control plane) ; Phase 4 finalisera le transport + l'audit.
  *
- * §2.25b — si `cidr` est fourni (IP de l'hôte qui poll le restore-plan, seul à
- * recevoir le token), le `secret_id` ET le token qui en découle sont **CIDR-bound**,
- * à l'identique de l'identité agent (`issueAgentSecretId`) : un token decrypt qui
- * fuit devient inutile depuis une autre IP. Sans `cidr` : comportement historique
- * (non borné) — dégradation propre plutôt que mint d'un token cassé.
+ * §2.25b — si `cidrs` est non vide (IP de l'hôte de l'agent : celle qui poll le
+ * restore-plan ET `Server.ip`, cf. `restoreTokenCidrs` dans lib/restore.ts), le
+ * **token** est CIDR-bound (`token_bound_cidrs`) : un token decrypt qui fuit
+ * devient inutile depuis une autre IP. Les deux IP sont nécessaires : un VPS peut
+ * joindre l'API par Tailscale et OpenBao par Internet (bug du 2026-10-04). Liste
+ * vide : comportement historique (non borné) — dégradation propre plutôt que mint
+ * d'un token cassé.
+ *
+ * ⚠️ PAS de `cidr_list` sur le `secret_id`, contrairement à l'identité agent : là,
+ * c'est l'agent qui fait le login depuis son IP ; ici, c'est le CONTROL PLANE qui
+ * consomme le `secret_id` (login ci-dessous) depuis SA propre IP. Un `cidr_list`
+ * = IP de l'agent fait refuser ce login par OpenBao → aucun restore ne part jamais
+ * (job PENDING à vie, cf. bug du 2026-10-02). Le `secret_id` ne quitte pas ce
+ * processus : le borner n'apporte rien.
  */
 export async function getRestoreToken(
   tenantSlug: string,
-  cidr?: string,
+  cidrs: string[] = [],
 ): Promise<{ token: string; kmsKeyName: string }> {
   assertSlug(tenantSlug);
   const role = restoreRole(tenantSlug);
@@ -388,10 +397,7 @@ export async function getRestoreToken(
     { token: admin },
   );
   const secretIdBody: Record<string, unknown> = {};
-  if (cidr) {
-    secretIdBody.cidr_list = [cidr];
-    secretIdBody.token_bound_cidrs = [cidr];
-  }
+  if (cidrs.length > 0) secretIdBody.token_bound_cidrs = cidrs;
   const sid = await baoRequest<{ data?: { secret_id?: string } }>(
     "POST",
     `/v1/auth/${APPROLE_MOUNT}/role/${role}/secret-id`,

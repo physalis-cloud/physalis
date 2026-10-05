@@ -29,6 +29,32 @@ export const VAULT_ENTRY_TYPES = ["LOGIN", "SECRET", "LIST", "NOTE"] as const;
 
 export type VaultEntryType = (typeof VAULT_ENTRY_TYPES)[number];
 
+// ─── Clé SSH : type RÉSERVÉ au coffre personnel (C-0050, phase 1) ─────────
+//
+// Volontairement HORS de VAULT_ENTRY_TYPES : cette liste est partagée avec le
+// coffre d'équipe, le sélecteur de type et les routes génériques (POST, PATCH,
+// conversion). Y ajouter SSH_KEY y ouvrirait la création, la conversion (qui
+// effacerait la clé) et le déplacement vers le coffre d'équipe (dont la
+// révélation déchiffre le blob). Une clé SSH se crée par /api/vault/ssh-keys,
+// et chaque route générique la refuse explicitement (isSshKeyEntry).
+// Sa clé privée ne sort JAMAIS vers le navigateur : seule la signature côté
+// serveur (phase 3) la lit.
+export const SSH_KEY_ENTRY_TYPE = "SSH_KEY" as const;
+
+export type PersonalEntryType = VaultEntryType | typeof SSH_KEY_ENTRY_TYPE;
+
+export function isSshKeyEntry(rawType: unknown): boolean {
+  return rawType === SSH_KEY_ENTRY_TYPE;
+}
+
+/** Comme normalizeEntryType, mais garde SSH_KEY (coffre personnel seulement). */
+export function normalizePersonalEntryType(v: unknown): PersonalEntryType {
+  return isSshKeyEntry(v) ? SSH_KEY_ENTRY_TYPE : normalizeEntryType(v);
+}
+
+/** Les seuls champs qu'un PATCH peut toucher sur une clé SSH. */
+export const SSH_KEY_EDITABLE_FIELDS = ["name", "tags", "favorite", "collectionId"] as const;
+
 export const VAULT_TYPE_LIMITS = {
   /** Nombre d'items d'une LIST. */
   itemsMax: 50,
@@ -231,3 +257,31 @@ export function itemCountFor(
 ): number | null {
   return type === "LIST" ? (payload.items ?? []).length : null;
 }
+
+// ─── Tags du coffre personnel ────────────────────────────────────────────
+
+const VAULT_TAG_MAX = 50;
+const VAULT_TAGS_MAX = 20;
+export const VAULT_TAGS_ERROR = `tags must be a string array of <= ${VAULT_TAGS_MAX} entries, each <= ${VAULT_TAG_MAX} chars`;
+
+/**
+ * Tags d'une entrée du coffre personnel : 20 au plus, 50 caractères chacun,
+ * dédoublonnés. null = entrée invalide (l'appelant répond 400).
+ * Extrait de app/api/vault/entries/route.ts pour être partagé avec
+ * /api/vault/ssh-keys (C-0050) — la règle n'est PAS celle de lib/tags.ts.
+ */
+export function normalizeVaultTags(input: unknown): string[] | null {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) return null;
+  if (input.length > VAULT_TAGS_MAX) return null;
+  const out: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== "string") return null;
+    const t = raw.trim();
+    if (!t) continue;
+    if (t.length > VAULT_TAG_MAX) return null;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+

@@ -11,7 +11,9 @@
 // (un edit Play ouvert puis supprimé), il est audité, et il est rate-limité.
 
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { withTenantSchema } from "@/lib/tenant";
 import { requireProjectMember } from "@/lib/api";
 import { logAction } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
@@ -24,6 +26,33 @@ type Params = { params: Promise<{ slug: string; appId: string }> };
  *  humain normal, assez serré pour que la route ne devienne pas un moyen de
  *  faire marteler l'API de Google depuis nos IP. */
 const VERIFY_LIMIT = { max: 20, windowMs: 5 * 60_000 };
+
+/**
+ * Dernier rapport connu. Aucun appel sortant : c'est ce qui permet d'ouvrir
+ * l'onglet — et d'afficher une pastille d'alerte — sans redemander à Google et
+ * Apple à chaque coup d'œil.
+ */
+export async function GET(_req: Request, { params }: Params) {
+  const { slug, appId } = await params;
+  // VIEWER : un rapport ne contient ni valeur ni secret, seulement des constats.
+  const access = await requireProjectMember(slug, "VIEWER", {
+    feature: "mobile_deploy",
+  });
+  if ("error" in access) return access.error;
+  const off = requireProjectMobileEnabled(access.project);
+  if (off) return off;
+
+  const app = await prisma.mobileApp.findFirst({
+    where: { id: appId, projectId: access.project.id },
+    select: { lastVerifyReport: true, lastVerifiedAt: true },
+  });
+  if (!app) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  return NextResponse.json({
+    report: app.lastVerifyReport ?? null,
+    checkedAt: app.lastVerifiedAt ?? null,
+  });
+}
 
 export async function POST(req: Request, { params }: Params) {
   const { slug, appId } = await params;
@@ -47,6 +76,21 @@ export async function POST(req: Request, { params }: Params) {
   if (!app) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const report = await verifyMobileApp(prisma, app);
+
+  // Persisté pour l'ouverture d'onglet et la pastille d'alerte. Best-effort :
+  // un rapport qu'on n'a pas su écrire ne doit pas faire échouer le geste qui
+  // vient de coûter quatre appels sortants.
+  await withTenantSchema(access.tenantSlug, (tx) =>
+    tx.mobileApp.update({
+      where: { id: app.id },
+      data: {
+        lastVerifyReport: report as unknown as Prisma.InputJsonValue,
+        lastVerifiedAt: new Date(),
+      },
+    }),
+  ).catch((err) => {
+    console.error("[mobile-verify] rapport non persisté (non bloquant):", err);
+  });
 
   // Métadonnées d'audit : le COMPTE par statut, jamais un constat verbatim —
   // certains portent le sujet d'un certificat ou l'e-mail d'un compte de

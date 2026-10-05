@@ -23,6 +23,11 @@ export async function GET(_req: Request, { params }: Params) {
       createdAt: true,
       environmentId: true,
       serviceId: true,
+      // Pastille rotation de la liste (RotationBadge) : champs en clair.
+      rotationEnabled: true,
+      rotationStrategy: true,
+      rotationNextAt: true,
+      rotationLastStatus: true,
       environment: { select: { name: true, url: true } },
       service: { select: { name: true, url: true } },
     },

@@ -9,6 +9,7 @@ import {
   RiMenuLine,
   RiCloseLine,
   RiSafe2Line,
+  RiRobot2Line,
   RiSettings3Line,
   RiShareForward2Line,
   type RemixiconComponentType,
@@ -21,7 +22,14 @@ type NavItem = {
   Icon?: RemixiconComponentType;
 };
 
-export default function HeaderNav({ currentSlug }: { currentSlug: string | null }) {
+export default function HeaderNav({
+  currentSlug,
+  automation = false,
+}: {
+  currentSlug: string | null;
+  /** Onglet « Automatisations » — module ouvert ET service activé (C-0046). */
+  automation?: boolean;
+}) {
   const t = useTranslations("dashboard.nav");
   const pathname = usePathname() ?? "";
   const [open, setOpen] = useState(false);
@@ -59,6 +67,10 @@ export default function HeaderNav({ currentSlug }: { currentSlug: string | null 
     { href: "/projects", label: t("projects"), Icon: RiFolderOpenLine },
     { href: "/vault", label: t("vault"), shortLabel: t("vaultShort"), Icon: RiSafe2Line },
     { href: "/shares", label: t("shares"), Icon: RiShareForward2Line },
+    // Entre Partages et Documentation, et seulement si le service est activé.
+    ...(automation
+      ? [{ href: "/automation", label: t("automation"), Icon: RiRobot2Line }]
+      : []),
     { href: "/docs", label: t("docs"), Icon: RiBookOpenLine },
     { href: settingsHref, label: t("parameters"), Icon: RiSettings3Line },
   ];
@@ -67,6 +79,7 @@ export default function HeaderNav({ currentSlug }: { currentSlug: string | null 
     if (href === "/projects") return pathname.startsWith("/projects");
     if (href === "/vault") return pathname === "/vault";
     if (href === "/shares") return pathname === "/shares";
+    if (href === "/automation") return pathname.startsWith("/automation");
     if (href === "/docs") return pathname.startsWith("/docs");
     if (href === settingsHref) return pathname.startsWith("/orgs");
     return pathname === href;

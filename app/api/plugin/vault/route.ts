@@ -21,6 +21,7 @@ import type { ProjectRole, Role, VaultRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClient } from "@prisma/client";
 import { decrypt, encrypt } from "@/lib/crypto";
+import { normalizeEntryType } from "@/lib/vault-entry-types";
 import { readJson } from "@/lib/api";
 import { hasDevPrivileges, isPlatformAdmin } from "@/lib/roles";
 import { effectiveProjectRole, hasProjectRole } from "@/lib/project-access";
@@ -777,11 +778,29 @@ export async function POST(req: Request) {
   // update team — verifie que l'entry appartient bien a la collection
   const existing = await prisma.teamVaultEntry.findFirst({
     where: { id: data.id!, collectionId: access.collectionId },
-    select: { id: true },
+    select: { id: true, type: true },
   });
   if (!existing) {
     return withCors(
       NextResponse.json({ error: "Not found" }, { status: 404 }),
+      allowOrigin,
+    );
+  }
+  // ⚠️ L'extension ne connaît que la forme LOGIN : elle envoie un
+  // nom/URL/identifiant/mot de passe. Appliquer ça à une LIST ou une NOTE
+  // (C-0047) y écrirait un mot de passe et une URL que cette forme ne porte
+  // pas, en laissant sa charge utile chiffrée orpheline à côté. On refuse au
+  // lieu d'écrire à moitié — l'entrée reste modifiable depuis Physalis.
+  const formeExistante = normalizeEntryType(existing.type);
+  if (formeExistante !== "LOGIN" && formeExistante !== "SECRET") {
+    return withCors(
+      NextResponse.json(
+        {
+          error: `Cette entrée est de type ${formeExistante} : elle se modifie depuis Physalis, pas depuis l'extension.`,
+          code: "type_not_editable_here",
+        },
+        { status: 409 },
+      ),
       allowOrigin,
     );
   }

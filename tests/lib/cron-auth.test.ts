@@ -136,6 +136,7 @@ describe("requireCronAuthAsync — bearer statique + OIDC GitHub (Phase 3)", () 
       matchKey: "cron-backup.yml",
       policyIssuer: null,
       branch: "main",
+      run: null,
       raw: {},
       ...over,
     },

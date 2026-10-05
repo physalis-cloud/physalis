@@ -45,6 +45,9 @@ const PROTECTED_PREFIXES = [
   "/shares",
   "/vault",
   "/admin",
+  // C-0050 : /account/cli, ouverte par `physalis login` — le retour après le
+  // login doit ramener sur la page d'approbation avec son ?code=.
+  "/account",
 ];
 
 function getLocaleFromPath(path: string): Locale | null {
@@ -158,8 +161,13 @@ export default auth((req) => {
 export const config = {
   matcher: [
     {
+      // ⚠️ Porte depuis le middleware SaaS le 2026-09-16 — ce fichier en est un
+      // jumeau mono-tenant tenu a la main. Le routage de locale est identique
+      // des deux cotes, donc le defaut l'etait aussi : `/robots.txt` redirige
+      // vers `/en/robots.txt`, qui n'existe pas, donc 404. La liste
+      // d'extensions juste apres ne porte que des images et des archives.
       source:
-        "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|zip)).*)",
+        "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|zip)).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

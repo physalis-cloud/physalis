@@ -361,3 +361,357 @@ export async function getProjectDocs(projectId: string) {
   const canRefresh = Boolean(meta && meta.repo !== "");
   return { docs, fetchedAt: project.docsFetchedAt, canRefresh };
 }
+
+// ─── Lecture d'un fichier précis (C-0051) ────────────────────────────────────
+// Sert la vérification des projets antérieurs au guide d'installation : le
+// workflow déclaré par une policy existe-t-il, et envoie-t-il son rapport ?
+
+export type RepoFileRead = {
+  /** found : lu ; absent : 404 ; unreadable : pas de jeton, refus ou erreur. */
+  status: "found" | "absent" | "unreadable";
+  content: string | null;
+  httpStatus: number;
+};
+
+/** Plafond : un workflow ne pèse pas plus, et le contenu ne fait que transiter. */
+const MAX_REPO_FILE = 200_000;
+
+export async function readRepoFile(
+  projectId: string,
+  path: string,
+  branch: string,
+): Promise<RepoFileRead> {
+  const meta = await loadProjectRepoMeta(projectId);
+  if (!meta?.repo) return { status: "unreadable", content: null, httpStatus: 0 };
+  const { token, identity } = await projectApiAuth(projectId);
+  // Sans jeton, un dépôt privé répond 404 — on ne conclurait « absent » à tort.
+  if (!token) return { status: "unreadable", content: null, httpStatus: 0 };
+
+  let f: Fetched;
+  try {
+    if (meta.provider === "gitlab") {
+      f = await glFile(meta.issuer, meta.repo, path, branch, token);
+    } else if (meta.provider === "bitbucket") {
+      const ws = bbWorkspace(meta.issuer);
+      if (!ws) return { status: "unreadable", content: null, httpStatus: 0 };
+      f = await bbFile(ws, meta.repo, path, branch, token, identity);
+    } else {
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const res = await fetch(
+        `https://api.github.com/repos/${meta.repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`,
+        { headers: GH_HEADERS(token) },
+      );
+      f = res.ok
+        ? { status: 200, content: decodeB64(((await res.json()) as { content?: string }).content) }
+        : { status: res.status, content: null };
+    }
+  } catch {
+    return { status: "unreadable", content: null, httpStatus: 0 };
+  }
+  if (f.status === 200 && f.content !== null) {
+    return { status: "found", content: f.content.slice(0, MAX_REPO_FILE), httpStatus: 200 };
+  }
+  if (f.status === 404) return { status: "absent", content: null, httpStatus: 404 };
+  return { status: "unreadable", content: null, httpStatus: f.status };
+}
+
+// ─── Existence d'un dépôt (C-0051) ───────────────────────────────────────────
+// L'étape « Indiquer le dépôt » du guide ne se valide que si le dépôt existe
+// vraiment. Le guide est relu toutes les 30 s pendant l'attente d'un run :
+// petit cache mémoire pour ne pas solliciter l'API de la plateforme à chaque fois.
+
+export type RepoExistence = "yes" | "no" | "unknown";
+
+const REPO_CHECK_TTL_MS = 5 * 60_000;
+const repoCheckCache = new Map<string, { at: number; value: RepoExistence }>();
+
+/**
+ * @param repo dépôt à tester ; à défaut, celui du projet.
+ * « no » n'est rendu qu'AVEC un jeton : sans lui, un dépôt privé répond 404
+ * comme un dépôt absent, et on ne conclut pas à tort.
+ */
+export async function checkRepoExists(projectId: string, repo?: string): Promise<RepoExistence> {
+  const meta = await loadProjectRepoMeta(projectId);
+  if (!meta) return "unknown";
+  const target = (repo ?? meta.repo).trim();
+  if (!target) return "unknown";
+  const key = `${meta.provider}|${meta.issuer ?? ""}|${target}`;
+  const hit = repoCheckCache.get(key);
+  if (hit && Date.now() - hit.at < REPO_CHECK_TTL_MS) return hit.value;
+
+  const { token, identity } = await projectApiAuth(projectId);
+  let status = 0;
+  try {
+    if (meta.provider === "gitlab") {
+      status = (await fetch(glBase(meta.issuer, target), { headers: GL_HEADERS(token) })).status;
+    } else if (meta.provider === "bitbucket") {
+      const ws = bbWorkspace(meta.issuer);
+      if (ws) {
+        status = (await fetch(bbBase(ws, target), { headers: BB_HEADERS(token, identity) })).status;
+      }
+    } else if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(target)) {
+      status = (
+        await fetch(`https://api.github.com/repos/${target}`, { headers: GH_HEADERS(token) })
+      ).status;
+    }
+  } catch {
+    status = 0;
+  }
+  const value: RepoExistence =
+    status === 200 ? "yes" : status === 404 && token ? "no" : "unknown";
+  // Seuls les verdicts nets sont mis en cache : un « unknown » (réseau, quota)
+  // doit pouvoir se lever au prochain passage.
+  if (value !== "unknown") repoCheckCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+// ─── Workflow déclaré par une policy (C-0051) ────────────────────────────────
+// L'étape « Ajouter le workflow » du guide vérifie, POUR CHAQUE policy, que le
+// fichier qu'elle désigne existe sur SA branche, et s'il envoie son rapport.
+// Cache court (60 s) : le guide est relu toutes les 30 s, mais l'utilisateur qui
+// vient de pousser son workflow doit voir l'étape se valider vite.
+
+export type WorkflowFileCheck = {
+  status: RepoFileRead["status"];
+  /** Le fichier contient l'appel à /api/deploy/report (null si non lu). */
+  hasReport: boolean | null;
+};
+
+const WORKFLOW_CHECK_TTL_MS = 60_000;
+const workflowCheckCache = new Map<string, { at: number; value: WorkflowFileCheck }>();
+
+export async function checkWorkflowFile(
+  projectId: string,
+  path: string,
+  branch: string,
+): Promise<WorkflowFileCheck> {
+  const key = `${projectId}|${path}|${branch}`;
+  const hit = workflowCheckCache.get(key);
+  if (hit && Date.now() - hit.at < WORKFLOW_CHECK_TTL_MS) return hit.value;
+  const read = await readRepoFile(projectId, path, branch);
+  const value: WorkflowFileCheck = {
+    status: read.status,
+    hasReport: read.status === "found" ? (read.content ?? "").includes("/api/deploy/report") : null,
+  };
+  if (read.status !== "unreadable") workflowCheckCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+// ─── Dernier run du workflow d'une policy (C-0051) ───────────────────────────
+// L'étape « Lancer le workflow » du guide montre, POUR CHAQUE policy, le dernier
+// run de son workflow sur SA branche. C'est surtout le seul moyen de voir un run
+// refusé AVANT d'atteindre le projet (403 de policy, 401 d'audience) : ces refus
+// n'ont pas de tenant et ne sont pas persistés côté Physalis (lib/audit.ts).
+
+export type CiRunState = "running" | "success" | "failure" | "cancelled" | "none" | "unknown";
+export type CiRun = { state: CiRunState; url: string | null; at: string | null };
+
+const RUN_CHECK_TTL_MS = 30_000;
+const runCheckCache = new Map<string, { at: number; value: CiRun }>();
+
+const UNKNOWN_RUN: CiRun = { state: "unknown", url: null, at: null };
+
+/** N'expose une URL que si elle pointe bien chez la plateforme attendue. */
+function safeUrl(url: unknown, origin: string): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    return new URL(url).origin === origin ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function latestWorkflowRun(
+  projectId: string,
+  workflow: string,
+  branch: string,
+): Promise<CiRun> {
+  const meta = await loadProjectRepoMeta(projectId);
+  if (!meta?.repo) return UNKNOWN_RUN;
+  const key = `${projectId}|${workflow}|${branch}`;
+  const hit = runCheckCache.get(key);
+  if (hit && Date.now() - hit.at < RUN_CHECK_TTL_MS) return hit.value;
+
+  const { token, identity } = await projectApiAuth(projectId);
+  if (!token) return UNKNOWN_RUN;
+
+  let value: CiRun = UNKNOWN_RUN;
+  try {
+    if (meta.provider === "gitlab") {
+      const res = await fetch(
+        `${glBase(meta.issuer, meta.repo)}/pipelines?ref=${encodeURIComponent(branch)}&per_page=1&order_by=id&sort=desc`,
+        { headers: GL_HEADERS(token) },
+      );
+      if (res.ok) {
+        const [p] = (await res.json()) as { status?: string; web_url?: string; created_at?: string }[];
+        value = p
+          ? {
+              state:
+                p.status === "success"
+                  ? "success"
+                  : p.status === "failed"
+                    ? "failure"
+                    : p.status === "canceled" || p.status === "skipped"
+                      ? "cancelled"
+                      : "running",
+              url: safeUrl(p.web_url, new URL(GL_HOST(meta.issuer)).origin),
+              at: p.created_at ?? null,
+            }
+          : { state: "none", url: null, at: null };
+      }
+    } else if (meta.provider === "bitbucket") {
+      const ws = bbWorkspace(meta.issuer);
+      if (ws) {
+        const res = await fetch(
+          `${bbBase(ws, meta.repo)}/pipelines/?sort=-created_on&pagelen=1&target.branch=${encodeURIComponent(branch)}`,
+          { headers: BB_HEADERS(token, identity) },
+        );
+        if (res.ok) {
+          const data = (await res.json()) as {
+            values?: {
+              created_on?: string;
+              state?: { name?: string; result?: { name?: string } };
+            }[];
+          };
+          const p = data.values?.[0];
+          const result = p?.state?.result?.name;
+          value = p
+            ? {
+                state:
+                  p.state?.name !== "COMPLETED"
+                    ? "running"
+                    : result === "SUCCESSFUL"
+                      ? "success"
+                      : result === "STOPPED"
+                        ? "cancelled"
+                        : "failure",
+                // L'API ne donne que des UUID : pas d'URL web constructible.
+                url: null,
+                at: p.created_on ?? null,
+              }
+            : { state: "none", url: null, at: null };
+        }
+      }
+    } else if (/^[A-Za-z0-9_.-]+$/.test(workflow)) {
+      const res = await fetch(
+        `https://api.github.com/repos/${meta.repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?branch=${encodeURIComponent(branch)}&per_page=1`,
+        { headers: GH_HEADERS(token) },
+      );
+      if (res.ok) {
+        const data = (await res.json()) as {
+          workflow_runs?: { status?: string; conclusion?: string | null; html_url?: string; created_at?: string }[];
+        };
+        const r = data.workflow_runs?.[0];
+        value = r
+          ? {
+              state:
+                r.status !== "completed"
+                  ? "running"
+                  : r.conclusion === "success"
+                    ? "success"
+                    : r.conclusion === "cancelled" || r.conclusion === "skipped"
+                      ? "cancelled"
+                      : "failure",
+              url: safeUrl(r.html_url, "https://github.com"),
+              at: r.created_at ?? null,
+            }
+          : { state: "none", url: null, at: null };
+      } else if (res.status === 404) {
+        // Workflow inconnu de GitHub (fichier absent sur la branche par défaut).
+        value = { state: "none", url: null, at: null };
+      }
+    }
+  } catch {
+    value = UNKNOWN_RUN;
+  }
+  if (value.state !== "unknown") runCheckCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+// ─── Issue d'un run PRÉCIS (C-0051) ──────────────────────────────────────────
+// Le suivi des déploiements n'exige plus l'étape « Report to Physalis » : quand
+// une ligne reste en attente, Physalis demande lui-même à la plateforme l'issue
+// du run dont il a reçu l'identifiant dans le jeton OIDC signé. C'est un
+// CONSTAT, plus fiable qu'une déclaration du pipeline (il couvre aussi un run
+// qui plante avant d'atteindre son étape de rapport).
+
+export type RunOutcome = "running" | "success" | "failure" | "unknown";
+
+const RUN_OUTCOME_TTL_MS = 30_000;
+const runOutcomeCache = new Map<string, { at: number; value: RunOutcome }>();
+
+/**
+ * @param repo  repo tel que porté par le jeton (owner/repo, chemin GitLab, UUID Bitbucket)
+ * @param runId run_id (GitHub), pipeline_id (GitLab), pipelineUuid (Bitbucket)
+ * @param attempt run_attempt (GitHub) ; ignoré ailleurs
+ */
+export async function fetchRunOutcome(
+  projectId: string,
+  provider: string,
+  repo: string,
+  runId: string,
+  attempt: string,
+): Promise<RunOutcome> {
+  const key = `${provider}|${repo}|${runId}|${attempt}`;
+  const hit = runOutcomeCache.get(key);
+  if (hit && Date.now() - hit.at < RUN_OUTCOME_TTL_MS) return hit.value;
+
+  const meta = await loadProjectRepoMeta(projectId);
+  if (!meta || meta.provider !== provider) return "unknown";
+  const { token, identity } = await projectApiAuth(projectId);
+  if (!token) return "unknown";
+
+  let value: RunOutcome = "unknown";
+  try {
+    if (provider === "github") {
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !/^\d+$/.test(runId)) return "unknown";
+      const att = /^\d+$/.test(attempt) ? attempt : "1";
+      const res = await fetch(
+        `https://api.github.com/repos/${repo}/actions/runs/${runId}/attempts/${att}`,
+        { headers: GH_HEADERS(token) },
+      );
+      if (res.ok) {
+        const r = (await res.json()) as { status?: string; conclusion?: string | null };
+        value =
+          r.status !== "completed"
+            ? "running"
+            : r.conclusion === "success"
+              ? "success"
+              : "failure";
+      }
+    } else if (provider === "gitlab") {
+      if (!/^\d+$/.test(runId)) return "unknown";
+      const res = await fetch(`${glBase(meta.issuer, repo)}/pipelines/${runId}`, {
+        headers: GL_HEADERS(token),
+      });
+      if (res.ok) {
+        const p = (await res.json()) as { status?: string };
+        value =
+          p.status === "success"
+            ? "success"
+            : p.status === "failed" || p.status === "canceled" || p.status === "skipped"
+              ? "failure"
+              : "running";
+      }
+    } else if (provider === "bitbucket") {
+      const ws = bbWorkspace(meta.issuer);
+      if (!ws) return "unknown";
+      const res = await fetch(`${bbBase(ws, repo)}/pipelines/${encodeURIComponent(runId)}`, {
+        headers: BB_HEADERS(token, identity),
+      });
+      if (res.ok) {
+        const p = (await res.json()) as { state?: { name?: string; result?: { name?: string } } };
+        value =
+          p.state?.name !== "COMPLETED"
+            ? "running"
+            : p.state?.result?.name === "SUCCESSFUL"
+              ? "success"
+              : "failure";
+      }
+    }
+  } catch {
+    value = "unknown";
+  }
+  if (value !== "unknown") runOutcomeCache.set(key, { at: Date.now(), value });
+  return value;
+}

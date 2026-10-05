@@ -62,8 +62,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # VERSION sert aux tags de l'image. APP_VERSION alimente /api/health :
+      # sans lui, l'image publiée annonce "unknown" et on ne sait pas dire
+      # quelle version tourne chez un self-hébergeur. Le SHA court distingue
+      # deux images qui partagent la même version de package.json.
       - name: Extract version from package.json
-        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+        run: |
+          echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+          echo "APP_VERSION=$(node -p "require('./package.json').version")+${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -81,5 +87,15 @@ jobs:
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ env.VERSION }}
             ${{ env.IMAGE }}:${{ github.sha }}
+          # Même traitement que `deploy.yml` et `deploy-staging.yml` de la
+          # source, le Dockerfile de l'overlay ayant les mêmes stages `deps` et
+          # `prod-deps` : `mode=max` pour que les `npm ci` intermédiaires soient
+          # exportés, `ignore-error` pour qu'un cache refusé ne casse pas la CI.
+          # Ici le dépôt est PUBLIC, donc les minutes sont gratuites : ce qu'on
+          # y gagne, c'est du temps d'attente, pas du budget.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+          # `CACHEBUST` retiré : aucun `ARG CACHEBUST` dans le Dockerfile de
+          # l'overlay non plus — le build-arg était ignoré par Docker.
           build-args: |
-            CACHEBUST=${{ github.sha }}
+            APP_VERSION=${{ env.APP_VERSION }}

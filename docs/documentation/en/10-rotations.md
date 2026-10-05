@@ -115,8 +115,10 @@ password** hashed in the database by the app (admin, user). See the
 
 ### Reminder (assisted)
 
-Physalis **changes nothing at the source**. When due, it **notifies** the org
-ADMIN / OWNER and shows a badge. You change the credential at the provider, then,
+Physalis **changes nothing at the source**. When due, it sends a
+**notification** (notification center, email and webhook per the org's alert
+destinations) and the object's clock badge turns orange ("Due"). An advance
+notice is also sent a few days before (7 by default). You change the credential at the provider, then,
 via the modal's **immediate rotation**, you **generate or enter** the new value:
 Physalis stores it and archives the old one. Suited to third-party keys, tokens,
 shared passwords.

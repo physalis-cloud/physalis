@@ -17,7 +17,13 @@ import type { PrismaClient } from "@prisma/client";
  *  client tenant (getTenantPrisma) que le client unique du self-host, sans les
  *  coupler ni tirer l'un dans le build de l'autre. */
 type MobileCredentialReader = Pick<PrismaClient, "mobileCredential">;
-type MobileAppWriter = Pick<PrismaClient, "mobileApp">;
+/** ⚠️ Notation MÉTHODE, pas propriété : sous `strictFunctionTypes` une
+ *  propriété-fonction est comparée de façon contravariante et les signatures
+ *  génériques de Prisma ne sont alors assignables à rien de plus large. */
+type MobileAppWriter = {
+  mobileApp: { update(args: unknown): Promise<unknown> };
+  $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
+};
 
 /** Une entrée du bundle. `encoding` dit au CI quoi faire de `value` :
  *   - "base64" (kinds fichier) : à écrire tel quel dans un fichier binaire ;
@@ -124,11 +130,38 @@ export async function buildMobileBundle(
 export async function consumeBuildNumber(
   db: MobileAppWriter,
   appId: string,
+  /**
+   * Plus haut numéro DÉJÀ PUBLIÉ, lu au magasin (Phase 5, §4.5). `null` =
+   * magasin injoignable ou numéro non ordonnable → on retombe sur le seul
+   * compteur local, ce qui est le comportement d'avant la Phase 5.
+   */
+  storeFloor: number | null = null,
 ): Promise<{ buildNumber: number; versionName: string | null }> {
-  const app = await db.mobileApp.update({
-    where: { id: appId },
-    data: { buildNumber: { increment: 1 } },
-    select: { buildNumber: true, versionName: true },
-  });
-  return app;
+  if (storeFloor === null) {
+    const app = (await db.mobileApp.update({
+      where: { id: appId },
+      data: { buildNumber: { increment: 1 } },
+      select: { buildNumber: true, versionName: true },
+    })) as { buildNumber: number; versionName: string | null };
+    return app;
+  }
+
+  // `max(magasin, dernier servi) + 1`, en UNE instruction SQL — donc toujours
+  // atomique entre deux déploiements concurrents, exactement comme l'increment
+  // qu'elle remplace. Écrire ce max en JavaScript (lire, comparer, écrire)
+  // aurait rouvert la fenêtre de course que l'increment fermait.
+  //
+  // Auto-réparant : après un téléversement manuel depuis Xcode ou la console,
+  // le compteur local est en retard ; le GREATEST le rattrape au déploiement
+  // suivant sans que personne ait à corriger quoi que ce soit.
+  const rows = (await db.$queryRaw`
+    UPDATE "MobileApp"
+       SET "buildNumber" = GREATEST("buildNumber", ${storeFloor}::int) + 1
+     WHERE "id" = ${appId}
+     RETURNING "buildNumber", "versionName"
+  `) as Array<{ buildNumber: number; versionName: string | null }>;
+
+  const row = rows?.[0];
+  if (!row) throw new Error(`consumeBuildNumber: application ${appId} introuvable`);
+  return row;
 }

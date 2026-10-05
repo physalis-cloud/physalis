@@ -42,13 +42,14 @@ export default async function ProjectPage({
         },
       },
       environments: {
-        orderBy: { name: "asc" },
+        orderBy: [{ position: "asc" }, { name: "asc" }],
         select: {
           id: true,
           name: true,
           url: true,
           serverId: true,
           deployPath: true,
+          position: true,
           _count: { select: { secrets: true } },
         },
       },
@@ -129,6 +130,7 @@ export default async function ProjectPage({
             serverId: e.serverId,
             deployPath: e.deployPath,
             secretCount: e._count.secrets,
+            position: e.position,
           }))}
           role={role}
           orgRole={orgRole}

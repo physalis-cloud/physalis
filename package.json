@@ -1,6 +1,6 @@
 {
   "name": "physalis",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,6 +17,7 @@
     "@noble/post-quantum": "^0.6.1",
     "@prisma/client": "^6.19.3",
     "@remixicon/react": "^4.9.0",
+    "bcrypt-pbkdf": "^1.0.2",
     "bcryptjs": "^3.0.3",
     "form-data": "^4.0.5",
     "jose": "^6.2.3",

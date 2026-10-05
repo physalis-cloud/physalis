@@ -309,7 +309,15 @@ export default function MobilePanel({
           }
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div
+          className="flex flex-col gap-3"
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid var(--accent-soft)",
+            background: "var(--accent-bg)",
+          }}
+        >
           {apps.map((app) => {
             const open = expandedId === app.id;
             return (
@@ -447,7 +455,7 @@ export default function MobilePanel({
                       paddingTop: 16,
                     }}
                   >
-                    <CredentialsSection
+                    <AppTabs
                       slug={slug}
                       app={app}
                       canEdit={canEdit}
@@ -839,30 +847,89 @@ function CredentialsSection({
           }}
         />
       )}
+    </div>
+  );
+}
 
-      {canEdit && credentials !== null && credentials.length > 0 && (
-        <VerifySection slug={slug} app={app} />
+/** Les quatre onglets d'une application. Regroupés par QUESTION POSÉE, et non
+ *  par fonctionnalité : un onglet qui tiendrait en un seul bouton coûterait un
+ *  clic sans rien clarifier. */
+type AppTab = "material" | "verify" | "releases" | "ci";
+
+const APP_TABS: AppTab[] = ["material", "verify", "releases", "ci"];
+
+/**
+ * Panneau d'une application dépliée.
+ *
+ * Avant, les cinq sections s'empilaient d'un coup : illisible dès qu'une
+ * application avait du matériel, des livraisons ET des policies. Les onglets ne
+ * cachent rien — ils répondent à une question à la fois.
+ *
+ * ⚠️ Les certificats Apple vivent dans « Matériel » et non dans un onglet à
+ * eux : « Régénérer le profil seul » ne fonctionne que grâce au certificat en
+ * service, et les séparer casserait la lecture de ce lien. De même, promouvoir
+ * une version vit dans « Livraisons » — c'est agir sur une ligne qu'on est en
+ * train de regarder.
+ */
+function AppTabs({
+  slug,
+  app,
+  canEdit,
+  onChange,
+}: {
+  slug: string;
+  app: MobileApp;
+  canEdit: boolean;
+  onChange: () => void;
+}) {
+  const t = useTranslations("projects.mobile");
+  const [tab, setTab] = useState<AppTab>("material");
+  // Remonté depuis l'onglet Vérification pour porter la pastille : sans elle,
+  // il faudrait ouvrir l'onglet pour apprendre qu'il y a un problème.
+  const [failures, setFailures] = useState(0);
+
+  return (
+    <div>
+      <div className="tab-bar" style={{ marginBottom: 16 }}>
+        {APP_TABS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={`tab${tab === id ? " active" : ""}`}
+            onClick={() => setTab(id)}
+          >
+            {t(`tabs.${id}` as never)}
+            {id === "verify" && failures > 0 && (
+              <span
+                className="badge danger"
+                title={t("verify.badgeHint")}
+                style={{ marginLeft: 6 }}
+              >
+                {failures}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Chaque onglet est monté/démonté : c'est ce qui fait que l'ouverture
+          d'un onglet vaut rafraîchissement pour les listes qui se périment
+          (certificats Apple), sans code de synchronisation supplémentaire. */}
+      {tab === "material" && (
+        <CredentialsSection
+          slug={slug}
+          app={app}
+          canEdit={canEdit}
+          onChange={onChange}
+        />
       )}
-
-      <div
-        style={{
-          marginTop: 20,
-          borderTop: "1px solid var(--border)",
-          paddingTop: 16,
-        }}
-      >
-        <ReleasesSection slug={slug} app={app} />
-      </div>
-
-      <div
-        style={{
-          marginTop: 20,
-          borderTop: "1px solid var(--border)",
-          paddingTop: 16,
-        }}
-      >
-        <PoliciesSection slug={slug} app={app} canEdit={canEdit} />
-      </div>
+      {tab === "verify" && (
+        <VerifySection slug={slug} app={app} canEdit={canEdit} onFailures={setFailures} />
+      )}
+      {tab === "releases" && (
+        <ReleasesSection slug={slug} app={app} canEdit={canEdit} />
+      )}
+      {tab === "ci" && <PoliciesSection slug={slug} app={app} canEdit={canEdit} />}
     </div>
   );
 }
@@ -953,6 +1020,7 @@ type MobileRelease = {
   versionName: string | null;
   buildNumber: string;
   status: string;
+  /** "reported" = le CI l'a dit ; "store" = relu au magasin (Phase 5). */
   statusSource: string;
   statusDetail: string | null;
   signedByCurrent: boolean | null;
@@ -966,6 +1034,11 @@ type MobileRelease = {
 /** Teinte par état. `live` est le seul vert : tout le reste est en cours, ou
  *  a mal fini. Un `requested` orphelin (matériel servi, jamais rapporté) est
  *  volontairement visible — c'est une information, pas un déchet. */
+/** Pistes Play proposées à la promotion. Doit rester alignée sur
+ *  `PLAY_PROMOTABLE_TRACKS` de lib/mobile-store-write.ts — le serveur refuse
+ *  tout le reste, cette liste n'est que l'ergonomie. */
+const PLAY_TRACKS = ["internal", "alpha", "beta", "production"] as const;
+
 const RELEASE_STATUS_TONE: Record<string, string> = {
   live: "#1b7a44",
   uploaded: "#4b5563",
@@ -983,11 +1056,29 @@ const RELEASE_STATUS_TONE: Record<string, string> = {
  * ⚠️ Physalis ne détient pas l'artefact (§3.2) : cet écran montre des
  * SIGNALEMENTS. Le verbe reste « livré sur une piste », jamais « déployé ».
  */
-function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
+function ReleasesSection({
+  slug,
+  app,
+  canEdit,
+}: {
+  slug: string;
+  app: MobileApp;
+  canEdit: boolean;
+}) {
   const t = useTranslations("projects.mobile");
   const locale = useLocale();
   const [releases, setReleases] = useState<MobileRelease[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+  // Formulaire de promotion ouvert, par ligne. `null` = fermé. La promotion
+  // demande DEUX gestes délibérés (ouvrir, puis confirmer) : aucune suite de
+  // clics ne doit pouvoir atteindre la production par inadvertance.
+  const [promoting, setPromoting] = useState<string | null>(null);
+  const [promoteTrack, setPromoteTrack] = useState("");
+  const [promoteFraction, setPromoteFraction] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const load = useCallback(() => {
     fetch(`/api/projects/${slug}/mobile/apps/${app.id}/releases`)
@@ -1003,6 +1094,96 @@ function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
     load();
   }, [load]);
 
+  /** Demande au MAGASIN où en sont ces livraisons. Geste explicite : il part
+   *  avec les clés du client vers Google ou Apple. */
+  async function sync() {
+    setSyncing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${slug}/mobile/apps/${app.id}/releases/sync`,
+        { method: "POST" },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(t(`releases.syncErr.${data?.error ?? "failed"}` as never));
+        return;
+      }
+      // « 0 mise à jour » n'est PAS un échec : c'est le cas normal quand rien
+      // n'a bougé au magasin depuis la dernière fois. Le taire laisserait
+      // croire que le bouton n'a rien fait.
+      setNotice(
+        t("releases.syncDone", {
+          matched: data?.matched ?? 0,
+          changed: data?.changed?.length ?? 0,
+        }),
+      );
+      load();
+    } catch {
+      setError(t("releases.syncErr.failed"));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  /**
+   * Agit sur le MAGASIN (Phase 6). ⚠️ Irréversible : promouvoir en production
+   * atteint de vrais utilisateurs, et Play refuse de revenir à un versionCode
+   * inférieur. La confirmation dit donc la conséquence, pas « êtes-vous sûr ».
+   */
+  async function storeAction(
+    r: MobileRelease,
+    action: "promote" | "halt",
+    track: string,
+    userFraction?: number,
+  ) {
+    // La production n'est pas une piste comme les autres : elle atteint les
+    // utilisateurs réels de l'application. Son avertissement est distinct, et
+    // c'est voulu — un message générique s'use à force d'être lu.
+    const message =
+      action === "halt"
+        ? t("releases.haltConfirm", { build: r.buildNumber, track })
+        : track === "production"
+          ? t("releases.promoteConfirmProduction", { build: r.buildNumber })
+          : t("releases.promoteConfirm", { build: r.buildNumber, track });
+    const ok = await confirm({ message, danger: true });
+    if (!ok) return;
+
+    setActing(r.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${slug}/mobile/apps/${app.id}/store-action`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action,
+            buildNumber: r.buildNumber,
+            track,
+            ...(userFraction !== undefined ? { userFraction } : {}),
+          }),
+        },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Le message de Google est explicite (« Version code 41 has already
+        // been used ») : le rendre tel quel vaut mieux qu'un libellé générique.
+        setError(data?.detail ?? t("releases.actionErr"));
+        return;
+      }
+      setNotice(t("releases.actionDone"));
+      setPromoting(null);
+      load();
+    } catch {
+      setError(t("releases.actionErr"));
+    } finally {
+      setActing(null);
+    }
+  }
+
   if (error) return <p className="error-text">{error}</p>;
   if (releases === null) return <p className="help">{t("loading")}</p>;
 
@@ -1012,6 +1193,24 @@ function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
       <p className="help" style={{ marginTop: 0 }}>
         {t("releases.intro")}
       </p>
+
+      {releases.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={syncing}
+            onClick={sync}
+          >
+            {syncing ? t("releases.syncing") : t("releases.sync")}
+          </button>
+          {notice && (
+            <span className="help" style={{ marginLeft: 8 }}>
+              {notice}
+            </span>
+          )}
+        </div>
+      )}
 
       {releases.length === 0 ? (
         <p className="help">{t("releases.empty")}</p>
@@ -1024,6 +1223,7 @@ function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
               <th>{t("releases.colStatus")}</th>
               <th>{t("releases.colPipeline")}</th>
               <th>{t("releases.colWhen")}</th>
+              {canEdit && app.platform === "android" && <th />}
             </tr>
           </thead>
           <tbody>
@@ -1060,6 +1260,17 @@ function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
                   <span style={{ color: RELEASE_STATUS_TONE[r.status] ?? "inherit" }}>
                     {t(`releases.status.${r.status}` as never)}
                   </span>
+                  {/* Constaté au magasin vs déclaré par le CI : la nuance dit
+                      au lecteur s'il lit celui qui publie ou celui qui héberge. */}
+                  {r.statusSource === "store" && (
+                    <span
+                      className="text-muted"
+                      title={t("releases.fromStoreHint")}
+                      style={{ fontSize: 10, marginLeft: 4 }}
+                    >
+                      {t("releases.fromStore")}
+                    </span>
+                  )}
                   {r.statusDetail && (
                     <div className="text-muted" style={{ fontSize: 11 }}>
                       {r.statusDetail}
@@ -1073,6 +1284,107 @@ function ReleasesSection({ slug, app }: { slug: string; app: MobileApp }) {
                 <td className="text-muted" style={{ fontSize: 12 }}>
                   {new Date(r.reportedAt ?? r.requestedAt).toLocaleString(locale)}
                 </td>
+                {/* Actions magasin : Android seulement pour l'instant — côté
+                    Apple, la promotion en vente relève d'appStoreVersions, que
+                    la Phase 5 ne lit pas encore. */}
+                {canEdit && app.platform === "android" && (
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {r.track !== "pending" && r.status !== "halted" && (
+                      promoting === r.id ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {/* Aucune valeur par défaut : le bouton reste
+                              désactivé tant qu'une piste n'a pas été CHOISIE.
+                              Un défaut, quel qu'il soit, finirait par être
+                              validé sans être lu. */}
+                          <select
+                            className="select"
+                            value={promoteTrack}
+                            onChange={(e) => setPromoteTrack(e.target.value)}
+                            aria-label={t("releases.promoteTrackLabel")}
+                          >
+                            <option value="">{t("releases.promoteTrackChoose")}</option>
+                            {PLAY_TRACKS.map((tr) => (
+                              <option key={tr} value={tr}>
+                                {tr}
+                                {tr === r.track ? ` — ${t("releases.currentTrack")}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="input"
+                            style={{ width: 96 }}
+                            type="number"
+                            min={1}
+                            max={99}
+                            placeholder={t("releases.promoteFractionPlaceholder")}
+                            title={t("releases.promoteFractionHint")}
+                            value={promoteFraction}
+                            onChange={(e) => setPromoteFraction(e.target.value)}
+                            aria-label={t("releases.promoteFractionLabel")}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            disabled={acting === r.id || !promoteTrack}
+                            onClick={() => {
+                              const pct = Number.parseInt(promoteFraction, 10);
+                              storeAction(
+                                r,
+                                "promote",
+                                promoteTrack,
+                                // Vide => diffusion COMPLÈTE. Les bornes sont
+                                // strictes côté serveur : 100 % n'est pas un
+                                // échelonnement mais un statut `completed`.
+                                Number.isFinite(pct) && pct > 0 && pct < 100
+                                  ? pct / 100
+                                  : undefined,
+                              );
+                            }}
+                          >
+                            {t("releases.promoteConfirmBtn")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setPromoting(null)}
+                          >
+                            {t("cancel")}
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={acting === r.id}
+                            onClick={() => {
+                              setPromoting(r.id);
+                              setPromoteTrack("");
+                              setPromoteFraction("");
+                            }}
+                          >
+                            {t("releases.promote")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={acting === r.id}
+                            onClick={() => storeAction(r, "halt", r.track)}
+                          >
+                            {t("releases.halt")}
+                          </button>
+                        </>
+                      )
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -1222,10 +1534,17 @@ function GenerateSection({
  *  rendus TELS QUELS : « There is no App ID with ID … » est plus actionnable
  *  que n'importe quelle reformulation, et Apple ne les traduit pas. */
 function generateError(t: Translator, data: unknown): string {
-  const d = (data ?? {}) as { error?: string; detail?: string };
+  const d = (data ?? {}) as { error?: string; detail?: string; missing?: string[] };
   switch (d.error) {
-    case "asc_key_missing":
-      return t("generate.errAscKeyMissing");
+    case "asc_key_missing": {
+      // Nommer CE QUI MANQUE, et non réciter les trois éléments : déposer le
+      // seul fichier .p8 est l'erreur naturelle — c'est lui qu'Apple fait
+      // télécharger — et un refus générique laisse croire qu'il n'a pas été pris.
+      const missing = (d.missing ?? []).map((k) => kindLabel(t, k)).join(", ");
+      return missing
+        ? t("generate.errAscKeyMissingList", { missing })
+        : t("generate.errAscKeyMissing");
+    }
     case "cert_cap_reached":
       return t("generate.errCertCap");
     case "bundle_id_not_registered":
@@ -1293,21 +1612,64 @@ function CertificatesSection({ slug, app }: { slug: string; app: MobileApp }) {
     }
   }, [slug, app.id, t]);
 
+  function del(certificateId: string, force: boolean) {
+    return fetch(
+      `/api/projects/${slug}/mobile/apps/${app.id}/certificates?id=${encodeURIComponent(certificateId)}${force ? "&force=1" : ""}`,
+      { method: "DELETE" },
+    );
+  }
+
+  /**
+   * Révocation en DEUX temps, et c'est délibéré.
+   *
+   * ⚠️ La première tentative ne porte JAMAIS `force`. C'est le serveur qui
+   * décide si ce certificat est en service — pas le navigateur. `cert.inUse`
+   * date du chargement de la liste : si le `.p12` du coffre a changé depuis
+   * (import, régénération, autre onglet), cette croyance est périmée. Envoyer
+   * `force` d'emblée, comme le faisait la première version, revenait à laisser
+   * le client court-circuiter la garde serveur sur une donnée fausse — et donc
+   * à ne jamais l'exercer depuis l'écran.
+   *
+   * `cert.inUse` ne sert plus qu'au LIBELLÉ de la première confirmation. Quand
+   * il est vrai, l'utilisateur a déjà lu et accepté l'avertissement rouge : on
+   * ne le lui repose pas au 409.
+   */
   async function revoke(cert: AscCertificate) {
+    const warnedUpfront = cert.inUse;
     const ok = await confirm({
-      message: cert.inUse
+      message: warnedUpfront
         ? t("certificates.revokeInUseConfirm", { name: cert.name })
         : t("certificates.revokeConfirm", { name: cert.name }),
       danger: true,
     });
     if (!ok) return;
+
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/projects/${slug}/mobile/apps/${app.id}/certificates?id=${encodeURIComponent(cert.id)}${cert.inUse ? "&force=1" : ""}`,
-        { method: "DELETE" },
-      );
-      const data = await res.json().catch(() => null);
+      let res = await del(cert.id, false);
+      let data = await res.json().catch(() => null);
+
+      if (res.status === 409 && data?.error === "certificate_in_use") {
+        // Le serveur contredit l'écran : ce certificat EST en service. Si
+        // l'utilisateur n'a pas déjà vu l'avertissement rouge, il le voit
+        // maintenant — c'est exactement le cas que la garde existe pour
+        // attraper.
+        if (!warnedUpfront) {
+          const forced = await confirm({
+            message: t("certificates.revokeInUseConfirm", { name: cert.name }),
+            danger: true,
+          });
+          if (!forced) {
+            // La liste affichait une information fausse : on la rafraîchit
+            // plutôt que de laisser l'utilisateur devant un badge périmé.
+            await load();
+            return;
+          }
+        }
+        res = await del(cert.id, true);
+        data = await res.json().catch(() => null);
+      }
+
       if (!res.ok) {
         setError(data?.detail ?? t("certificates.revokeError"));
         return;
@@ -1412,12 +1774,50 @@ const VERIFY_CODES = new Set<string>([
  * Geste explicite, jamais automatique — il part avec les clés du client vers
  * des API tierces. Cf. la note en tête de app/api/.../verify/route.ts.
  */
-function VerifySection({ slug, app }: { slug: string; app: MobileApp }) {
+function VerifySection({
+  slug,
+  app,
+  canEdit,
+  onFailures,
+}: {
+  slug: string;
+  app: MobileApp;
+  canEdit: boolean;
+  /** Remonte le nombre d'échecs pour la pastille de l'onglet. */
+  onFailures: (n: number) => void;
+}) {
   const t = useTranslations("projects.mobile");
   const locale = useLocale();
   const [report, setReport] = useState<MobileVerifyReport | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+
+  const publish = useCallback(
+    (r: MobileVerifyReport | null) => {
+      onFailures(r ? r.checks.filter((c) => c.status === "fail").length : 0);
+    },
+    [onFailures],
+  );
+
+  // Le DERNIER rapport connu, lu en base — aucun appel sortant. C'est ce qui
+  // permet d'ouvrir l'onglet et de voir l'état sans redemander à Google et
+  // Apple, qui coûtent quatre appels et plusieurs secondes.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${slug}/mobile/apps/${app.id}/verify`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setReport(data.report ?? null);
+        setCheckedAt(data.checkedAt ?? null);
+        publish(data.report ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, app.id, publish]);
 
   async function run() {
     setRunning(true);
@@ -1430,6 +1830,8 @@ function VerifySection({ slug, app }: { slug: string; app: MobileApp }) {
       if (!res.ok) throw new Error("verify_failed");
       const data = await res.json();
       setReport(data.report ?? null);
+      setCheckedAt(data.report?.checkedAt ?? null);
+      publish(data.report ?? null);
     } catch {
       setError(t("verify.failed"));
     } finally {
@@ -1453,20 +1855,31 @@ function VerifySection({ slug, app }: { slug: string; app: MobileApp }) {
 
   return (
     <div style={{ marginTop: 12 }}>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        disabled={running}
-        onClick={run}
-      >
-        <RiStethoscopeLine size={14} aria-hidden />
-        &nbsp;{running ? t("verify.running") : t("verify.action")}
-      </button>
+      {canEdit && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={running}
+          onClick={run}
+        >
+          <RiStethoscopeLine size={14} aria-hidden />
+          &nbsp;
+          {running
+            ? t("verify.running")
+            : report
+              ? t("verify.refresh")
+              : t("verify.action")}
+        </button>
+      )}
       <p className="help" style={{ marginTop: 6 }}>
         {t("verify.hint")}
       </p>
 
       {error && <p className="error-text">{error}</p>}
+
+      {!report && !running && (
+        <p className="help">{t("verify.never")}</p>
+      )}
 
       {report && (
         <div style={{ marginTop: 10 }}>
@@ -1502,7 +1915,7 @@ function VerifySection({ slug, app }: { slug: string; app: MobileApp }) {
           </ul>
           <p className="help" style={{ marginTop: 6 }}>
             {t("verify.checkedAt", {
-              date: new Date(report.checkedAt).toLocaleString(locale),
+              date: new Date(checkedAt ?? report.checkedAt).toLocaleString(locale),
             })}
           </p>
         </div>

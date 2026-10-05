@@ -9,9 +9,8 @@ import { getCurrentOrgSlug } from "@/lib/api";
 import { isPlatformAdmin, hasDevPrivileges } from "@/lib/roles";
 import { isSyncProvider } from "@/lib/sync/types";
 import PageHero from "@/components/PageHero";
-import CreateProjectForm from "./create-project";
-import CreateGroupForm from "./create-group";
-import ProjectsBoard, { type ProjectVM } from "./projects-board";
+import ProjectsHome from "./projects-home";
+import { type ProjectVM } from "./projects-board";
 import { getTranslations } from "next-intl/server";
 
 export default async function ProjectsPage() {
@@ -212,27 +211,12 @@ export default async function ProjectsPage() {
           }
         />
 
-        <div className="create-row">
-          <div className="create-col-main">
-            <CreateProjectForm members={settableMembers} />
-          </div>
-          <div className="create-col-aside">
-            <CreateGroupForm groups={groups} canEdit={canEdit} />
-          </div>
-        </div>
-
-        {projects.length === 0 && groups.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-title">{t("empty")}</div>
-            <div>{t("emptyHint")}</div>
-          </div>
-        ) : (
-          <ProjectsBoard
-            canEdit={canEdit}
-            groups={groups}
-            projects={projectVMs}
-          />
-        )}
+        <ProjectsHome
+          projects={projectVMs}
+          groups={groups}
+          members={settableMembers}
+          canEdit={canEdit}
+        />
       </div>
     </div>
   );

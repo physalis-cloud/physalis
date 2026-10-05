@@ -21,49 +21,57 @@ datasource db {
 }
 
 model User {
-  id                       String                    @id @default(cuid())
-  email                    String                    @unique
+  id                       String                      @id @default(cuid())
+  email                    String                      @unique
   /// Nullable depuis le chantier SSO : un compte fédéré (ssoProvider non null)
   /// n'a pas de mot de passe Physalis. Credentials refuse si password est null.
   password                 String?
   /// SSO — null pour un compte mot de passe classique ; "google"|"github"|…
   /// pour un compte fédéré (dénormalisé pour l'affichage UI sécurité).
   ssoProvider              String?
-  role                     Role                      @default(MEMBER)
+  role                     Role                        @default(MEMBER)
   /// 2FA TOTP — secret chiffré avec la même ENCRYPTION_KEY que les Secrets
   /// (3 colonnes : encryptedValue/iv/tag, base64). Désactivé par défaut.
-  twoFactorEnabled         Boolean                   @default(false)
+  twoFactorEnabled         Boolean                     @default(false)
   twoFactorSecret          String?
   twoFactorIv              String?
   twoFactorTag             String?
   /// 8 codes de secours bcrypt-hashés. Vidé à chaque rotation 2FA.
-  backupCodes              String[]                  @default([])
+  backupCodes              String[]                    @default([])
   /// §2.17 — dernier pas de temps TOTP consommé (RFC 6238 §5.2, anti-rejeu).
   /// Un code n'est accepté que si son timeStep > lastTotpTimeStep.
   lastTotpTimeStep         Int?
   projects                 ProjectMember[]
   organizations            OrgMember[]
-  invitationsSent          Invitation[]              @relation("invitedBy")
-  invitationsReceived      Invitation[]              @relation("invitationsReceived")
-  createdMachineTokens     MachineToken[]            @relation("machineTokenCreator")
+  invitationsSent          Invitation[]                @relation("invitedBy")
+  invitationsReceived      Invitation[]                @relation("invitationsReceived")
+  createdMachineTokens     MachineToken[]              @relation("machineTokenCreator")
   pluginTokens             PluginToken[]
+  cliSessions              CliSession[]
+  cliDeviceAuths           CliDeviceAuthorization[]
   vaultEntries             VaultEntry[]
   vaultCollections         VaultCollection[]
   teamVaultMemberships     TeamVaultMember[]
   userTokens               UserToken[]
-  orgTokensCreated         OrgToken[]                @relation("orgTokenCreator")
-  oneTimeShares            OneTimeShare[]            @relation("oneTimeShareCreator")
-  accessLogs               AccessLog[]               @relation("accessLogActor")
-  secretRequests           SecretRequest[]           @relation("secretRequestCreator")
-  secretVersions           SecretVersion[]           @relation("secretVersionCreator")
-  orgSecretVersions        OrgSecretVersion[]        @relation("orgSecretVersionCreator")
-  mobileCredentialVersions MobileCredentialVersion[] @relation("mobileCredentialVersionCreator")
-  apiKeysCreated           ApiKey[]                  @relation("apiKeyCreator")
-  createdAt                DateTime                  @default(now())
+  orgTokensCreated         OrgToken[]                  @relation("orgTokenCreator")
+  oneTimeShares            OneTimeShare[]              @relation("oneTimeShareCreator")
+  accessLogs               AccessLog[]                 @relation("accessLogActor")
+  secretRequests           SecretRequest[]             @relation("secretRequestCreator")
+  secretVersions           SecretVersion[]             @relation("secretVersionCreator")
+  orgSecretVersions        OrgSecretVersion[]          @relation("orgSecretVersionCreator")
+  mobileCredentialVersions MobileCredentialVersion[]   @relation("mobileCredentialVersionCreator")
+  apiKeysCreated           ApiKey[]                    @relation("apiKeyCreator")
+  notificationReads        NotificationRead[]
+  createdAt                DateTime                    @default(now())
   /// #5 — borne basse de validité des sessions : tout JWT émis avant cette
   /// date est rejeté par requireUser(). Posé au reset password / 2FA disable
   /// pour couper les sessions existantes. NULL = jamais invalidé (legacy).
   sessionsValidFrom        DateTime?
+  /// Nouveautés (C-0048, T-0267) : dernière fois que la personne a VU la
+  /// section Nouveautés. Les annonces publiées après sont comptées dans la
+  /// pastille verte. NULL = jamais → repli sur `createdAt` (un nouvel inscrit
+  /// ne reçoit pas tout l'historique d'un coup).
+  announcementsSeenAt      DateTime?
   /// Suppression de compte MEMBRE (self-service) — à ne pas confondre avec la
   /// suppression du compte CLIENT, qui vit sur `admin.clients`. Ici le tenant
   /// survit : seule cette ligne `User` et ses dépendances en Cascade (coffre
@@ -78,6 +86,10 @@ model User {
   dataExportedAt           DateTime?
   /// Identités externes liées (social login / SSO perso, Phase F).
   socialIdentities         UserSocialIdentity[]
+  /// Les autorisations OAuth d'automatisation que cette personne a accordées
+  /// ([T-0260]). ⚠️ `SetNull` côté credential : son départ ne doit pas effacer
+  /// l'autorisation qui fait tourner la production, il doit se VOIR.
+  automationOAuthConsents  AutomationOAuthCredential[] @relation("automationOAuthConsent")
 }
 
 /// Identité externe (social login / SSO perso) liée à un User. L'utilisateur lie
@@ -103,6 +115,57 @@ model UserSocialIdentity {
   @@index([userId])
 }
 
+/// Session CLI (`sv_cli_…`) — chantier C-0050, phase 2. Obtenue par flux
+/// d'appareil (`physalis login`) : liée à un utilisateur et à un appareil,
+/// 12 h, révocable depuis le compte. Hash SHA-256 seul, jamais le brut.
+/// `kind` en TEXTE (HUMAN | AI) : un enum tenant-only casse le deploy admin.
+/// `scope` : réservé à la session IA (projets/environnements autorisés).
+model CliSession {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       String    @default("HUMAN")
+  scope      Json?
+  deviceName String?
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Demande de connexion CLI en attente (flux d'appareil, sur le modèle de
+/// RFC 8628). La CLI garde le code appareil (haché ici), l'utilisateur voit le
+/// code court et l'approuve depuis le navigateur. La session n'est créée qu'au
+/// poll suivant l'approbation (status APPROVED → CONSUMED), pour que le jeton
+/// ne soit rendu qu'une fois. `status` en TEXTE : PENDING | APPROVED | DENIED
+/// | CONSUMED.
+model CliDeviceAuthorization {
+  id             String    @id @default(cuid())
+  deviceCodeHash String    @unique
+  userCode       String    @unique
+  kind           String    @default("HUMAN")
+  scope          Json?
+  deviceName     String?
+  userAgent      String?
+  ip             String?
+  status         String    @default("PENDING")
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interval       Int       @default(5)
+  lastPolledAt   DateTime?
+  decidedAt      DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
 model PluginToken {
   id         String    @id @default(cuid())
   tokenHash  String    @unique
@@ -119,38 +182,49 @@ model PluginToken {
 }
 
 model Organization {
-  id                     String                @id @default(cuid())
-  name                   String
-  slug                   String                @unique
-  members                OrgMember[]
-  projects               Project[]
-  projectGroups          ProjectGroup[]
-  invitations            Invitation[]
-  secrets                OrgSecret[]
-  servers                Server[]
-  ciConnections          CiConnection[]
-  teamVaultCollections   TeamVaultCollection[]
-  oneTimeShares          OneTimeShare[]
-  accessLogs             AccessLog[]
-  secretRequests         SecretRequest[]
-  orgTokens              OrgToken[]
-  rotationFeatureEnabled Boolean               @default(false)
+  id                         String                      @id @default(cuid())
+  name                       String
+  slug                       String                      @unique
+  members                    OrgMember[]
+  projects                   Project[]
+  projectGroups              ProjectGroup[]
+  invitations                Invitation[]
+  secrets                    OrgSecret[]
+  servers                    Server[]
+  ciConnections              CiConnection[]
+  n8nConnections             N8nConnection[]
+  automationOAuthCredentials AutomationOAuthCredential[]
+  teamVaultCollections       TeamVaultCollection[]
+  oneTimeShares              OneTimeShare[]
+  accessLogs                 AccessLog[]
+  secretRequests             SecretRequest[]
+  orgTokens                  OrgToken[]
+  notifications              Notification[]
+  notificationDestinations   NotificationDestination[]
+  rotationFeatureEnabled     Boolean                     @default(false)
+  /// Préavis d'échéance de rotation (C-0048, T-0262), en jours. 0 = désactivé.
+  /// Vise les entrées / secrets dont la rotation est MANUELLE (rappel).
+  rotationPreavisDays        Int                         @default(7)
+  /// Rappel d'ancienneté (T-0262) : entrée ou secret inchangé depuis N jours,
+  /// rotation réglée ou non. NULL = désactivé (défaut — opt-in de l'org, pour
+  /// ne pas déverser une notification par vieille entrée au déploiement).
+  rotationAncienneteDays     Int?
   // ─── Cloisonnement orgs (refonte pricing) ──────────────────────────
   /// org principale = compte général du tenant. Ses quotas sont DÉRIVÉS
   /// du plan (PLAN_QUOTAS + client.extra*) ; les champs maxX ci-dessous
   /// sont ignorés pour la primaire. Les orgs ajoutées portent leur
   /// propre bundle isolé (ADDON_ORG_BUNDLE).
-  isPrimary              Boolean               @default(false)
+  isPrimary                  Boolean                     @default(false)
   /// Quotas isolés des orgs AJOUTÉES (defaults = ADDON_ORG_BUNDLE).
-  maxServers             Int                   @default(2)
-  maxOidcProjects        Int                   @default(10)
+  maxServers                 Int                         @default(2)
+  maxOidcProjects            Int                         @default(10)
   /// Posé pour le futur — emails restent métrés au niveau client (non
   /// branché par org en Phase B).
-  maxEmailsPerMonth      Int                   @default(1000)
-  extraEmails            Int                   @default(0)
+  maxEmailsPerMonth          Int                         @default(1000)
+  extraEmails                Int                         @default(0)
   /// Sièges propres à l'org (confinés, isolés du pool global du plan).
-  maxSeats               Int                   @default(2)
-  createdAt              DateTime              @default(now())
+  maxSeats                   Int                         @default(2)
+  createdAt                  DateTime                    @default(now())
 }
 
 /// Configuration email Physalis Email au niveau CLIENT (tenant) — singleton par
@@ -486,51 +560,68 @@ model Invitation {
 }
 
 model Project {
-  id                   String                 @id @default(cuid())
-  name                 String
-  slug                 String                 @unique
-  organizationId       String
-  organization         Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  members              ProjectMember[]
-  environments         Environment[]
-  tokens               MachineToken[]
-  accessLogs           AccessLog[]
-  services             Service[]
-  appAccounts          AppAccount[]
-  policies             Policy[]
-  teamVaultCollections TeamVaultCollection[]
-  secretRequests       SecretRequest[]
-  apis                 Api[]
-  emailConfig          ProjectEmailConfig?
-  backupConfig         ProjectBackupConfig?
-  backupEntries        ProjectBackupEntry[]
-  backupRestores       ProjectBackupRestore[]
-  docs                 ProjectDoc[]
-  mobileApps           MobileApp[]
+  id                         String                      @id @default(cuid())
+  name                       String
+  slug                       String                      @unique
+  organizationId             String
+  organization               Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members                    ProjectMember[]
+  environments               Environment[]
+  automationOAuthCredentials AutomationOAuthCredential[]
+  tokens                     MachineToken[]
+  accessLogs                 AccessLog[]
+  services                   Service[]
+  appAccounts                AppAccount[]
+  policies                   Policy[]
+  teamVaultCollections       TeamVaultCollection[]
+  secretRequests             SecretRequest[]
+  apis                       Api[]
+  emailConfig                ProjectEmailConfig?
+  backupConfig               ProjectBackupConfig?
+  backupEntries              ProjectBackupEntry[]
+  backupRestores             ProjectBackupRestore[]
+  docs                       ProjectDoc[]
+  mobileApps                 MobileApp[]
+  notifications              Notification[]
+  notificationDestinations   NotificationDestination[]
   /// Groupe d'organisation (kanban projets). Null = « Sans groupe ».
-  groupId              String?
-  group                ProjectGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  groupId                    String?
+  group                      ProjectGroup?               @relation(fields: [groupId], references: [id], onDelete: SetNull)
   /// Ordre du projet à l'intérieur de son groupe (ou des non-groupés). Posé
   /// explicitement par le drag-and-drop ; ties cassés par createdAt.
-  position             Int                    @default(0)
-  githubRepo           String?
-  githubWorkflow       String?
+  position                   Int                         @default(0)
+  githubRepo                 String?
+  githubWorkflow             String?
   /// Connexion CI/CD org-level (provider + issuer + tokens). Cf. modèle public.
-  ciConnectionId       String?
-  ciConnection         CiConnection?          @relation(fields: [ciConnectionId], references: [id], onDelete: SetNull)
+  ciConnectionId             String?
+  ciConnection               CiConnection?               @relation(fields: [ciConnectionId], references: [id], onDelete: SetNull)
   /// Repo natif quand le provider ≠ github (group/project GitLab ou UUID Bitbucket).
-  ciRepo               String?
+  ciRepo                     String?
   /// Dernier fetch des docs depuis le repo (null = jamais tenté). Distingue
   /// « aucun fichier de doc » de « jamais récupéré ».
-  docsFetchedAt        DateTime?
-  rotationPaused       Boolean                @default(false)
+  docsFetchedAt              DateTime?
+  rotationPaused             Boolean                     @default(false)
   /// Onglet « Mobile » activé pour CE projet — DÉFAUT OFF. Deux verrous
   /// distincts : la feature de plan `mobile_deploy` (payante, refusée en FREE)
   /// ouvre la capacité au tenant, ce drapeau la déclenche projet par projet
   /// depuis la modale Paramètres. Un projet sans publication mobile ne porte
   /// donc pas l'onglet.
-  mobileEnabled        Boolean                @default(false)
-  createdAt            DateTime               @default(now())
+  mobileEnabled              Boolean                     @default(false)
+  /// Premier rapport de déploiement `succeeded` reçu (C-0051). Posé une seule
+  /// fois par /api/deploy/report, jamais remis à zéro : c'est le signal qui
+  /// ferme l'onglet « Installation ». Ne dépend PAS de l'audit, dont la purge
+  /// par rétention ferait réapparaître l'onglet sur un projet en prod.
+  setupCompletedAt           DateTime?
+  /// Choix explicite de l'utilisateur pour l'onglet « Installation » (C-0051),
+  /// réglé dans la modale Paramètres : null = automatique (visible tant que
+  /// setupCompletedAt est null), "shown" = toujours, "hidden" = jamais.
+  setupGuide                 String?
+  /// Projet créé AVANT la mise en service du guide (arbitrage A2). Posé par le
+  /// backfill de la migration, retiré par la vérification (lib/project-verify.ts),
+  /// jamais remis à true par l'application. Il change le contenu de l'onglet
+  /// (message d'entrée + vérification), pas sa visibilité.
+  setupLegacy                Boolean                     @default(false)
+  createdAt                  DateTime                    @default(now())
 
   @@index([organizationId])
   @@index([ciConnectionId])
@@ -551,6 +642,357 @@ model ProjectGroup {
   createdAt      DateTime     @default(now())
 
   @@index([organizationId])
+}
+
+/// Interrupteur du service d'automatisation conversationnelle au niveau CLIENT
+/// (tenant) — singleton par schéma, comme ClientEmailConfig et
+/// ClientBackupConfig. `enabled` commande l'onglet « Automatisations » du
+/// header : un service qu'on n'a pas activé n'encombre pas la navigation.
+/// Cf. chantier C-0046, phase A.
+model ClientAutomationConfig {
+  id              String   @id @default(cuid())
+  tenantSlug      String   @unique
+  enabled         Boolean  @default(false)
+  /// L'entrée du coffre d'ÉQUIPE qui porte la clé du modèle (BYOK, §7).
+  ///
+  /// ⚠️ **On stocke le POINTEUR, jamais la clé.** Le produit qui vend le
+  /// stockage de secrets se sert de son propre stockage : Physalis n'acquiert
+  /// aucune copie à protéger, à faire tourner, ni à inscrire au registre de
+  /// re-keying.
+  ///
+  /// ⚠️ Pas de clé étrangère, délibérément — comme `N8nCredentialLink.entryId`.
+  /// Une cascade effacerait le pointeur au moment précis où il faut VOIR que
+  /// l'entrée a disparu : « aucune clé désignée » et « la clé désignée n'existe
+  /// plus » appellent deux messages différents.
+  modelKeyEntryId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Instance N8N d'un client, au niveau organisation. Physalis n'héberge PAS
+/// N8N : il parle à l'API d'une instance que le client fait tourner lui-même
+/// (décision fondatrice du chantier C-0046 — licence, isolation, coût).
+///
+/// ⚠️ Le secret porté par `N8nConnectionSecret` est une clé API N8N, donc le
+/// CONTRÔLE TOTAL de l'instance du client. Même classe de pouvoir que le
+/// `redeploy_token` de `CiConnection`, dont ce modèle reprend la forme.
+model N8nConnection {
+  id                     String                @id @default(cuid())
+  organizationId         String
+  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// L'environnement qui porte cette instance, ou `null` pour une instance de
+  /// l'organisation entière (T-0258).
+  ///
+  /// ⚠️ **L'ENVIRONNEMENT et non le projet**, parce que c'est là que vit la
+  /// réalité : `Environment.dockerCompose` est le fichier où un service `n8n`
+  /// se détecte, et un projet avec `production` et `staging` peut donc en faire
+  /// tourner deux. Une colonne `projectId` aurait forcé à n'en connecter qu'un,
+  /// et à choisir lequel sans le dire.
+  ///
+  /// ⚠️ **Ce champ est une BARRIÈRE D'ACCÈS, pas un rangement.** La clé API
+  /// d'une connexion donne le contrôle total de l'instance en face : une
+  /// connexion d'environnement ne doit être ni vue ni pilotée par un membre de
+  /// l'organisation qui n'est pas membre du PROJET de cet environnement. Le
+  /// filtre par `organizationId`, seul, ne suffit donc plus — cf.
+  /// `porteeConnexionWhere` (lib/automation/portee.ts), qui passe par
+  /// `accessibleProjectsWhere` (lequel porte la règle du `ProjectMember.hidden`).
+  ///
+  /// `onDelete: Cascade` : un environnement supprimé emporte sa connexion.
+  /// Laisser une connexion orpheline la ferait retomber, `environmentId` à
+  /// null, dans le périmètre de TOUTE l'organisation — une suppression qui
+  /// ÉLARGIT un accès.
+  environmentId          String?
+  environment            Environment?          @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  name                   String
+  oauthPoses             AutomationOAuthPose[]
+  /// Sans slash final — la construction des URL d'API le suppose.
+  baseUrl                String
+  /// "direct" (Physalis appelle l'instance) | "pull" (l'instance vient chercher).
+  mode                   String                @default("direct")
+  /// Version relevée à la connexion. Null = non déterminée : la palette ne peut
+  /// alors pas viser un `typeVersion` sûr.
+  n8nVersion             String?
+  /// Résultat de la sonde de capacités (§4 du plan) : ce que l'API sait faire,
+  /// constaté et non supposé. Null tant qu'aucune sonde n'a tourné.
+  capabilities           Json?
+  /// La collection d'ÉQUIPE où vivent les secrets d'automatisation de cette
+  /// connexion (T-0249, T-0252). Null = pas encore choisie ; l'écran propose
+  /// alors « automatisation » et la crée à la demande.
+  ///
+  /// ⚠️ On stocke l'ID, pas le slug « automatisation ». Un client qui renomme
+  /// son dossier perdrait sinon tous ses liens en silence — et « en silence »
+  /// est le mode de panne que ce chantier passe son temps à fermer.
+  credentialCollectionId String?
+  /// Le modèle d'IA imposé par défaut aux gabarits de CETTE instance.
+  ///
+  /// ⚠️ **Deux colonnes et non un JSON** : le couple décide du TYPE de nœud posé
+  /// (`lmChatAnthropic` vs `lmChatOpenAi`) et de la credential attendue. Un
+  /// `Json?` aurait rendu la moitié manquante indétectable sans lire la valeur —
+  /// alors qu'ici « un fournisseur sans modèle » se voit dans le schéma.
+  ///
+  /// ⚠️ **Les deux sont posées ENSEMBLE ou pas du tout.** Un fournisseur sans
+  /// son modèle imposerait un défaut inapplicable : le formulaire cocherait
+  /// « utilise le modèle par défaut » et pousserait un nœud sans modèle, que N8N
+  /// crée sans broncher puis refuse d'exécuter. La route les valide en couple
+  /// (`modeleConnu`), et l'écran ne propose jamais l'un sans l'autre.
+  ///
+  /// Null tous les deux = pas de défaut : chaque gabarit fait choisir, comme
+  /// avant.
+  defaultModelProvider   String?
+  defaultModelId         String?
+  lastSeenAt             DateTime?
+  secrets                N8nConnectionSecret[]
+  workflows              GeneratedWorkflow[]
+  credentialLinks        N8nCredentialLink[]
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  /// ⚠️ **Deux NULL sont DISTINCTS en PostgreSQL.** Cette contrainte à trois
+  /// colonnes ne contraint donc RIEN pour les connexions d'organisation
+  /// (`environmentId IS NULL`) : deux « n8n de prod » y coexisteraient sans que
+  /// rien ne proteste. L'unicité de ce cas-là est tenue par un index unique
+  /// PARTIEL, posé à la main dans la migration `..._automation_portee_environnement`
+  /// — Prisma ne sait pas le déclarer. Retirer l'un des deux ne fait échouer
+  /// aucun test de schéma ; c'est le doublon qui le dira, en production.
+  @@unique([organizationId, environmentId, name])
+  @@index([organizationId])
+  @@index([environmentId])
+}
+
+/// Le lien entre une entrée du coffre d'ÉQUIPE et la credential N8N qu'elle
+/// alimente (C-0046, T-0252 — régime B).
+///
+/// ⚠️ **Ce modèle acte l'inversion du §6.4** : pour ces credentials-là, le secret
+/// EST recopié dans N8N, et Physalis l'y maintient à jour. L'arbitrage tient
+/// parce que le client l'y mettait déjà à la main ; mais il doit rester VISIBLE,
+/// et c'est cette table qui permet à l'écran de distinguer les deux régimes.
+///
+/// ⚠️ **`entryId` n'a délibérément PAS de clé étrangère.** Une cascade
+/// effacerait la ligne quand l'entrée du coffre disparaît — c'est-à-dire
+/// exactement dans le cas qu'il faut VOIR : la credential, elle, vit toujours
+/// dans N8N et alimente peut-être un workflow actif. On garde le lien orphelin
+/// et `entryName` pour pouvoir le nommer. L'état de référence est l'instance,
+/// pas cette table (§5.4).
+model N8nCredentialLink {
+  id              String        @id @default(cuid())
+  connectionId    String
+  connection      N8nConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  /// L'entrée du coffre d'équipe qui fait foi. Pas de FK — cf. ci-dessus.
+  entryId         String
+  /// Nom de l'entrée au dernier passage, pour rester lisible si elle disparaît.
+  entryName       String
+  /// Le type N8N (`imap`, `smtp`…). Vit ICI et pas sur l'entrée : une entrée du
+  /// coffre n'a pas à savoir que N8N existe.
+  credentialType  String
+  /// L'id rendu par N8N — la clé de vérité côté instance. Stable d'une mise à
+  /// jour à l'autre, ce qui est TOUT l'intérêt de `PATCH /credentials/{id}` :
+  /// les workflows qui le référencent survivent à une rotation.
+  n8nCredentialId String
+  /// Quand Physalis a poussé pour la dernière fois. Comparé à
+  /// `TeamVaultEntry.updatedAt` pour dire « à jour » ou « en retard ».
+  lastPushedAt    DateTime
+  /// Dernier `POST /credentials/{id}/test`. `null` = jamais testée — ce qui
+  /// n'est pas « en échec », et l'écran doit les distinguer.
+  lastTestAt      DateTime?
+  lastTestOk      Boolean?
+  lastTestError   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  /// Une entrée alimente au plus UNE credential par connexion : sans ça, deux
+  /// poussées créeraient deux credentials et la rotation n'en mettrait qu'une
+  /// à jour, en silence.
+  @@unique([connectionId, entryId])
+  @@index([connectionId])
+}
+
+/// Workflow poussé par Physalis sur l'instance du client (C-0046, phase B).
+///
+/// ⚠️ L'état de référence est **l'instance**, pas cette table : le client peut
+/// modifier ou supprimer un workflow à la main. La réconciliation compare et
+/// marque `orphan` ; Physalis ne réécrit jamais en silence (§5.4).
+model GeneratedWorkflow {
+  id               String        @id @default(cuid())
+  connectionId     String
+  connection       N8nConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  /// L'id rendu par N8N — la clé de vérité côté instance.
+  n8nWorkflowId    String
+  name             String
+  /// Le gabarit qui l'a produit, ou null pour une génération libre (phase D).
+  /// ⚠️ C'est la matière du **taux de gabarit**, métrique économique du
+  /// chantier (§7) : le coût du produit est la moyenne pondérée par ce taux.
+  gabarit          String?
+  /// Les paramètres saisis pour instancier le gabarit (T-0254). Null pour une
+  /// génération libre, un workflow adopté, ou tout ce qui a été poussé AVANT
+  /// cette colonne.
+  ///
+  /// ⚠️ Sans eux, on ne peut ni détecter qu'un gabarit a changé, ni le
+  /// réappliquer — et les rétro-déduire du JSON serait la devinette que ce
+  /// chantier refuse partout ailleurs.
+  ///
+  /// ⚠️ Ce ne sont PAS des secrets : des références (projet, environnement,
+  /// tag, collection, cadence), déjà présentes dans `pushedJson`. Si un gabarit
+  /// venait un jour à prendre une VALEUR en paramètre, c'est ici qu'il faudrait
+  /// s'arrêter pour y penser.
+  gabaritParams    Json?
+  /// Vrai si Physalis a ADOPTÉ ce workflow au lieu de le produire (T-0250).
+  ///
+  /// ⚠️ `gabarit: null` ne suffit pas à distinguer les origines : il vaut null
+  /// pour la génération libre AUSSI. Sans ce booléen, un workflow adopté — qui
+  /// n'a rien coûté en modèle — creuserait le taux de gabarit (§7) comme s'il
+  /// avait été généré, et fausserait la métrique économique du chantier.
+  adopted          Boolean       @default(false)
+  /// Le JSON RÉELLEMENT poussé, pour diff, relecture et re-génération.
+  /// (Le plan §5.1 l'appelait `palette` ; renommé parce que la palette est la
+  /// liste blanche de nœuds, pas le workflow.)
+  pushedJson       Json
+  /// draft | validated | dry_run_ok | active | broken | orphan
+  state            String        @default("draft")
+  /// Conversation d'origine (phase C). Null tant qu'il n'y a pas de chat.
+  conversationId   String?
+  lastExecutionAt  DateTime?
+  lastErrorSummary String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([connectionId, n8nWorkflowId])
+  @@index([connectionId])
+}
+
+/// Secret chiffré d'une N8nConnection, typé par `kind` (api_key).
+/// Calque exact de CiConnectionSecret.
+model N8nConnectionSecret {
+  id             String        @id @default(cuid())
+  connectionId   String
+  connection     N8nConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  kind           String
+  encryptedValue String
+  iv             String
+  tag            String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([connectionId, kind])
+}
+
+/// Une autorisation OAuth détenue par Physalis pour le compte du client, et
+/// posée sur les N instances de sa portée — la custody de [T-0260].
+///
+/// ⚠️ **L'application OAuth reste celle du CLIENT (BYO).** Physalis ne porte
+/// aucune vérification : `clientId` et le `client_secret` chiffré viennent du
+/// client, exactement comme `SsoConfig` le fait déjà pour le SSO Enterprise.
+///
+/// ⚠️ **La portée est le PROJET, pas l'environnement** — et c'est un cran
+/// au-dessus de `N8nConnection` à dessein. Toute la raison d'être de cet objet
+/// est qu'UNE autorisation serve les DEUX instances d'un projet (`production` et
+/// `staging`) ; la porter par environnement obligerait à consentir deux fois,
+/// c'est-à-dire à ne rien résoudre. `null` = toute l'organisation.
+///
+/// ⚠️ **`projectId` est une BARRIÈRE D'ACCÈS, pas un rangement**, pour la même
+/// raison que `N8nConnection.environmentId` : lire par
+/// `porteeCredentialOAuthWhere` (lib/automation/portee.ts), jamais par un filtre
+/// maison — c'est lui qui passe par `accessibleProjectsWhere`, lequel porte la
+/// règle du `ProjectMember.hidden`.
+model AutomationOAuthCredential {
+  id               String                  @id @default(cuid())
+  organizationId   String
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId        String?
+  project          Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name             String
+  /// Le type de credential N8N visé (`gmailOAuth2`, `googleSheetsOAuth2Api`…).
+  /// ⚠️ Doit être un type OAuth du catalogue : c'est lui qui décide des points
+  /// d'autorisation et des portées demandées.
+  credentialType   String
+  /// L'identifiant public de l'application OAuth du client. En clair, comme
+  /// `SsoConfig.oidcClientId` — ce n'est pas un secret, seul l'est le `secret`.
+  clientId         String
+  /// ⚠️ **QUI A CONSENTI, et c'est indispensable, pas décoratif.** Un jeton OAuth
+  /// porte l'identité d'UNE personne : le jour où elle part, ou révoque l'accès
+  /// depuis son compte Google, la connexion meurt pour toute l'équipe. Sans ce
+  /// champ, personne ne peut prévoir ni diagnostiquer cette panne.
+  ///
+  /// `onDelete: SetNull` et pas `Cascade` : le départ de la personne ne doit PAS
+  /// effacer l'autorisation qui fait tourner la production — il doit se voir.
+  consentedById    String?
+  consentedBy      User?                   @relation("automationOAuthConsent", fields: [consentedById], references: [id], onDelete: SetNull)
+  /// Le compte TIERS qui a consenti (l'adresse Google), pour l'afficher tel quel.
+  /// Distinct de `consentedById` : la personne peut avoir autorisé un compte de
+  /// service ou une adresse partagée, et c'est celle-là qu'il faut révoquer.
+  consentedSubject String?
+  consentedAt      DateTime?
+  secrets          AutomationOAuthSecret[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  poses            AutomationOAuthPose[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([projectId])
+}
+
+/// Le secret chiffré d'une autorisation OAuth, typé par `kind`
+/// (`client_secret` | `refresh_token` | `access_token`) — calque exact de
+/// `N8nConnectionSecret`.
+///
+/// ⚠️ **Aucun `@map` sur les colonnes chiffrées, et c'est une règle, pas un
+/// hasard.** Le garde-fou `tests/lib/rekey-registry.test.ts` compare le registre
+/// de rotation aux CHAMPS Prisma, pas aux COLONNES SQL : c'est précisément par
+/// là que `admin.sso_configs` — seul modèle à `@map` snake_case — est passé
+/// entre les mailles, au point que la rotation du 2026-08-01 l'a sauté en
+/// annonçant « 0 erreur ». Sans `@map`, le garde-fou ne peut plus être contourné.
+///
+/// ⚠️ Ce modèle DOIT figurer au registre de `scripts/rekey-encryption.mjs`. Un
+/// triplet absent n'échoue pas : il est ignoré en silence, et ne se découvre
+/// qu'à la destruction de l'ancienne clé, quand il est trop tard.
+/// La POSE d'une autorisation OAuth sur une instance N8N ([T-0260]).
+///
+/// ⚠️ **Cette ligne EST la règle d'écriture unique.** Mesuré en [T-0259] :
+/// repousser une copie datée d'un jeton détruit un jeton tourné, et l'API
+/// publique de N8N ne rend jamais `oauthTokenData` en lecture — on ne peut donc
+/// même pas comparer avant d'écrire. La seule discipline tenable est « on écrit
+/// une fois, puis plus jamais », et c'est l'existence de cette ligne qui le fait
+/// respecter.
+///
+/// ⚠️ La SEULE réécriture admise est celle qui suit un nouveau consentement :
+/// `AutomationOAuthCredential.consentedAt > posedAt`. C'est un signal externe
+/// fiable — le client a refait le tour de l'écran Google — par opposition à une
+/// horloge, qui repousserait une copie périmée.
+///
+/// ⚠️ **Distinct de `N8nCredentialLink`, et pas par paresse.** Celui-là relie une
+/// ENTRÉE DU COFFRE à une credential (régime B, maintenue à jour) ; celui-ci
+/// relie une AUTORISATION à une credential, écrite une fois. Les fondre ferait
+/// promettre à l'écran un « maintien à jour » qui, sur de l'OAuth, casse la
+/// connexion.
+model AutomationOAuthPose {
+  id              String                    @id @default(cuid())
+  credentialId    String
+  credential      AutomationOAuthCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  connectionId    String
+  connection      N8nConnection             @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  /// L'id rendu par N8N — la clé de vérité côté instance, celle que les
+  /// workflows référencent.
+  n8nCredentialId String
+  posedAt         DateTime
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@unique([credentialId, connectionId])
+  @@index([connectionId])
+}
+
+model AutomationOAuthSecret {
+  id             String                    @id @default(cuid())
+  credentialId   String
+  credential     AutomationOAuthCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  kind           String
+  encryptedValue String
+  iv             String
+  tag            String
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@unique([credentialId, kind])
 }
 
 /// Connexion CI/CD au niveau organisation (cf. modèle public schema.prisma).
@@ -772,26 +1214,82 @@ model AppAccount {
 }
 
 model Environment {
-  id            String                  @id @default(cuid())
-  name          String
-  projectId     String
-  project       Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  url           String?
-  dockerCompose String?
-  serverId      String?
-  server        Server?                 @relation(fields: [serverId], references: [id], onDelete: SetNull)
-  deployPath    String?
-  secrets       Secret[]
-  tokens        MachineToken[]
-  policies      Policy[]
-  liveApis      Api[]                   @relation("apiLiveEnv")
-  testApis      Api[]                   @relation("apiTestEnv")
-  syncTargets   EnvironmentSyncTarget[]
+  id             String                  @id @default(cuid())
+  name           String
+  projectId      String
+  project        Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url            String?
+  dockerCompose  String?
+  serverId       String?
+  server         Server?                 @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  deployPath     String?
+  /// Ordre d'affichage dans le projet (glisser-déposer des paramètres).
+  /// À égalité (0 par défaut), départage par nom.
+  position       Int                     @default(0)
+  secrets        Secret[]
+  tokens         MachineToken[]
+  policies       Policy[]
+  liveApis       Api[]                   @relation("apiLiveEnv")
+  testApis       Api[]                   @relation("apiTestEnv")
+  syncTargets    EnvironmentSyncTarget[]
   /// Comptes applicatifs dont l'URL pointe vers cet environnement (frontend).
-  appAccounts   AppAccount[]
+  appAccounts    AppAccount[]
+  /// Instances N8N portées par CET environnement (T-0258). Cf. l'avertissement
+  /// sur `N8nConnection.environmentId` : c'est une barrière d'accès.
+  n8nConnections N8nConnection[]
+  deployments    Deployment[]
 
   @@unique([projectId, name])
   @@index([serverId])
+}
+
+/// Suivi des déploiements serveur (C-0051) — calque du registre mobile
+/// (`MobileRelease`). Cf. documentation/plans/guide-installation-projet.md §3.
+///
+/// Deux moments d'écriture, à ne JAMAIS confondre :
+///   1. `/api/deploy` ouvre la ligne quand il SERT le bundle (constaté) ;
+///   2. `/api/deploy/report` y pose l'issue que le pipeline DÉCLARE.
+/// Les deux se rejoignent sur l'identité du run tirée du jeton OIDC signé. Une
+/// ligne sans bundle servi (`bundleServedCount = 0`) est un déploiement que
+/// Physalis n'a pas orchestré : c'est une information de sécurité, pas un trou.
+///
+/// Les paliers d'attente (long / anormal / expiré) se CALCULENT depuis
+/// `authorizedAt` : ils ne sont jamais écrits. Rétention : les 25 derniers par
+/// environnement, purgés à l'écriture (lib/deployment.ts).
+model Deployment {
+  id                String      @id @default(cuid())
+  projectId         String
+  environmentId     String
+  environment       Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  /// admin.policies.id (SaaS) ou Policy.id (self-host). Sans FK : autre schéma.
+  policyId          String?
+  /// github | gitlab | bitbucket
+  provider          String
+  repo              String
+  /// matchKey OIDC : fichier workflow (github) ou environment CI (gitlab/bitbucket).
+  workflow          String
+  branch            String
+  runId             String
+  /// Texte : Bitbucket distingue ses relances par un UUID.
+  runAttempt        String      @default("1")
+  sha               String?
+  /// requested (bundle servi, pas encore de rapport) | succeeded | failed
+  status            String      @default("requested")
+  /// D'où vient l'issue : "reported" (le pipeline l'a DÉCLARÉE via
+  /// /api/deploy/report) | "platform" (Physalis l'a CONSTATÉE en lisant le run
+  /// chez GitHub/GitLab/Bitbucket). null tant que la ligne est en attente.
+  statusSource      String?
+  /// Nombre de bundles servis à ce run (un `deploy.yml` en prend deux : build
+  /// puis deploy). 0 = rapport reçu sans bundle servi → non corrélé.
+  bundleServedCount Int         @default(0)
+  authorizedAt      DateTime?
+  reportedAt        DateTime?
+  detail            String?
+  createdAt         DateTime    @default(now())
+
+  @@unique([environmentId, provider, runId, runAttempt])
+  @@index([projectId, createdAt(sort: Desc)])
+  @@index([environmentId, createdAt(sort: Desc)])
 }
 
 model Secret {
@@ -877,44 +1375,49 @@ model SecretVersion {
 /// table via un DO block hand-écrit (motif SecretRequest), pas via un diff
 /// `prisma migrate dev` sur schema.prisma.
 model MobileApp {
-  id           String             @id @default(cuid())
-  projectId    String
-  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id               String             @id @default(cuid())
+  projectId        String
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// "android" | "ios". String, pas enum PG (cf. Policy.provider — un ALTER
   /// TYPE sur un enum tenant-only plante le déploiement admin, mémoire
   /// orgrole-enum-tenant-only).
-  platform     String
+  platform         String
   /// applicationId Android (com.exemple.app) ou bundleId iOS.
-  bundleId     String
-  displayName  String
+  bundleId         String
+  displayName      String
   /// Team ID Apple / identifiant développeur Play. Informatif + préremplissage.
-  vendorTeamId String?
+  vendorTeamId     String?
   /// Étiquette de regroupement cosmétique ("Production"/"Staging"/"Dev"),
   /// orthogonale à `platform` — décidé §10.5 du plan (2026-08-14). Purement
   /// UI, non contrainte : le repliage visuel par groupe est différé.
-  group        String?
+  group            String?
   /// Version marketing servie au CI (CFBundleShortVersionString / versionName),
   /// ex. "1.4". Fixée à la main : bumper une version est une décision humaine.
-  versionName  String?
+  versionName      String?
   /// Dernier numéro de build SERVI (CFBundleVersion / versionCode). À
   /// initialiser au dernier numéro déjà publié sur le store ; chaque
   /// POST /api/deploy/mobile sert `buildNumber + 1` et le persiste. Compteur
   /// LOCAL (repli §4.5 du plan) : la lecture autoritative du magasin est la
   /// Phase 5. Des trous après un échec de build sont sans conséquence (un
   /// numéro de build doit croître, pas être contigu).
-  buildNumber  Int                @default(0)
+  buildNumber      Int                @default(0)
   /// Coupe-circuit de publication PAR APP (donc par plateforme). true =>
   /// /api/deploy/mobile répond 403 « publications en pause » à un pipeline
   /// pourtant autorisé — gel manuel depuis la console, audité, sans toucher au
   /// CI. Même motif que Secret.rotationPaused / Project.rotationPaused. La
   /// FRONTIÈRE (policy) reste intacte : c'est un veto ponctuel, pas une
   /// révocation d'accès.
-  deployPaused Boolean            @default(false)
-  credentials  MobileCredential[]
-  releases     MobileRelease[]
-  policies     Policy[]
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  deployPaused     Boolean            @default(false)
+  /// Dernier rapport de « Vérifier le matériel », tel quel. Gardé pour être
+  /// affiché à l'ouverture de l'onglet sans redemander aux magasins — le
+  /// rapport coûte quatre appels sortants. Null = jamais vérifié.
+  lastVerifyReport Json?
+  lastVerifiedAt   DateTime?
+  credentials      MobileCredential[]
+  releases         MobileRelease[]
+  policies         Policy[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   @@unique([projectId, platform, bundleId])
   @@index([projectId])
@@ -1186,6 +1689,12 @@ model VaultEntry {
   /// Nombre d'items d'une LIST, EN CLAIR : permet d'afficher « N secrets »
   /// dans la liste sans déchiffrer. NULL hors LIST.
   itemCount           Int?
+  /// Clé SSH (type SSH_KEY, C-0050) — clé publique au format OpenSSH et
+  /// empreinte SHA256, EN CLAIR (non secrètes, affichées sans déchiffrer).
+  /// La clé privée PKCS#8 est dans `encryptedData` et ne sort jamais vers le
+  /// navigateur. NULL hors SSH_KEY.
+  sshPublicKey        String?
+  sshFingerprint      String?
   tags                String[]         @default([])
   favorite            Boolean          @default(false)
   createdAt           DateTime         @default(now())
@@ -1222,6 +1731,7 @@ model TeamVaultCollection {
   name           String
   slug           String
   entries        TeamVaultEntry[]
+  notifications  Notification[]
   members        TeamVaultMember[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -1236,6 +1746,12 @@ model TeamVaultEntry {
   id                  String              @id @default(cuid())
   collectionId        String
   collection          TeamVaultCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  /// Forme de l'entrée : LOGIN | SECRET | LIST | NOTE (cf.
+  /// lib/vault-entry-types.ts). Miroir de `VaultEntry.type`, et TEXTE pour la
+  /// même raison : un enum tenant-only absent du schéma `public` casse le
+  /// deploy admin, et une 5ᵉ forme demanderait un ALTER TYPE … ADD VALUE avec
+  /// le même piège (C-0047).
+  type                String              @default("LOGIN")
   name                String
   url                 String?
   username            String?
@@ -1245,6 +1761,16 @@ model TeamVaultEntry {
   encryptedTotpSecret String?
   totpSecretIv        String?
   totpSecretTag       String?
+  /// Charge utile chiffrée des types LIST et NOTE (JSON AES-256-GCM :
+  /// {items:[{label,value}]} ou {text}). Libellés compris — ils en disent plus
+  /// long qu'une URL. NULL pour LOGIN et SECRET, qui n'utilisent que les
+  /// colonnes ci-dessus.
+  encryptedData       String?
+  dataIv              String?
+  dataTag             String?
+  /// Nombre d'items d'une LIST, EN CLAIR : permet d'afficher « N secrets »
+  /// sans déchiffrer. NULL hors LIST.
+  itemCount           Int?
   tags                String[]            @default([])
   favorite            Boolean             @default(false)
   createdAt           DateTime            @default(now())
@@ -1258,6 +1784,9 @@ model TeamVaultEntry {
   rotationNextAt       DateTime?
   rotationLastStatus   String?
   rotationHistory      Json?
+
+  /// Destinations d'alerte dont le webhook pointe sur cette entrée (SetNull).
+  notificationDestinations NotificationDestination[]
 
   @@index([collectionId])
   @@index([rotationNextAt])
@@ -1389,9 +1918,49 @@ enum AccessAction {
   PROJECT_GROUP_DELETE
   DEPLOY_AUTHORIZED
   DEPLOY_DENIED
+  /// Suivi des déploiements (C-0051) : le CI rapporte l'issue d'un déploiement.
+  DEPLOY_REPORTED
   /// Déploiement mobile — Phase 2 (bundle de signature servi au CI).
   MOBILE_DEPLOY_AUTHORIZED
   MOBILE_DEPLOY_DENIED
+  /// Automatisation conversationnelle (C-0046). La clé API d'une connexion N8N
+  /// donne le contrôle total de l'instance du client : sa pose et sa dépose se
+  /// tracent, comme le redeploy_token d'une CiConnection.
+  AUTOMATION_ENABLED
+  AUTOMATION_DISABLED
+  AUTOMATION_MODEL_KEY_SET
+  N8N_CONNECTION_CREATE
+  N8N_CONNECTION_DELETE
+  N8N_CONNECTION_PROBE
+  /// Phase B : pousser un workflow ÉCRIT sur l'instance du client, l'activer le
+  /// fait tourner. Deux gestes à tracer.
+  N8N_WORKFLOW_PUSH
+  N8N_WORKFLOW_ACTIVATE
+  N8N_WORKFLOW_DEACTIVATE
+  N8N_WORKFLOW_DELETE
+  N8N_WORKFLOW_ESSAI
+  /// T-0250 : prendre la main sur un workflow que Physalis n'a PAS poussé.
+  /// À tracer autant qu'une poussée — c'est une prise de responsabilité sur un
+  /// objet qui tournait déjà chez le client.
+  N8N_WORKFLOW_ADOPT
+  /// T-0251 : remplacer le contenu d'un workflow qui tourne déjà. Une édition
+  /// peut faire basculer un workflow de lecture en écriture, et un workflow
+  /// ACTIF repart modifié aussitôt : l'audit doit porter l'effet et la
+  /// confirmation, pas seulement le fait qu'on a touché à quelque chose.
+  N8N_WORKFLOW_EDIT
+  /// Régime B (T-0252) : Physalis ÉCRIT une credential dans N8N depuis le
+  /// coffre d'équipe. ⚠️ Cette action trace une RECOPIE de secret hors du
+  /// vault — c'est la trace la plus sensible du chantier, et la métadonnée ne
+  /// porte jamais la valeur, seulement le type et l'entrée d'origine.
+  N8N_CREDENTIAL_WRITE
+  N8N_CREDENTIAL_TEST
+  N8N_CREDENTIAL_UNLINK
+  AUTOMATION_OAUTH_CREATE
+  AUTOMATION_OAUTH_CONSENT_START
+  AUTOMATION_OAUTH_CONSENT_OK
+  AUTOMATION_OAUTH_POSE
+  AUTOMATION_OAUTH_UPDATE
+  AUTOMATION_OAUTH_DELETE
   PLUGIN_AUTH_SUCCESS
   PLUGIN_AUTH_FAILURE
   PLUGIN_CREDENTIALS_FETCH
@@ -1495,6 +2064,20 @@ enum AccessAction {
   /// certificat EN SERVICE : c'est la trace à chercher quand une publication
   /// casse sans raison apparente.
   MOBILE_CERTIFICATE_REVOKED
+  /// Reprise d'état des livraisons depuis Google Play / App Store Connect
+  /// (Phase 5) : `statusSource` passe de "reported" (déclaratif) à "store".
+  MOBILE_RELEASE_SYNCED
+  /// Action sur le magasin (Phase 6) : promotion de piste, déploiement
+  /// progressif, suspension, ajout à un groupe TestFlight. SEULE action du
+  /// chantier qui modifie l'état public d'une application.
+  MOBILE_STORE_ACTION
+  /// Session CLI (C-0050) : approbation / refus d'une demande `physalis login`,
+  /// révocation d'une session.
+  CLI_SESSION_APPROVED
+  CLI_SESSION_DENIED
+  CLI_SESSION_REVOKED
+  /// Signature SSH faite par le serveur pour `physalis ssh-agent` (C-0050, phase 3).
+  SSH_KEY_SIGN
 }
 
 /// Demande de secret externe (Phase 9). Un user DEV+ crée la demande,
@@ -1641,6 +2224,125 @@ model ApiLog {
   @@index([keyId, createdAt(sort: Desc)])
 }
 
+// ─── Notifications (chantier C-0048, T-0264 socle + T-0268 destinations) ────
+//
+// Ce que Physalis sait et dit à qui de droit. Stocké en CLÉ + VARIABLES, traduit
+// à l'affichage / à l'envoi : `User` n'a pas de locale, une phrase figée naîtrait
+// dans la langue du cron et y resterait.
+//
+// ⚠️ JAMAIS la valeur d'un secret, dans aucun champ (vars comprises).
+// ⚠️ `type`, `channel`, `status`, `webhookFormat` sont du TEXTE, pas des enums :
+//    un enum tenant-only absent de `public` casse le deploy admin.
+
+/// Une notification d'organisation. `dedupKey` est le registre anti-répétition :
+/// un même événement (même dedupKey) n'est écrit — donc envoyé — qu'une fois.
+model Notification {
+  id             String                 @id @default(cuid())
+  organizationId String
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Projet concerné. SetNull : la notification survit à la suppression du
+  /// projet, lisible grâce à `subjectName` (précédent : SecretRequest).
+  projectId      String?
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  /// Collection du coffre concernée (entrée de coffre d'équipe). Sert la
+  /// VISIBILITÉ : une entrée de coffre d'org n'a pas de projet, seule l'accès
+  /// à sa collection dit qui peut la voir (T-0265). SetNull : la notification
+  /// survit, alors visible des seuls admins d'org.
+  collectionId   String?
+  collection     TeamVaultCollection?   @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  /// backup.failed | backup.recovered | backup.overdue | rotation.preavis |
+  /// rotation.anciennete | test
+  type           String
+  /// Objet visé (ex. "ProjectBackupConfig" + id), sans FK : il peut disparaître.
+  subjectKind    String?
+  subjectId      String?
+  /// Nom dénormalisé de l'objet (ex. nom du projet) — survit à sa suppression.
+  subjectName    String
+  /// Clé de traduction (namespace emails.notifications.*) + ses variables.
+  messageKey     String
+  vars           Json                   @default("{}")
+  dedupKey       String?
+  createdAt      DateTime               @default(now())
+  reads          NotificationRead[]
+  deliveries     NotificationDelivery[]
+
+  @@unique([organizationId, dedupKey])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([projectId])
+  @@index([collectionId])
+  @@index([organizationId, type, subjectKind, subjectId, createdAt])
+}
+
+/// Lu/non-lu PAR PERSONNE : une notification d'organisation est vue par
+/// plusieurs admins, le premier qui la lit ne doit pas l'éteindre pour les
+/// autres. Forme tranchée par T-0264 ; lue par l'onglet (T-0266, à venir).
+model NotificationRead {
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@id([notificationId, userId])
+  @@index([userId])
+}
+
+/// Registre des envois : une ligne par canal et par destinataire.
+/// `target` = adresse email, ou `webhook:<entryId>` — JAMAIS l'URL (c'est un secret).
+model NotificationDelivery {
+  id             String       @id @default(cuid())
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  /// email | webhook
+  channel        String
+  target         String
+  /// sent | failed
+  status         String
+  /// Cause tronquée, sans URL.
+  error          String?
+  createdAt      DateTime     @default(now())
+
+  @@index([notificationId])
+}
+
+/// Où partent les alertes : réglage d'ORGANISATION (scopeKey "org") et
+/// surcharge PAR PROJET (scopeKey "project:<id>"), qui REMPLACE entièrement le
+/// réglage d'org. Aucune ligne = défaut historique (OWNER seulement).
+/// `scopeKey` porte l'unicité : un @@unique sur `projectId` nullable laisserait
+/// passer plusieurs lignes d'org (NULL ≠ NULL en SQL).
+model NotificationDestination {
+  id                 String          @id @default(cuid())
+  organizationId     String
+  organization       Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId          String?
+  project            Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scopeKey           String
+  /// Prévenir les OWNER de l'org (+ ceux du projet, hors `hidden`).
+  includeOwners      Boolean         @default(true)
+  /// Adresses libres, y compris hors membres Physalis (≤ 20).
+  emails             String[]        @default([])
+  /// Webhook Slack/Discord/Teams : l'URL est un SECRET, rangée dans le coffre
+  /// d'équipe et lue à l'envoi. SetNull si l'entrée est supprimée.
+  webhookEntryId     String?
+  webhookEntry       TeamVaultEntry? @relation(fields: [webhookEntryId], references: [id], onDelete: SetNull)
+  /// Entrée de type LIST : LIBELLÉ de l'élément qui porte l'URL (jamais sa
+  /// valeur). Null pour une entrée LOGIN / SECRET (valeur = champ secret).
+  webhookItemLabel   String?
+  /// slack | discord | teams
+  webhookFormat      String?
+  /// L'échec du canal se lit dans l'écran de configuration, jamais dans le
+  /// canal lui-même (T-0268 ④).
+  webhookLastOkAt    DateTime?
+  webhookLastErrorAt DateTime?
+  webhookLastError   String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([organizationId, scopeKey])
+  @@index([projectId])
+  @@index([webhookEntryId])
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Modèles admin fusionnés en mono-DB pour le self-host.
 //
@@ -1660,6 +2362,7 @@ enum TokenKind {
   SECRET_REQUEST
   USER
   ORG
+  CLI
 }
 
 model TokenIndex {

@@ -86,10 +86,44 @@ six**, the other three being precisely the API key used as input.
 > match` — and the round trip through the macOS Keychain.
 
 Two Apple-side limits to know: the **App ID must already be registered** in your
-developer account, and Apple caps distribution certificates (2 to 3 per
-account). Regenerating consumes one and **stops the profiles tied to the old
-certificate from signing** — the old material stays visible in the
-application's history.
+developer account, and Apple caps distribution certificates (2 to 3 per account).
+Regenerating **everything** consumes one and stops the profiles tied to the old
+certificate from signing.
+
+> ⚠️ **Replacement cannot be undone.** Physalis does keep the previous value, but
+> **no screen currently restores it**: keep a local copy of your `.p12` and your
+> profile before regenerating.
+
+### Regenerate the profile only
+
+This is the most frequent case, and the one to prefer: a profile lasts a year, a
+certificate too, but **their dates do not line up**. When only the profile
+expires, regenerating everything would consume a certificate for nothing — and
+you would hit the cap after twice.
+
+**Regenerate profile only** reuses the certificate already in service: it
+consumes no slot and touches neither the certificate nor the private key.
+Physalis finds the right certificate by comparing **fingerprints**, not names —
+two certificates on the same account often share a label.
+
+> The regenerated profile may show the **certificate's** expiry rather than a
+> year: Apple caps a profile's validity to that of the certificate it embeds.
+> That is not an anomaly.
+
+### The cap, and revocation
+
+**Show Apple certificates** lists the account's distribution certificates and
+flags the one **in use** — the one whose private key is in the vault, hence the
+one signing your builds. Without that, revoking is a coin toss.
+
+At the cap you must revoke before generating. **Revoke** calls Apple's API for
+you, from Physalis, and writes it to the audit log — this is what replaces
+fastlane's `match nuke`, while keeping the trace.
+
+> ⚠️ Physalis **refuses** to revoke the certificate in use, and overrides only
+> after an explicit confirmation. Doing it anyway breaks your releases until a new
+> certificate is generated. The audit entry then carries `forced: true`: that is
+> the trace to look for the day a signature fails for no apparent reason.
 
 ## Verifying the material
 
@@ -156,6 +190,19 @@ The workflow templates provided call `/report` at the end of the run, including
 when the run fails — a failure occurring **after** the material was handed over
 is exactly what you want to see.
 
+### ⚠️ "Live" means "published on the track", not "approved"
+
+Two API limits worth knowing, because they look like bugs:
+
+- **Google Play exposes the review state nowhere.** A version can be `completed`
+  on its track — hence shown as **live** here — and have been **rejected** by
+  Play's policy review. Only the console shows it. There is no endpoint to read
+  it; when in doubt, the Play Console is authoritative.
+- **At Apple, `VALID` means "binary processed"**, not "on sale". Review and
+  release for sale live in another part of the API, which Physalis does not
+  read — so we show `uploaded`, never `live`, rather than announcing a release
+  we have not observed.
+
 ## The version number
 
 Apple and Google reject a build number that does not increase. Physalis tracks
@@ -176,6 +223,66 @@ As with server deployment, a **policy** authorizes a specific pipeline
 ⚠️ **A Capacitor / Cordova / Ionic app first builds a web layer**, which needs
 its build secrets. It therefore needs **both** policies, on the same
 `(repo, workflow, branch)`. A pure-native app only needs the mobile policy.
+
+## Native or hybrid project: the delta
+
+Four templates ship, two per platform:
+
+| Project | Templates |
+|---|---|
+| **Hybrid** (Capacitor, Cordova, Ionic) | `deploy-mobile-android-capacitor.modele.yml`, `deploy-mobile-ios-capacitor.modele.yml` |
+| **Native** (Gradle/Kotlin, Xcode/Swift) | `deploy-mobile-android-native.modele.yml`, `deploy-mobile-ios-native.modele.yml` |
+
+A **single `fastlane/Fastfile`** serves all four: what separates the two families
+is what the *workflow* does before calling the lane, not the lane itself.
+
+⚠️ **The Capacitor templates have shipped for real** (Google Play and TestFlight,
+from CI, with no secrets). The native ones are their transposition and **have not
+run yet** in real conditions — their header says so. The sensitive parts (bundle
+fetch, fingerprint check, release report, fastlane lane) are reused verbatim;
+read the two points below before your first run.
+
+### What native does less of
+
+- **No call to `/api/deploy`.** With no web layer there are no build secrets to
+  inject: a **single mobile policy** is enough (see the previous section).
+- **No `npm ci`, no `npx cap sync`.** The native project lives in your repo, under
+  version control; it is not regenerated on every build.
+- **No icon or permission step.** They live in the project, in git.
+
+### The point that really differs: the version
+
+Physalis is authoritative on the build number, but **how it is applied differs**,
+and that is not cosmetic.
+
+**Android.** The templates patch the app module's `build.gradle`, then **read the
+file back** to confirm the substitution bit. The native template accepts both
+syntaxes — `versionCode 12` (Groovy) and `versionCode = 12` (Kotlin DSL). If your
+project **computes** its version (commit count, properties file, versioning
+plugin), the substitution will match nothing: the workflow stops and says so,
+rather than shipping a wrong number. Replace that step with whatever your project
+expects.
+
+**iOS.** This is where the two families diverge most:
+
+- **Capacitor** generates an `Info.plist` with **literal** values, which `agvtool`
+  cannot read. The template therefore writes it directly with `plutil -replace`.
+- **A native Xcode project** writes `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
+  and keeps the value in its *build settings*. Writing a literal there with
+  `plutil` would **disconnect the plist from the project settings**: the number
+  actually embedded would revert to the build settings on the next build. So the
+  native template uses `agvtool new-version -all`, which is the right method here.
+
+⚠️ `agvtool` requires **Apple Generic** versioning (`VERSIONING_SYSTEM =
+apple-generic`), the default for recent Xcode projects. The template checks this
+**before** building and stops outright otherwise — a 20-minute build ending in a
+"redundant build version" rejection costs more than an immediate failure.
+
+### What to adapt
+
+In both native templates, an `À ADAPTER POUR VOTRE PROJET` box lists the
+variables: app identifier, Gradle module (`app` by convention), Xcode project
+folder and scheme name.
 
 ## Kill-switch
 

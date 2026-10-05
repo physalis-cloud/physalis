@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { RiDraggable } from "@remixicon/react";
 import { useRouter } from "@/i18n/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { defaultDeployPath } from "@/lib/validation";
 import { useFeature } from "@/components/PlanFeatures";
 import { isSyncProvider } from "@/lib/sync/types";
@@ -35,6 +36,9 @@ export default function SettingsDialog({
   environments,
   mobileDeployEnabled = false,
   mobileEnabled = false,
+  setupGuideAvailable = false,
+  setupGuide = null,
+  setupCompletedAt = null,
   onClose,
 }: {
   slug: string;
@@ -57,6 +61,12 @@ export default function SettingsDialog({
   mobileDeployEnabled?: boolean;
   /** État courant de l'interrupteur du projet (Project.mobileEnabled). */
   mobileEnabled?: boolean;
+  /** Section « Guide d'installation » (C-0051). Optionnelles pour la même
+   *  raison que les props mobiles : le jumeau overlay de `project-view.tsx`
+   *  monte cette modale sans elles, et le défaut masque la section. */
+  setupGuideAvailable?: boolean;
+  setupGuide?: string | null;
+  setupCompletedAt?: string | null;
   onClose: () => void;
 }) {
   const t = useTranslations("projects.settings");
@@ -120,10 +130,96 @@ export default function SettingsDialog({
             servers={servers}
             serversError={serversError}
           />
+          {setupGuideAvailable && (
+            <SetupGuideSection
+              slug={slug}
+              initial={setupGuide}
+              completedAt={setupCompletedAt}
+            />
+          )}
           <DeleteProjectSection slug={slug} projectName={projectName} onClose={onClose} />
         </div>
       </div>
     </div>
+  );
+}
+
+// Guide d'installation (C-0051) — juste au-dessus de la zone dangereuse.
+// Trois choix : automatique (défaut, null), toujours afficher, masquer. La
+// visibilité de l'onglet se décide dans page.tsx → refresh après écriture.
+function SetupGuideSection({
+  slug,
+  initial,
+  completedAt,
+}: {
+  slug: string;
+  initial: string | null;
+  completedAt: string | null;
+}) {
+  const t = useTranslations("projects.settings");
+  const locale = useLocale();
+  const router = useRouter();
+  const [value, setValue] = useState<string | null>(
+    initial === "shown" || initial === "hidden" ? initial : null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function choose(next: string | null) {
+    const previous = value;
+    setError(null);
+    setValue(next); // optimiste, rollback si l'API refuse
+    startTransition(async () => {
+      const res = await fetch(`/api/projects/${slug}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ setupGuide: next }),
+      });
+      if (!res.ok) {
+        setValue(previous);
+        setError(t("setupGuideError"));
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  const options: { v: string | null; label: string }[] = [
+    { v: null, label: t("setupGuideAuto") },
+    { v: "shown", label: t("setupGuideShown") },
+    { v: "hidden", label: t("setupGuideHidden") },
+  ];
+
+  return (
+    <section>
+      <h3 className="section-title" style={{ fontSize: 14, marginBottom: 8 }}>
+        {t("setupGuideTitle")}
+      </h3>
+      <p className="help" style={{ marginTop: 0 }}>
+        {t("setupGuideHint")}{" "}
+        {completedAt
+          ? t("setupGuideCompleted", { date: new Date(completedAt).toLocaleDateString(locale) })
+          : t("setupGuideNotCompleted")}
+      </p>
+      <div role="radiogroup" aria-label={t("setupGuideTitle")} className="flex flex-col gap-1">
+        {options.map((o) => (
+          <label
+            key={o.v ?? "auto"}
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+          >
+            <input
+              type="radio"
+              name="setup-guide"
+              checked={value === o.v}
+              disabled={pending}
+              onChange={() => choose(o.v)}
+            />
+            <span>{o.label}</span>
+          </label>
+        ))}
+      </div>
+      {error && <p className="error-text">{error}</p>}
+    </section>
   );
 }
 
@@ -366,6 +462,27 @@ function CiSection({
   const [ciRepo, setCiRepo] = useState(initialCiRepo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Dépôt par défaut `<utilisateur registry>/<slug>` (C-0051) : placeholder du
+  // champ, et valeur enregistrée si le champ est laissé vide.
+  const [defaultRepo, setDefaultRepo] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!connectionId) {
+      setDefaultRepo(null);
+      return;
+    }
+    (async () => {
+      const res = await fetch(
+        `/api/projects/${slug}/repo-default?connection=${encodeURIComponent(connectionId)}`,
+      );
+      if (cancelled || !res.ok) return;
+      const data = (await res.json()) as { defaultRepo: string | null };
+      setDefaultRepo(data.defaultRepo);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, connectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -388,6 +505,8 @@ function CiSection({
 
   const dirty =
     connectionId !== (initialConnectionId ?? "") ||
+    // Champ vide sans dépôt enregistré : enregistrer adopterait le dépôt par défaut.
+    (provider === "github" && githubRepo.trim() === "" && !initialGithubRepo && !!defaultRepo) ||
     githubRepo.trim() !== (initialGithubRepo ?? "") ||
     githubWorkflow.trim() !== (initialGithubWorkflow ?? "") ||
     ciRepo.trim() !== (initialCiRepo ?? "");
@@ -402,7 +521,7 @@ function CiSection({
       if (provider === "github") {
         const r = githubRepo.trim();
         const w = githubWorkflow.trim();
-        body.githubRepo = r === "" ? null : r;
+        body.githubRepo = r === "" ? defaultRepo : r;
         body.githubWorkflow = w === "" ? null : w;
       } else {
         const r = ciRepo.trim();
@@ -458,9 +577,14 @@ function CiSection({
                 <input
                   value={githubRepo}
                   onChange={(e) => setGithubRepo(e.target.value)}
-                  placeholder={t("githubRepoPlaceholder")}
+                  placeholder={defaultRepo ?? t("githubRepoPlaceholder")}
                   className="input input-mono"
                 />
+                {defaultRepo && githubRepo.trim() === "" && (
+                  <p className="help" style={{ margin: "4px 0 0" }}>
+                    {t("githubRepoDefaultHint", { repo: defaultRepo })}
+                  </p>
+                )}
               </div>
               <div className="field">
                 <label>{t("githubWorkflowLabel")}</label>
@@ -625,6 +749,36 @@ function EnvironmentsSection({
   const router = useRouter();
   const [adding, setAdding] = useState(false);
 
+  // Ordre local, réordonné par glisser-déposer puis persisté. Réconcilié avec
+  // les props serveur à chaque refresh (ajout, suppression, renommage).
+  const [items, setItems] = useState<EnvSummary[]>(environments);
+  useEffect(() => setItems(environments), [environments]);
+  const dragIndex = useRef<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  async function reorder(from: number, to: number) {
+    if (from === to) return;
+    const next = [...items];
+    const [moved] = next.splice(from, 1);
+    if (!moved) return;
+    next.splice(to, 0, moved);
+    setItems(next);
+    setOrderError(null);
+    const res = await fetch(`/api/projects/${slug}/environments`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ order: next.map((e) => e.id) }),
+    });
+    if (!res.ok) {
+      setItems(environments);
+      setOrderError(t("envReorderError"));
+      return;
+    }
+    // Les onglets d'environnement de la page suivent le même ordre.
+    router.refresh();
+  }
+
   return (
     <section>
       <div className="section-header">
@@ -662,15 +816,59 @@ function EnvironmentsSection({
         </div>
       )}
 
+      {orderError && (
+        <p className="error-text" style={{ marginBottom: 8 }}>
+          {orderError}
+        </p>
+      )}
+
       <div className="row-list">
-        {environments.map((env) => (
-          <EnvRow
+        {items.map((env, i) => (
+          <div
             key={env.id}
-            slug={slug}
-            env={env}
-            servers={servers}
-            onChanged={() => router.refresh()}
-          />
+            className={`env-order-row${overIndex === i ? " is-over" : ""}`}
+            onDragOver={(e) => {
+              if (dragIndex.current === null) return;
+              e.preventDefault();
+              setOverIndex(i);
+            }}
+            onDragLeave={() => setOverIndex((v) => (v === i ? null : v))}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIndex.current !== null) reorder(dragIndex.current, i);
+              dragIndex.current = null;
+              setOverIndex(null);
+            }}
+          >
+            {items.length > 1 && (
+              <span
+                className="group-drag-handle"
+                draggable
+                title={t("envReorderHint")}
+                aria-label={t("envReorderHint")}
+                onDragStart={(e) => {
+                  dragIndex.current = i;
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", env.id);
+                  // Fantôme = la ligne entière, pas la seule poignée.
+                  const row = e.currentTarget.parentElement;
+                  if (row) e.dataTransfer.setDragImage(row, 16, 16);
+                }}
+                onDragEnd={() => {
+                  dragIndex.current = null;
+                  setOverIndex(null);
+                }}
+              >
+                <RiDraggable size={16} aria-hidden />
+              </span>
+            )}
+            <EnvRow
+              slug={slug}
+              env={env}
+              servers={servers}
+              onChanged={() => router.refresh()}
+            />
+          </div>
         ))}
       </div>
     </section>

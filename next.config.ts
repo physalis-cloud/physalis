@@ -55,6 +55,10 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/[locale]/docs": ["./docs/documentation/**/*"],
     "/[locale]/docs/[slug]": ["./docs/documentation/**/*"],
+    // Modèles de workflow lus par le guide d'installation (C-0051). Même
+    // ENOENT sinon : les deux routes répondraient 500 dans l'image.
+    "/api/projects/[slug]/setup/template": ["./docs/*.modele.yml"],
+    "/api/projects/[slug]/setup/verify": ["./docs/*.modele.yml"],
   },
   async headers() {
     return [

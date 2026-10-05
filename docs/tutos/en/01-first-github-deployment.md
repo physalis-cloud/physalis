@@ -228,11 +228,14 @@ Run a `git push` on `main` (or the branch name you defined). The workflow starts
 1. **build** job: fetches the `VITE_*`, builds the image, pushes it to GHCR
 2. **deploy** job: fetches the bundle, writes `.env` + `docker-compose.yml` to
    the VPS, runs `docker compose up -d`
+3. Last step **"Report to Physalis"**: tells Physalis whether the deployment
+   succeeded or failed
 
 ## Check that everything works
 
 - In Physalis: organisation page → **Audit log** → you should see a
-  **`DEPLOY_AUTHORIZED`** event with the repo, branch and environment.
+  **`DEPLOY_AUTHORIZED`** event with the repo, branch and environment, then a
+  **`DEPLOY_REPORTED`** event with `status: succeeded` at the end of the run.
 - Your application responds at its public URL.
 
 ## Troubleshooting

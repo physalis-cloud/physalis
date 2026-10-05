@@ -89,9 +89,45 @@ d'entrée.
 
 Deux limites à connaître côté Apple : l'**App ID doit déjà être enregistré**
 dans votre compte développeur, et Apple plafonne les certificats de distribution
-(2 à 3 par compte). Régénérer en consomme un et **fait cesser de signer les
-profils liés à l'ancien certificat** — l'ancien matériel reste consultable dans
-l'historique de l'application.
+(2 à 3 par compte). Régénérer **tout** en consomme un et fait cesser de signer
+les profils liés à l'ancien certificat.
+
+> ⚠️ **Le remplacement n'a pas de retour arrière.** Physalis conserve bien
+> l'ancienne valeur, mais **aucun écran ne permet aujourd'hui de la restaurer** :
+> gardez une copie locale de votre `.p12` et de votre profil avant de régénérer.
+
+### Régénérer le profil seul
+
+C'est le cas le plus fréquent, et celui qu'il faut préférer : un profil vaut un
+an, un certificat aussi, mais **leurs dates ne coïncident pas**. Quand seul le
+profil expire, tout régénérer consommerait un certificat pour rien — et vous
+cogneriez le plafond au bout de deux fois.
+
+**Régénérer le profil seul** réutilise le certificat déjà en service : il
+n'entame aucun slot, et ne touche ni au certificat ni à la clé privée. Physalis
+retrouve le bon certificat en comparant les **empreintes**, pas les noms — deux
+certificats d'un même compte portent souvent le même intitulé.
+
+> Le profil régénéré peut afficher l'échéance du **certificat** plutôt qu'un an :
+> Apple plafonne la validité d'un profil à celle du certificat qu'il embarque.
+> Ce n'est pas une anomalie.
+
+### Le plafond, et la révocation
+
+**Voir les certificats Apple** liste les certificats de distribution du compte,
+et marque celui **en service** — c'est-à-dire celui dont la clé privée est dans
+le coffre, donc celui qui signe vos builds. Sans cette indication, révoquer est
+un coup de dés.
+
+Au plafond, il faut révoquer avant de générer. **Révoquer** appelle l'API d'Apple
+pour vous, depuis Physalis, et l'inscrit au journal d'audit — c'est ce qui
+remplace le `match nuke` de fastlane, en gardant la trace.
+
+> ⚠️ Physalis **refuse** de révoquer le certificat en service, et ne passe outre
+> qu'après une confirmation explicite. Le faire quand même casse vos publications
+> tant qu'un nouveau certificat n'a pas été généré. L'audit porte alors
+> `forced: true` : c'est la trace à chercher le jour où une signature échoue sans
+> raison apparente.
 
 ## Vérifier le matériel
 
@@ -161,6 +197,19 @@ Les gabarits de workflow fournis appellent `/report` en fin de run, y compris
 quand le run échoue — un échec survenu **après** la remise du matériel est
 justement ce qu'on veut voir.
 
+### ⚠️ « En ligne » veut dire « publié sur la piste », pas « approuvé »
+
+Deux limites d'API à connaître, parce qu'elles ressemblent à des bugs :
+
+- **Google Play n'expose nulle part l'état de la revue.** Une version peut être
+  `completed` sur sa piste — donc affichée **en ligne** ici — et avoir été
+  **refusée** par la conformité Play. Seule la console le montre. Il n'existe pas
+  d'endpoint pour le lire ; en cas de doute, la Play Console fait foi.
+- **Chez Apple, `VALID` signifie « binaire traité »**, pas « en vente ». Le
+  passage en revue puis en vente relève d'une autre partie de l'API, que
+  Physalis ne lit pas — on affiche donc `téléversé`, jamais `en ligne`, plutôt
+  que d'annoncer une mise en vente qu'on n'a pas constatée.
+
 ## Le numéro de version
 
 Apple et Google refusent un numéro de build qui ne croît pas. Physalis le tient
@@ -183,6 +232,70 @@ Comme pour le déploiement serveur, une **policy** autorise un pipeline précis
 a besoin de ses secrets de build. Elle a donc besoin des **deux** policies, sur
 le même `(repo, workflow, branche)`. Une app native pure n'a besoin que de la
 policy mobile.
+
+## Projet natif ou hybride : le delta
+
+Quatre gabarits sont fournis, deux par plateforme :
+
+| Projet | Gabarits |
+|---|---|
+| **Hybride** (Capacitor, Cordova, Ionic) | `deploy-mobile-android-capacitor.modele.yml`, `deploy-mobile-ios-capacitor.modele.yml` |
+| **Natif** (Gradle/Kotlin, Xcode/Swift) | `deploy-mobile-android-native.modele.yml`, `deploy-mobile-ios-native.modele.yml` |
+
+Un **seul `fastlane/Fastfile`** sert les quatre : ce qui sépare les deux
+familles tient à ce que fait le *workflow* avant d'appeler la lane, pas à la
+lane elle-même.
+
+⚠️ **Les gabarits Capacitor ont publié pour de vrai** (Google Play et TestFlight,
+depuis le CI, sans secret). Les gabarits natifs en sont la transposition et
+**n'ont pas encore tourné** en conditions réelles : leur en-tête le dit. Les
+parties sensibles — récupération du bundle, vérification d'empreinte, rapport,
+lane fastlane — y sont reprises à l'identique ; relisez les deux points ci-dessous
+avant votre premier run.
+
+### Ce que le natif fait en moins
+
+- **Pas d'appel à `/api/deploy`.** Sans couche web, il n'y a pas de secrets de
+  build à injecter : une **seule policy mobile** suffit (voir la section
+  précédente).
+- **Pas de `npm ci` ni de `npx cap sync`.** Le projet natif est dans votre dépôt,
+  versionné ; il n'est pas régénéré à chaque build.
+- **Pas d'étape icônes ni permissions.** Elles vivent dans le projet, en git.
+
+### Le point qui change vraiment : la version
+
+Physalis fait autorité sur le numéro de build, mais **la façon de le poser
+diffère**, et ce n'est pas cosmétique.
+
+**Android.** Les gabarits patchent le `build.gradle` du module applicatif puis
+**relisent le fichier** pour vérifier que la substitution a mordu. Le gabarit
+natif accepte les deux syntaxes — `versionCode 12` (Groovy) et
+`versionCode = 12` (Kotlin DSL). Si votre projet **calcule** sa version (nombre
+de commits, fichier de propriétés, plugin de versioning), la substitution ne
+trouvera rien : le workflow s'arrête et vous le dit, plutôt que de publier un
+numéro faux. Remplacez alors cette étape par ce que votre projet attend.
+
+**iOS.** C'est ici que les deux familles divergent le plus :
+
+- **Capacitor** génère un `Info.plist` à valeurs **littérales**, qu'`agvtool` ne
+  sait pas lire. Le gabarit y écrit donc directement avec `plutil -replace`.
+- **Un projet Xcode natif** écrit `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
+  et garde la valeur dans ses *build settings*. Y poser un littéral au `plutil`
+  **déconnecterait le plist des réglages du projet** : le numéro réellement
+  embarqué redeviendrait celui des build settings au build suivant. Le gabarit
+  natif utilise donc `agvtool new-version -all`, qui est la bonne méthode là.
+
+⚠️ `agvtool` exige le versioning **« Apple Generic »** (`VERSIONING_SYSTEM =
+apple-generic`), qui est le défaut des projets Xcode récents. Le gabarit le
+vérifie **avant** de construire et s'arrête net sinon — un build de 20 minutes
+qui se solde par un rejet « redundant build version » coûte plus cher qu'un
+échec immédiat.
+
+### Ce qu'il faut adapter
+
+Dans les deux gabarits natifs, un encadré `À ADAPTER POUR VOTRE PROJET` liste
+les variables : identifiant de l'app, module Gradle (`app` par convention),
+dossier du projet Xcode et nom du *scheme*.
 
 ## Coupe-circuit
 

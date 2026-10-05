@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Image from "next/image";
 import { getTranslations } from "next-intl/server";
@@ -14,9 +15,37 @@ import { prisma } from "@/lib/prisma";
 // 404 pour TOUTE demande externe. En mono-tenant, `tokenHash` est unique et il
 // n'y a qu'un schéma : on lit la ligne directement.
 
-export async function generateMetadata() {
+// ⚠️ Portée depuis la page SaaS le 2026-09-17. La carte d'aperçu ne dit RIEN de
+// la demande — ni libellé, ni email du demandeur : le lien est collé dans des
+// canaux d'équipe, où l'aperçu s'affiche pour tout le monde. Et `images` est
+// redéclaré parce que chez Next un segment qui déclare `openGraph` REMPLACE
+// celui du parent au lieu de le fusionner — sans ça, la page perd le logo.
+export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("secretRequest");
-  return { title: t("metaTitle") };
+  const titre = t("metaTitle");
+  const description = t("metaDescription");
+  return {
+    title: titre,
+    description,
+    openGraph: {
+      type: "website",
+      siteName: "Physalis",
+      title: titre,
+      description,
+      images: [{
+        url: "/og-icon.png",
+        width: 200,
+        height: 200,
+        alt: "Physalis",
+      }],
+    },
+    twitter: {
+      card: "summary",
+      title: titre,
+      description,
+      images: ["/og-icon.png"],
+    },
+  };
 }
 
 type RequestData = {

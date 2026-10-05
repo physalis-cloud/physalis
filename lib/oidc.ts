@@ -59,7 +59,7 @@ export type CiProvider = "github" | "gitlab" | "bitbucket";
 // pour Bitbucket : le scoping repose sur l'issuer-workspace (allowlisté) + le
 // repositoryUuid + la branche/environment. Posture anti-replay plus faible,
 // documentée. Cf. expectedAudience() non appliquée pour bitbucket.
-function expectedAudience(): string {
+export function expectedAudience(): string {
   return process.env.OIDC_AUDIENCE ?? "vault.physalis.cloud";
 }
 
@@ -152,8 +152,62 @@ export type OidcClaims = {
   policyIssuer: string | null;
   /** Nom de branche (ou tag). */
   branch: string;
+  /** Identité du run, ou null si le jeton n'en porte pas (cf. `extractRunIdentity`). */
+  run: RunIdentity | null;
   raw: JWTPayload;
 };
+
+/**
+ * Identité d'une exécution de pipeline, tirée du jeton SIGNÉ — c'est ce qui
+ * corrèle la remise du bundle (`/api/deploy`) au rapport de fin
+ * (`/api/deploy/report`) sans que le pipeline puisse l'inventer. Cf.
+ * documentation/plans/guide-installation-projet.md §3.2.
+ *
+ *   github    → run_id / run_attempt / sha
+ *   gitlab    → pipeline_id / "1" (une relance de job garde le pipeline) / sha
+ *   bitbucket → pipelineUuid / pipelineRunUuid (relance) / pas de sha
+ */
+export type RunIdentity = {
+  id: string;
+  /** Texte et non entier : Bitbucket distingue ses relances par un UUID. */
+  attempt: string;
+  sha: string | null;
+};
+
+/** Borne des valeurs reprises du jeton : elles finissent en colonne et en URL. */
+const MAX_RUN_FIELD = 100;
+
+function runField(v: unknown): string {
+  const s = typeof v === "number" ? String(v) : str(v);
+  return s.length <= MAX_RUN_FIELD ? s : "";
+}
+
+/**
+ * Extrait l'identité du run. TOLÉRANTE : null si le claim manque ou a une forme
+ * inattendue — l'appelant sert alors le bundle sans ouvrir de ligne de suivi.
+ * Le suivi ne doit jamais faire échouer un déploiement.
+ */
+export function extractRunIdentity(
+  provider: CiProvider,
+  payload: JWTPayload,
+): RunIdentity | null {
+  const p = payload as Record<string, unknown>;
+  let id = "";
+  let attempt = "1";
+  let sha: string | null = null;
+  if (provider === "github") {
+    id = runField(p.run_id);
+    attempt = runField(p.run_attempt) || "1";
+    sha = runField(p.sha) || null;
+  } else if (provider === "gitlab") {
+    id = runField(p.pipeline_id);
+    sha = runField(p.sha) || null;
+  } else {
+    id = runField(p.pipelineUuid);
+    attempt = runField(p.pipelineRunUuid) || "1";
+  }
+  return id ? { id, attempt, sha } : null;
+}
 
 export type VerifyResult =
   | { ok: true; claims: OidcClaims }
@@ -299,6 +353,7 @@ function extractClaims(
         repo,
         matchKey: m[1],
         branch,
+        run: extractRunIdentity(provider, payload),
         raw: payload,
       },
     };
@@ -322,6 +377,7 @@ function extractClaims(
         repo,
         matchKey: env,
         branch,
+        run: extractRunIdentity(provider, payload),
         raw: payload,
       },
     };
@@ -342,6 +398,7 @@ function extractClaims(
       repo,
       matchKey: env,
       branch,
+      run: extractRunIdentity(provider, payload),
       raw: payload,
     },
   };
@@ -441,6 +498,7 @@ export type GithubParsedClaims = {
   workflowFile: string;
   /** nom de branche extrait de `ref`. */
   branch: string;
+  run: RunIdentity | null;
   raw: JWTPayload;
 };
 
@@ -463,6 +521,7 @@ export async function verifyGithubOidcToken(
       repository: r.claims.repo,
       workflowFile: r.claims.matchKey,
       branch: r.claims.branch,
+      run: r.claims.run,
       raw: r.claims.raw,
     },
   };

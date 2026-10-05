@@ -286,5 +286,23 @@
         "slug": "despliegue-movil"
       }
     }
+  },
+  {
+    "order": 17,
+    "icon": "RiTerminalBoxLine",
+    "translations": {
+      "en": {
+        "file": "17-cli.md",
+        "slug": "cli"
+      },
+      "fr": {
+        "file": "17-cli.md",
+        "slug": "cli"
+      },
+      "es": {
+        "file": "17-cli.md",
+        "slug": "cli"
+      }
+    }
   }
 ]

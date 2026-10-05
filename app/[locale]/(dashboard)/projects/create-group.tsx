@@ -10,9 +10,12 @@ import type { GroupVM } from "./projects-board";
 export default function CreateGroupForm({
   groups,
   canEdit,
+  onCreated,
 }: {
   groups: GroupVM[];
   canEdit: boolean;
+  /** Appelé après une création réussie (retour à la liste des projets). */
+  onCreated?: () => void;
 }) {
   const t = useTranslations("projects");
   const router = useRouter();
@@ -39,6 +42,7 @@ export default function CreateGroupForm({
       }
       setName("");
       router.refresh();
+      onCreated?.();
     });
   }
 
@@ -67,6 +71,7 @@ export default function CreateGroupForm({
             <input
               id="create-group-name"
               required
+              autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t("createGroup.namePlaceholder")}

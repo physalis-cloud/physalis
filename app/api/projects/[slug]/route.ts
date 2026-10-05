@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { readJson, requireProjectMember, slugify } from "@/lib/api";
 import { logAction } from "@/lib/audit";
+import { isValidSetupGuide } from "@/lib/project-setup";
 import { hasDevPrivileges } from "@/lib/roles";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -28,7 +29,7 @@ export async function GET(_req: Request, { params }: Params) {
           url: true,
           _count: { select: { secrets: true } },
         },
-        orderBy: { name: "asc" },
+        orderBy: [{ position: "asc" }, { name: "asc" }],
       },
       _count: { select: { tokens: { where: { revokedAt: null } } } },
     },
@@ -57,6 +58,7 @@ export async function PATCH(req: Request, { params }: Params) {
         githubRepo?: string | null;
         githubWorkflow?: string | null;
         mobileEnabled?: boolean;
+        setupGuide?: string | null;
       }
     | null;
   if (!body || typeof body !== "object") {
@@ -69,6 +71,7 @@ export async function PATCH(req: Request, { params }: Params) {
     githubRepo?: string | null;
     githubWorkflow?: string | null;
     mobileEnabled?: boolean;
+    setupGuide?: string | null;
   } = {};
   const changed: string[] = [];
   let oldSlug: string | undefined;
@@ -141,6 +144,19 @@ export async function PATCH(req: Request, { params }: Params) {
     if (body.mobileEnabled !== access.project.mobileEnabled) {
       data.mobileEnabled = body.mobileEnabled;
       changed.push("mobileEnabled");
+    }
+  }
+
+  // Onglet « Installation » (C-0051) : null = automatique, "shown" | "hidden" =
+  // choix explicite, réglé depuis la modale Paramètres. Simple préférence
+  // d'affichage — elle ne touche à aucun accès.
+  if ("setupGuide" in body) {
+    if (!isValidSetupGuide(body.setupGuide)) {
+      return NextResponse.json({ error: "Invalid setupGuide" }, { status: 400 });
+    }
+    if (body.setupGuide !== access.project.setupGuide) {
+      data.setupGuide = body.setupGuide;
+      changed.push("setupGuide");
     }
   }
 

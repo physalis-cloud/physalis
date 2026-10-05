@@ -374,6 +374,48 @@ Conexión para que el VPS tire).
    en el VPS, ejecuta `docker compose up -d`
 4. Comprueba el **registro de auditoría** de Physalis (página de la org) →
    verás `DEPLOY_AUTHORIZED` con los detalles (repo, 3ª dimensión, rama, entorno)
+5. Al final del job, el paso **«Report to Physalis»** envía el resultado del
+   run → el registro de auditoría muestra `DEPLOY_REPORTED` con
+   `status: succeeded` o `failed`
+
+### Seguimiento de los despliegues
+
+`DEPLOY_AUTHORIZED` solo indica que Physalis **entregó los secretos** al
+pipeline. Para saber si el despliegue **tuvo éxito**, Physalis dispone de dos
+fuentes:
+
+- **Lee el resultado del run en la plataforma** (GitHub, GitLab, Bitbucket) con
+  el token de la conexión CI/CD, aproximadamente un minuto después de que el run
+  termine. No hay nada que añadir al workflow: el token solo tiene que poder leer
+  los runs (GitHub: scope `repo`, o `Actions: read` para un token de permisos
+  finos).
+- **El workflow también puede informarlo él mismo**, de inmediato: las plantillas
+  terminan con un paso que llama a `POST /api/deploy/report` con el mismo
+  mecanismo OIDC y la misma Policy. Solo es imprescindible si la conexión no
+  tiene token.
+
+```json
+{ "project": "mi-app", "environment": "production", "status": "succeeded" }
+```
+
+- `status` vale `succeeded` o `failed`, y `detail` (opcional, 500 caracteres
+  como máximo) precisa la causa.
+- El informe se vincula al run mediante el identificador de ejecución que lleva
+  el token OIDC firmado (`run_id` en GitHub, `pipeline_id` en GitLab,
+  `pipelineUuid` en Bitbucket). Un run que recibe varios bundles (jobs `build`
+  y luego `deploy`) sigue siendo **un solo** despliegue.
+- En ambos casos es el resultado **del run**: Physalis no sondea tu sitio. La
+  pestaña «Despliegues» indica de dónde viene cada resultado (constatado en la
+  plataforma, o informado por el pipeline).
+- El paso de informe **nunca hace fallar** el workflow. Un workflow que no lo
+  tiene (anterior a su incorporación) se sigue igualmente, leyendo el run.
+- Un informe recibido para un run al que Physalis **no entregó ningún bundle**
+  se registra con `correlated: false`: alguien desplegó con la identidad de tu
+  pipeline sin tomar sus secretos del vault.
+
+> **GitLab**: el token OIDC se emite al arrancar el job y caduca con él (5 min
+> si no se fija ningún `timeout:`). La plantilla fija `timeout: 15 minutes`
+> para que el informe enviado por `after_script` siga siendo válido.
 
 ### En caso de fallo
 

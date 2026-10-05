@@ -7,6 +7,8 @@ node_modules
 docs
 !docs/documentation
 !docs/tutos
+# Modèles de workflow lus au runtime par le guide d'installation (C-0051).
+!docs/*.modele.yml
 README.md
 AGENTS.md
 CLAUDE.md

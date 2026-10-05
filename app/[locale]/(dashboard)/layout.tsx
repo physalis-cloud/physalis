@@ -159,6 +159,12 @@ export default async function DashboardLayout({
               await signOut({ redirectTo: `/${locale}/login` });
             }}
           />
+          {/* ⚠️ PAS de pastilles ici, et c'est VOULU (C-0048, décision
+              « SaaS d'abord ») : la layout SaaS pose une pastille rouge de
+              notifications (NotificationBadge) et une verte de nouveautés
+              (AnnouncementBadge), mais aucun émetteur ni annonce n'existe en
+              self-host — les compteurs seraient toujours à zéro. Ne pas les
+              recopier « pour rattraper l'écart » au prochain portage. */}
           <Link
             href={`/${locale}/account`}
             className="user-link"

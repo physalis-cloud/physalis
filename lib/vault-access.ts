@@ -87,10 +87,16 @@ export function hasVaultRole(actual: VaultRole, required: VaultRole): boolean {
  * Utilise par /api/plugin/match pour agreger les coffres d'equipe dans
  * le bundle de l'extension. Ce helper ne fait PAS de match URL — c'est
  * au caller de filtrer les entries selon le hostname.
+ *
+ * `_tenantSlug` : accepté et IGNORÉ, pour que les appelants synchronisés
+ * (lib/integrations/coffre-equipe.ts) compilent tels quels. Le source fait
+ * `if (!tenantSlug) return []` — en mono-tenant le slug est toujours null,
+ * cette garde rendrait la liste TOUJOURS vide (cf. monotenant-tenantslug-dead-guard).
  */
 export async function getAccessibleCollectionIds(
   userId: string,
   userRole: Role,
+  _tenantSlug?: string | null,
 ): Promise<string[]> {
   if (isPlatformAdmin(userRole)) {
     const all = await prisma.teamVaultCollection.findMany({

@@ -26,6 +26,8 @@ import {
   VAULT_TYPE_LIMITS,
   type VaultEntryType,
   type VaultListItem,
+  isSshKeyEntry,
+  SSH_KEY_EDITABLE_FIELDS,
 } from "@/lib/vault-entry-types";
 import { decryptPayload, encryptPayload } from "@/lib/vault-entry-payload";
 
@@ -64,6 +66,26 @@ export async function GET(req: Request, { params }: Params) {
   });
   if (!entry) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Clé SSH (C-0050) : on ne révèle QUE la partie publique, et on ne déchiffre
+  // RIEN — la clé privée ne sort jamais vers le navigateur. Seule la signature
+  // côté serveur (phase 3) la lit.
+  if (isSshKeyEntry(entry.type)) {
+    return NextResponse.json({
+      entry: {
+        id: entry.id,
+        type: "SSH_KEY",
+        name: entry.name,
+        sshPublicKey: entry.sshPublicKey,
+        sshFingerprint: entry.sshFingerprint,
+        tags: entry.tags,
+        favorite: entry.favorite,
+        collectionId: entry.collectionId,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+      },
+    });
   }
 
   let password: string | null = null;
@@ -183,6 +205,25 @@ export async function PATCH(req: Request, { params }: Params) {
     | null;
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  }
+
+  // Clé SSH (C-0050) : seuls nom, tags, favori et collection se modifient.
+  // Ni conversion (elle effacerait la clé), ni url/login/mot de passe/blob. Le
+  // reste du handler voit la clé comme un LOGIN (normalizeEntryType) : c'est
+  // cette liste blanche qui l'empêche d'y toucher.
+  if (isSshKeyEntry(existing.type)) {
+    const allowed = new Set<string>(SSH_KEY_EDITABLE_FIELDS);
+    const refused = Object.keys(body).filter((k) => !allowed.has(k));
+    if (refused.length) {
+      return NextResponse.json(
+        {
+          error: `Une clé SSH ne permet de modifier que : ${SSH_KEY_EDITABLE_FIELDS.join(", ")}`,
+          code: "ssh_key_locked",
+          fields: refused,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   const currentType = normalizeEntryType(existing.type);

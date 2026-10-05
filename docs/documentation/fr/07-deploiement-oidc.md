@@ -377,6 +377,46 @@ que le VPS tire).
    sur le VPS, fait un `docker compose up -d`
 4. Vérifiez l'**audit log** Physalis (page de l'org) → vous verrez
    `DEPLOY_AUTHORIZED` avec les détails (repo, 3ᵉ dimension, branche, env)
+5. En fin de job, l'étape **« Report to Physalis »** envoie l'issue du run →
+   l'audit log affiche `DEPLOY_REPORTED` avec `status: succeeded` ou `failed`
+
+### Suivi des déploiements
+
+`DEPLOY_AUTHORIZED` dit seulement que Physalis a **remis les secrets** au
+pipeline. Pour savoir si le déploiement a **réussi**, Physalis dispose de deux
+sources :
+
+- **Il lit l'issue du run chez la plateforme** (GitHub, GitLab, Bitbucket), avec
+  le jeton de la connexion CI/CD, environ une minute après la fin du run. Rien à
+  ajouter dans le workflow : il faut seulement que le jeton puisse lire les runs
+  (GitHub : scope `repo`, ou `Actions: read` pour un jeton à permissions fines).
+- **Le workflow peut aussi la rapporter lui-même**, tout de suite : les templates
+  se terminent par une étape qui appelle `POST /api/deploy/report` avec le même
+  mécanisme OIDC et la même Policy. Indispensable seulement si la connexion n'a
+  pas de jeton.
+
+```json
+{ "project": "mon-app", "environment": "production", "status": "succeeded" }
+```
+
+- `status` vaut `succeeded` ou `failed`, et `detail` (facultatif, 500
+  caractères au plus) précise la cause.
+- Le rapport est rattaché au run par l'identifiant d'exécution porté par le
+  jeton OIDC signé (`run_id` GitHub, `pipeline_id` GitLab, `pipelineUuid`
+  Bitbucket). Un run qui prend plusieurs bundles (jobs `build` puis `deploy`)
+  reste **un seul** déploiement.
+- Dans les deux cas, c'est l'issue **du run** : Physalis ne sonde pas votre site.
+  L'onglet « Déploiements » indique d'où vient chaque issue (constatée chez la
+  plateforme, ou signalée par le pipeline).
+- L'étape de rapport **ne fait jamais échouer** le workflow. Un workflow qui ne
+  l'a pas (antérieur à son ajout) est suivi quand même, par la lecture du run.
+- Un rapport reçu pour un run auquel Physalis n'a **servi aucun bundle** est
+  enregistré avec `correlated: false` : quelqu'un a déployé sous l'identité de
+  votre pipeline sans prendre ses secrets dans le coffre.
+
+> **GitLab** : le jeton OIDC est émis au démarrage du job et expire avec lui
+> (5 min si aucun `timeout:` n'est fixé). Le template fixe `timeout: 15 minutes`
+> pour que le rapport de l'`after_script` reste valable.
 
 ### En cas d'échec
 

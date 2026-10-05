@@ -17,6 +17,7 @@ import { readJson } from "@/lib/api";
 import { resolveMobilePolicy } from "@/lib/mobile-policy";
 import { buildMobileBundle, consumeBuildNumber } from "@/lib/mobile-bundle";
 import { openRelease } from "@/lib/mobile-release";
+import { readStoreFloor } from "@/lib/mobile-store-read";
 
 export const runtime = "nodejs";
 
@@ -107,7 +108,20 @@ export async function POST(req: Request) {
     );
   }
 
-  const { buildNumber, versionName } = await consumeBuildNumber(prisma, app.id);
+  // Numéro autoritatif (Phase 5, §4.5) : on demande au MAGASIN le plus haut
+  // numéro déjà publié, et on sert `max(magasin, dernier servi) + 1`. C'est ce
+  // qui rend le compteur auto-réparant après un téléversement manuel depuis
+  // Xcode ou la console — le cas qui fait dériver tout compteur maison.
+  //
+  // ⚠️ Cet appel est sur le CHEMIN CRITIQUE : timeout court côté lecture, et
+  // `null` en cas de panne, qui fait retomber sur le seul compteur local.
+  // Jamais un échec de livraison parce que l'API de Google tousse.
+  const storeFloor = await readStoreFloor(app.platform, app.bundleId, bundle.credentials);
+  const { buildNumber, versionName } = await consumeBuildNumber(
+    prisma,
+    app.id,
+    storeFloor,
+  );
 
   // Registre (Phase 3), identique au SaaS : la ligne naît quand le bundle part,
   // pas au rapport du CI — c'est ce qui rend la corrélation matériel↔version
@@ -141,6 +155,9 @@ export async function POST(req: Request) {
       buildNumber,
       versionName,
       releaseId,
+      // `null` = magasin injoignable, numéro servi par le seul compteur local.
+      // C'est la trace à lire le jour où un versionCode est refusé par Google.
+      storeFloor,
     },
     req,
   });

@@ -8,13 +8,22 @@
 //   - "admin"  → CRON_SECRET_ADMIN : haut privilège, tout le reste
 //     (/api/cron/*, /api/rotation/admin/*), détenu uniquement par le
 //     planificateur de confiance (GitHub Actions, N8n).
+//   - "kms"    → CRON_SECRET_KMS : n'autorise QUE GET /api/internal/kms/allowlist
+//     (IP des agents backup KMS). Détenu par le nœud `kms`, qui ne doit rien
+//     pouvoir d'autre sur l'app : un tier dédié plutôt que l'admin.
 //
 // Header standardisé : `Authorization: Bearer <token>`.
 
 import { timingSafeEqual } from "node:crypto";
 import { verifyOidcToken, extractBearer } from "./oidc";
 
-export type CronTier = "report" | "admin";
+export type CronTier = "report" | "admin" | "kms";
+
+const TIER_ENV: Record<CronTier, string> = {
+  report: "CRON_SECRET_REPORT",
+  admin: "CRON_SECRET_ADMIN",
+  kms: "CRON_SECRET_KMS",
+};
 
 // Comparaison constant-time qui ne fuit pas la longueur du secret par timing.
 function safeEqual(provided: string, expected: string): boolean {
@@ -38,10 +47,7 @@ export function requireCronAuth(req: Request, tier: CronTier): boolean {
   const provided = presentedToken(req);
   if (!provided) return false;
 
-  const tierSecret =
-    tier === "report"
-      ? process.env.CRON_SECRET_REPORT
-      : process.env.CRON_SECRET_ADMIN;
+  const tierSecret = process.env[TIER_ENV[tier]];
 
   return Boolean(tierSecret) && safeEqual(provided, tierSecret as string);
 }

@@ -8,11 +8,14 @@ import { validateToken } from "@/lib/auth-token";
 import { logAction } from "@/lib/audit";
 import { machineFetchRateLimited } from "@/lib/machine-rate-limit";
 import { withTenantSchema } from "@/lib/tenant";
+import { CLI_TOKEN_PREFIX } from "@/lib/cli-session";
+import { handleCliSecretsRequest } from "@/lib/cli-secrets";
 
 type Params = { params: Promise<{ slug: string; env: string }> };
 
-// Machine-token endpoint: returns decrypted secrets for the requested env.
-// Auth: Authorization: Bearer sv_<hex>
+// Returns decrypted secrets for the requested env.
+// Auth: Authorization: Bearer sv_<hex> (token machine, scopé projet+env)
+//    ou Bearer sv_cli_<hex> (session CLI, droits de l'utilisateur).
 export async function GET(req: NextRequest, { params }: Params) {
   const { slug, env } = await params;
 
@@ -27,6 +30,12 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const token = authHeader.slice(7).trim();
+
+  // Session CLI (`physalis login`, C-0050) : droits de l'UTILISATEUR, re-dérivés
+  // par requête — tout le traitement vit dans lib/cli-secrets.ts.
+  if (token.startsWith(CLI_TOKEN_PREFIX)) {
+    return handleCliSecretsRequest(req, token, slug, env);
+  }
 
   const machineToken = await validateToken(token);
   if (!machineToken) {

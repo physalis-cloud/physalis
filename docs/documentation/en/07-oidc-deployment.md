@@ -371,6 +371,46 @@ pull).
    to the VPS, runs `docker compose up -d`
 4. Check the Physalis **audit log** (org page) → you will see
    `DEPLOY_AUTHORIZED` with the details (repo, 3rd dimension, branch, env)
+5. At the end of the job, the **"Report to Physalis"** step sends the outcome
+   of the run → the audit log shows `DEPLOY_REPORTED` with `status: succeeded`
+   or `failed`
+
+### Deployment tracking
+
+`DEPLOY_AUTHORIZED` only says that Physalis **handed the secrets** to the
+pipeline. To know whether the deployment **succeeded**, Physalis has two
+sources:
+
+- **It reads the run's outcome from the platform** (GitHub, GitLab, Bitbucket)
+  with the CI/CD connection's token, about a minute after the run ends. Nothing
+  to add to the workflow: the token only needs to be able to read runs (GitHub:
+  `repo` scope, or `Actions: read` for a fine-grained token).
+- **The workflow can also report it itself**, right away: the templates end
+  with a step that calls `POST /api/deploy/report` with the same OIDC mechanism
+  and the same Policy. Only required if the connection has no token.
+
+```json
+{ "project": "my-app", "environment": "production", "status": "succeeded" }
+```
+
+- `status` is `succeeded` or `failed`, and `detail` (optional, 500 characters
+  at most) gives the cause.
+- The report is tied to the run by the execution ID carried by the signed OIDC
+  token (`run_id` on GitHub, `pipeline_id` on GitLab, `pipelineUuid` on
+  Bitbucket). A run that takes several bundles (`build` then `deploy` jobs)
+  remains **a single** deployment.
+- Either way, it is the **run's** outcome: Physalis does not probe your site.
+  The "Deployments" tab shows where each outcome comes from (observed on the
+  platform, or reported by the pipeline).
+- The report step **never fails** the workflow. A workflow without it (older
+  than the step) is still tracked, by reading the run.
+- A report received for a run to which Physalis **served no bundle** is
+  recorded with `correlated: false`: someone deployed under your pipeline's
+  identity without taking its secrets from the vault.
+
+> **GitLab**: the OIDC token is issued when the job starts and expires with it
+> (5 min if no `timeout:` is set). The template sets `timeout: 15 minutes` so
+> that the report sent by `after_script` remains valid.
 
 ### In case of failure
 

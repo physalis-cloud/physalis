@@ -77,10 +77,18 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
+  // Un environnement neuf se range à la fin de l'ordre choisi (cf. PATCH).
+  const last = await prisma.environment.findFirst({
+    where: { projectId: access.project.id },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+
   const env = await prisma.environment.create({
     data: {
       name,
       projectId: access.project.id,
+      position: (last?.position ?? -1) + 1,
       url: url || null,
       serverId,
       deployPath,
@@ -112,4 +120,42 @@ export async function POST(req: Request, { params }: Params) {
   });
 
   return NextResponse.json({ environment: env }, { status: 201 });
+}
+
+// PATCH /api/projects/[slug]/environments — persiste l'ordre choisi par
+// glisser-déposer dans les paramètres du projet. Body : { order: string[] }
+// (ids d'environnement, dans l'ordre voulu).
+//
+// Sur la collection plutôt qu'une route `/environments/reorder` : celle-ci
+// masquerait un environnement nommé `reorder` (nom valide) pour [name].
+//
+// Pas de transaction : l'ordre est purement visuel, et `withTenantSchema`
+// refuse le tenantSlug null du self-host. Un échec en cours de route laisse au
+// pire un ordre partiel, que le client réconcilie par un refresh.
+export async function PATCH(req: Request, { params }: Params) {
+  const { slug } = await params;
+  const access = await requireProjectMember(slug, "EDITOR");
+  if ("error" in access) return access.error;
+
+  const body = (await readJson(req)) as { order?: unknown } | null;
+  const order = body?.order;
+  if (
+    !Array.isArray(order) ||
+    order.length === 0 ||
+    order.length > 200 ||
+    !order.every((id): id is string => typeof id === "string") ||
+    new Set(order).size !== order.length
+  ) {
+    return NextResponse.json({ error: "Ordre invalide" }, { status: 400 });
+  }
+
+  // `projectId` dans chaque where : un id d'un autre projet est ignoré.
+  for (const [i, id] of order.entries()) {
+    await prisma.environment.updateMany({
+      where: { id, projectId: access.project.id },
+      data: { position: i },
+    });
+  }
+
+  return NextResponse.json({ ok: true });
 }

@@ -15,6 +15,9 @@
 #      (UI : /projects/<slug> → onglet env → docker-compose)
 #   4. Policy : (repo, redeploy.yml, branch) → (project, env)
 #      ⚠ une policy distincte de deploy.yml — le `workflow` claim diffère
+#
+# Suivi des deploiements : l'etape finale « Report to Physalis » envoie l'issue
+# du run a /api/deploy/report. Elle ne fait jamais echouer le workflow.
 
 name: Redeploy
 
@@ -190,3 +193,34 @@ jobs:
           rm -f "$RUNNER_TEMP/bundle.json" "$RUNNER_TEMP/id_deploy" \
                 "$RUNNER_TEMP/.env" "$RUNNER_TEMP/docker-compose.yml" \
                 "$RUNNER_TEMP/known_hosts"
+
+      # ── Rapport à Physalis (suivi des déploiements) ─────────────────────
+      # Dit tout de suite à Physalis comment le déploiement s'est terminé.
+      # Facultatif si la connexion CI de Physalis a un jeton : il lit alors
+      # lui-même l'issue du run chez GitHub (en une minute environ).
+      # Jeton OIDC NEUF (celui du début peut avoir expiré pendant le build).
+      # Ne fait JAMAIS échouer le job : Physalis indisponible = simple warning.
+      - name: Report to Physalis
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_STATUS: ${{ job.status == 'success' && 'succeeded' || 'failed' }}
+          DEPLOY_DETAIL: job ${{ job.status }}
+        with:
+          script: |
+            try {
+              const token = await core.getIDToken(process.env.VAULT_AUDIENCE)
+              const res = await fetch(`${process.env.VAULT_URL}/api/deploy/report`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  project: process.env.VAULT_PROJECT,
+                  environment: process.env.VAULT_ENV,
+                  status: process.env.DEPLOY_STATUS,
+                  detail: process.env.DEPLOY_DETAIL,
+                }),
+              })
+              if (!res.ok) core.warning(`Physalis report: HTTP ${res.status}`)
+            } catch (e) {
+              core.warning(`Physalis report failed: ${e.message}`)
+            }

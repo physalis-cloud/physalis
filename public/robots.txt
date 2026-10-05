@@ -1,0 +1,34 @@
+# Le domaine de l'APPLICATION — pas la vitrine.
+#
+# Rien ici n'a vocation a etre indexe : tout est derriere une session, sauf les
+# pages de partage a usage unique, qui sont par nature privees et ephemeres.
+# D'ou un refus general.
+#
+# ⚠️ **Mais un refus general fait AUSSI taire les apercus de liens**, et c'est
+# le piege de ce fichier : Slack, Discord, LinkedIn et consorts respectent
+# robots.txt avant de deplier une URL. Un `Disallow: /` seul aurait donc annule
+# les metadonnees Open Graph ajoutees le meme jour — on aurait repare le logo
+# d'un cote et ferme la porte de l'autre.
+#
+# ⚠️ **Un robot ne suit QU'UN SEUL groupe** : celui qui le designe le plus
+# precisement. Les aspirateurs de liens sont donc nommes dans leur propre
+# groupe, qui remplace entierement le `*` ci-dessous pour eux — c'est la meme
+# mecanique que le robots.txt de la vitrine, en sens inverse.
+#
+# Ce qu'ils voient en depliant : le titre, la description et l'image de marque.
+# Jamais le contenu d'un partage — il est chiffre, et sa cle vit dans le
+# fragment `#` de l'URL, que le navigateur n'envoie pas au serveur.
+
+User-agent: Slackbot-LinkExpanding
+User-agent: Slackbot
+User-agent: Twitterbot
+User-agent: facebookexternalhit
+User-agent: LinkedInBot
+User-agent: Discordbot
+User-agent: TelegramBot
+User-agent: WhatsApp
+User-agent: SkypeUriPreview
+Allow: /
+
+User-agent: *
+Disallow: /

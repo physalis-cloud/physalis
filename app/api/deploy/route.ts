@@ -23,6 +23,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { extractBearer, verifyGithubOidcToken } from "@/lib/oidc";
 import { defaultDeployPath, readJson } from "@/lib/api";
 import { isValidDeployPath } from "@/lib/validation";
+import { openDeployment } from "@/lib/deployment";
 
 // Force Node runtime : jose, node:crypto, prisma — pas Edge.
 export const runtime = "nodejs";
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { repository, workflowFile, branch } = verified.claims;
+  const { repository, workflowFile, branch, run } = verified.claims;
 
   const body = (await readJson(req)) as
     | { project?: string; environment?: string }
@@ -288,6 +289,18 @@ export async function POST(req: Request) {
     },
     req,
   });
+
+  // Suivi des déploiements (C-0051) — cf. la source SaaS. Best-effort :
+  // `openDeployment` ne lève jamais.
+  if (run) {
+    await openDeployment(prisma, {
+      projectId: project.id,
+      environmentId: environment.id,
+      policyId: policy.id,
+      ci: { provider: "github", repo: repository, workflow: workflowFile, branch },
+      run,
+    });
+  }
 
   return NextResponse.json({
     project: project.slug,

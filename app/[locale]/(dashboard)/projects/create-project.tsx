@@ -41,8 +41,11 @@ function initials(email: string): string {
 
 export default function CreateProjectForm({
   members = [],
+  onCreated,
 }: {
   members?: SettableMember[];
+  /** Appelé après une création réussie (retour à la liste des projets). */
+  onCreated?: () => void;
 }) {
   const t = useTranslations("projects");
   const router = useRouter();
@@ -126,6 +129,7 @@ export default function CreateProjectForm({
       }
       reset();
       router.refresh();
+      onCreated?.();
     });
   }
 
@@ -142,6 +146,7 @@ export default function CreateProjectForm({
           <input
             required
             value={name}
+            autoFocus
             onChange={(e) => {
               setName(e.target.value);
               if (e.target.value.trim().length > 0) setNameEverFilled(true);

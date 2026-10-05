@@ -32,7 +32,7 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { rateLimit } from "@/lib/rate-limit";
 import {
-  normalizeEntryType,
+  normalizeEntryType, isSshKeyEntry,
   type VaultPayload,
 } from "@/lib/vault-entry-types";
 import { decryptPayload } from "@/lib/vault-entry-payload";
@@ -87,6 +87,8 @@ async function loadPersonalVaultEntries(userId: string) {
       encryptedData: true,
       dataIv: true,
       dataTag: true,
+      sshPublicKey: true,
+      sshFingerprint: true,
       tags: true,
       favorite: true,
       createdAt: true,
@@ -94,6 +96,23 @@ async function loadPersonalVaultEntries(userId: string) {
     },
   });
   return vaultEntries.map((v) => {
+    // Clé SSH (C-0050) : on exporte la partie PUBLIQUE, jamais la clé privée,
+    // qui ne quitte pas le serveur par conception — même vers son
+    // propriétaire. Le blob n'est même pas déchiffré.
+    if (isSshKeyEntry(v.type)) {
+      return {
+        id: v.id,
+        type: "SSH_KEY",
+        name: v.name,
+        sshPublicKey: v.sshPublicKey,
+        sshFingerprint: v.sshFingerprint,
+        privateKey: "non exportable : la clé privée ne quitte jamais Physalis",
+        tags: v.tags,
+        favorite: v.favorite,
+        createdAt: v.createdAt,
+        updatedAt: v.updatedAt,
+      };
+    }
     // Charge utile des types LIST / NOTE. Sans ça, l'export RGPD — le seul
     // endpoint qui déchiffre par conception — perdrait en silence tout le
     // contenu des entrées qui ne sont pas des logins.

@@ -32,7 +32,11 @@ export async function GET() {
       db: dbStatus,
       db_latency_ms: dbLatencyMs,
       total_ms: totalMs,
-      version: process.env.APP_VERSION ?? "unknown",
+      // `||` et non `??` : APP_VERSION est posée par le Dockerfile, donc
+      // TOUJOURS définie dans un conteneur. Une valeur vide (ARG non passé,
+      // ligne `APP_VERSION=` dans un .env) passerait à travers `??` et
+      // s'afficherait comme `"version": ""` — moins lisible qu'un aveu.
+      version: process.env.APP_VERSION || "unknown",
       ts: new Date().toISOString(),
     },
     { status: isOk ? 200 : 503 },

@@ -4,11 +4,9 @@ import { useCallback, useEffect, useState, useTransition, type ReactNode, type C
 import TagsInput from "@/components/TagsInput";
 import { useTranslations } from "next-intl";
 import {
-  RiFileTextLine,
   RiFolderOpenLine,
   RiGridLine,
   RiInboxArchiveLine,
-  RiKey2Line,
   RiListCheck2,
   RiShuffleLine,
   RiStarFill,
@@ -19,15 +17,16 @@ import { computeDuplicates, extractDomain } from "@/lib/vault-duplicates";
 import { maskedInputProps } from "@/lib/masked-input";
 import {
   CARRIES,
-  conversionBlocker,
-  VAULT_ENTRY_TYPES,
-  VAULT_TYPE_LIMITS,
   type VaultEntryType,
   type VaultListItem,
 } from "@/lib/vault-entry-types";
+import {
+  ItemsEditor, NoteEditor, TypeGlyph, TypeSwitcher,
+} from "@/components/vault/entry-form-parts";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ExtensionBanner from "./extension-banner";
 import RenameCollectionDialog from "../rename-collection-dialog";
+import SshKeysSection from "./ssh-keys-section";
 
 type VaultEntryListItem = {
   id: string;
@@ -91,14 +90,6 @@ function initials(name: string): string {
   if (parts.length === 0 || !parts[0]) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-// Glyphe des entrées sans URL : un SECRET, une LIST ou une NOTE n'a pas de
-// favicon à afficher, et deux initiales ne disent pas de quoi il s'agit.
-function TypeGlyph({ type, size = 18 }: { type: VaultEntryType; size?: number }) {
-  if (type === "LIST") return <RiListCheck2 size={size} aria-hidden />;
-  if (type === "NOTE") return <RiFileTextLine size={size} aria-hidden />;
-  return <RiKey2Line size={size} aria-hidden />;
 }
 
 // Favicon du domaine (API Google), qui remplit son conteneur (liste ou grille).
@@ -192,13 +183,6 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
-
-/** Le coffre d'équipe (TeamVaultEntry) n'a ni colonne `type` ni blob de
- *  charge utile : y déplacer une LIST ou une NOTE la viderait. L'API refuse,
- *  l'UI ne propose pas. Miroir du garde-fou de /entries/[id]/move. */
-function isMovable(type: VaultEntryType): boolean {
-  return type === "LOGIN" || type === "SECRET";
-}
 
 /** Nom lisible d'un type d'entrée. */
 function typeLabel(type: VaultEntryType, t: VaultT): string {
@@ -319,7 +303,13 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
       setError("Erreur de chargement.");
       return;
     }
-    const data = (await res.json()) as { entries: VaultEntryListItem[] };
+    const raw = (await res.json()) as { entries: (VaultEntryListItem | { type: "SSH_KEY" })[] };
+    // Les clés SSH (C-0050) ont leur propre section (ssh-keys-section.tsx) :
+    // ni mot de passe, ni révélation, ni conversion. Les garder ici ferait
+    // indexer CARRIES sur un type qu'il ne connaît pas.
+    const data = {
+      entries: raw.entries.filter((e): e is VaultEntryListItem => e.type !== "SSH_KEY"),
+    };
     // Filtres "doublons" et "faibles" appliqués client-side (notions non
     // connues du serveur ; le score faible = 0-1).
     const filtered =
@@ -725,6 +715,8 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
           />
         )}
 
+        <SshKeysSection onChanged={reloadAllTags} />
+
         {importing && (
           <ImportDialog
             onClose={() => setImporting(false)}
@@ -952,7 +944,7 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                     <GridMoreMenu
                       onMove={() => setMoving(e)}
                       onDelete={() => remove(e)}
-                      canMove={isMovable(e.type)}
+                      canMove
                     />
                   </div>
                 </div>
@@ -1099,16 +1091,14 @@ export default function VaultPanel({ children }: { children?: ReactNode }) {
                   >
                     {t("editBtn")}
                   </button>
-                  {isMovable(e.type) && (
-                    <button
-                      type="button"
-                      onClick={() => setMoving(e)}
-                      className="btn btn-ghost btn-xs"
-                      title={t("moveBtn")}
-                    >
-                      {t("moveBtn")}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setMoving(e)}
+                    className="btn btn-ghost btn-xs"
+                    title={t("moveBtn")}
+                  >
+                    {t("moveBtn")}
+                  </button>
                   <button
                     type="button"
                     onClick={() => remove(e)}
@@ -1478,85 +1468,6 @@ function OnboardingCard({
   );
 }
 
-/**
- * Sélecteur de forme de l'entrée.
- *
- * En création les quatre formes sont libres. En édition, seules les
- * conversions qui ne détruisent rien sont proposées — miroir client de
- * conversionBlocker, calculé sur les MÉTADONNÉES STOCKÉES (pas sur l'état du
- * formulaire) puisque c'est la ligne en base que le serveur convertit. Vider
- * l'URL dans le formulaire ne débloque donc pas la conversion tant qu'on n'a
- * pas enregistré : le serveur reste l'autorité, l'UI ne promet rien qu'il
- * refuserait.
- */
-function TypeSwitcher({
-  value,
-  entry,
-  onChange,
-  disabled,
-}: {
-  value: VaultEntryType;
-  entry: VaultEntryListItem | null;
-  onChange: (next: VaultEntryType) => void;
-  disabled?: boolean;
-}) {
-  const t = useTranslations("vault");
-  return (
-    // Pas de label : les quatre pastilles se lisent seules, et la phrase
-    // d'aide sous le groupe dit déjà ce que fait le type sélectionné.
-    <div className="field">
-      <div className="flex flex-wrap gap-1.5" role="group">
-        {VAULT_ENTRY_TYPES.map((candidate) => {
-          const blocker = entry
-            ? conversionBlocker(
-                {
-                  type: entry.type,
-                  url: entry.url,
-                  username: entry.username,
-                  hasTotpSecret: entry.hasTotpSecret,
-                  itemCount: entry.itemCount,
-                },
-                candidate,
-              )
-            : null;
-          const locked = blocker !== null;
-          const active = candidate === value;
-          return (
-            <button
-              key={candidate}
-              type="button"
-              onClick={() => onChange(candidate)}
-              disabled={disabled || locked}
-              aria-pressed={active}
-              title={
-                locked
-                  ? t(`form.typeLocked.${blocker}`)
-                  : t(`types.${candidate}.hint`)
-              }
-              className={`chip chip-button ${active ? "active chip-active" : ""}`}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                // Un peu plus grandes que les pastilles de tags : c'est le
-                // premier choix du formulaire, pas une étiquette.
-                fontSize: 12.5,
-                padding: "6px 12px",
-                opacity: locked ? 0.45 : 1,
-                cursor: locked ? "not-allowed" : "pointer",
-              }}
-            >
-              <TypeGlyph type={candidate} size={13} />
-              {t(`types.${candidate}.label`)}
-            </button>
-          );
-        })}
-      </div>
-      <div className="help">{t(`types.${value}.hint`)}</div>
-    </div>
-  );
-}
-
 function EntryDialog({
   initial,
   collections,
@@ -1676,24 +1587,6 @@ function EntryDialog({
     }
     if (next === "NOTE") setText(value);
     setType(next);
-  }
-
-  function addItem() {
-    if (items.length >= VAULT_TYPE_LIMITS.itemsMax) return;
-    setItems((prev) => [...prev, { label: "", value: "" }]);
-  }
-
-  function updateItem(index: number, patch: Partial<VaultListItem>) {
-    setItems((prev) =>
-      prev.map((it, i) => (i === index ? { ...it, ...patch } : it)),
-    );
-  }
-
-  function removeItem(index: number) {
-    setItems((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      return next.length > 0 ? next : [{ label: "", value: "" }];
-    });
   }
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -1883,100 +1776,16 @@ function EntryDialog({
             )}
 
             {carries.items && (
-              <div className="field">
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                  }}
-                >
-                  <label style={{ margin: 0 }}>{t("form.itemsLabel")}</label>
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    disabled={items.length >= VAULT_TYPE_LIMITS.itemsMax}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {t("form.addItemBtn")}
-                  </button>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {items.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input
-                        name={`vault-entry-item-label-${i}`}
-                        autoComplete="off"
-                        value={item.label}
-                        onChange={(ev) => updateItem(i, { label: ev.target.value })}
-                        placeholder={t("form.itemLabelPlaceholder")}
-                        className="input"
-                        style={{ flex: "1 1 40%" }}
-                      />
-                      <input
-                        {...maskedInputProps(showPassword)}
-                        name={`vault-entry-item-${i}`}
-                        autoComplete="off"
-                        value={item.value}
-                        onChange={(ev) => updateItem(i, { value: ev.target.value })}
-                        placeholder={t("form.itemValuePlaceholder")}
-                        style={{ flex: "1 1 60%" }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeItem(i)}
-                        title={t("form.removeItemBtn")}
-                        aria-label={t("form.removeItemBtn")}
-                        className="btn btn-ghost btn-xs"
-                        // Même hauteur que les deux champs de la ligne.
-                        style={{
-                          height: 42,
-                          flex: "0 0 auto",
-                          padding: "0 10px",
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="btn btn-ghost btn-xs"
-                  >
-                    {showPassword ? t("hideBtn") : t("revealBtn")}
-                  </button>
-                  <span className="help">
-                    {t("form.itemsHint", { max: VAULT_TYPE_LIMITS.itemsMax })}
-                  </span>
-                </div>
-              </div>
+              <ItemsEditor
+                items={items}
+                onChange={setItems}
+                visible={showPassword}
+                onToggleVisible={() => setShowPassword((v) => !v)}
+              />
             )}
 
-            {carries.text && (
-              <div className="field vault-grow-field">
-                <label>{t("form.textLabel")}</label>
-                <textarea
-                  name="vault-entry-text"
-                  autoComplete="off"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  rows={6}
-                  maxLength={VAULT_TYPE_LIMITS.noteTextMax}
-                  placeholder={t("form.textPlaceholder")}
-                  className="textarea"
-                />
-                <div className="help" style={{ marginTop: 4 }}>
-                  {t("form.textHint", {
-                    n: text.length,
-                    max: VAULT_TYPE_LIMITS.noteTextMax,
-                  })}
-                </div>
-              </div>
-            )}
+            {carries.text && <NoteEditor text={text} onChange={setText} />}
+
 
             {carries.totp && (
               <div className="field">
@@ -2176,6 +1985,8 @@ function MoveDialog({
   const collections = selectedParent?.collections ?? [];
   // Cible « compte de projet » (AppAccount) : pas de collection ; url + 2FA perdus.
   const isAccountTarget = scope === "project_account";
+  /** Le contenu de l'entrée tient-il dans un `{user, password}` ? */
+  const porteUnCouple = entry.type === "LOGIN" || entry.type === "SECRET";
 
   // Reset cascade quand l'utilisateur change de scope.
   function changeScope(next: "team_org" | "team_project" | "project_account") {
@@ -2317,6 +2128,13 @@ function MoveDialog({
                       value="project_account"
                       checked={scope === "project_account"}
                       onChange={() => changeScope("project_account")}
+                      // ⚠️ Un compte de projet ne porte qu'un
+                      // `{user, password}` : y déplacer une LIST ou une NOTE la
+                      // viderait en silence. C'est la SEULE cible encore
+                      // restreinte depuis que le coffre d'équipe a les quatre
+                      // formes (C-0047), et l'API refuse aussi — l'écran ne
+                      // fait que ne pas proposer un chemin qui finirait en 400.
+                      disabled={!porteUnCouple}
                     />
                     {t("move.scopeAccount")}
                   </label>

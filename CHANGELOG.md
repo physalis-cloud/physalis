@@ -9,6 +9,57 @@ pendant la mise à jour. Lisez-les avant de lancer `docker compose up -d`.
 
 ---
 
+## [1.7.0] — 2026-10-05
+
+> ⚠️ **Vous venez de la 1.6.0 ou d'une version antérieure ?** Lisez d'abord la
+> rupture de la [1.6.1](#161--2026-09-26) : le port n'est plus publié que sur
+> `127.0.0.1`. Une instance jointe directement par l'IP du serveur, sans
+> reverse proxy, deviendrait injoignable tant que `BIND_IP` n'est pas posé.
+
+La mise à jour applique une migration de base (`20261005100000_catchup_2026_10`)
+au démarrage du conteneur, comme d'habitude. Elle n'ajoute que des tables et des
+colonnes facultatives ou avec une valeur par défaut : aucune donnée n'est
+modifiée, à une exception près, voulue — les projets existants sont marqués
+« antérieurs au guide d'installation » (voir ci-dessous).
+
+### Ajouté
+
+- **Session CLI** : `physalis login` ouvre une session par flux d'appareil,
+  approuvée depuis le navigateur (`/account/cli`). `physalis run` injecte les
+  secrets avec les droits de l'utilisateur, re-vérifiés à chaque requête — plus
+  besoin de fichiers `.env` sur le poste. `physalis pull` est refusé hors des
+  environnements de développement et tracé comme un export. Les sessions
+  ouvertes se consultent et se révoquent depuis le compte. Une session « agent
+  IA » est limitée au périmètre coché par l'humain.
+- **Clés SSH dans le coffre personnel** : génération ed25519 ou import
+  (OpenSSH, PKCS#8, PEM). La clé privée n'est jamais renvoyée au navigateur.
+  Une API d'agent SSH (`/api/agent/ssh/*`) liste les clés et fait signer par
+  le serveur, chaque signature étant journalisée.
+- **Suivi des déploiements** : chaque run OIDC est enregistré, son issue
+  remonte par `/api/deploy/report` ou est lue chez la plateforme (GitHub,
+  GitLab, Bitbucket). Un sous-onglet « Déploiements », ouvert par défaut,
+  liste les runs d'un environnement et permet de les relancer.
+- **Guide d'installation** : un onglet calcule les étapes restantes d'un projet
+  depuis son état réel (dépôt, policy, fichier de workflow, premier
+  déploiement) et fournit des modèles de workflow pré-remplis à copier ou
+  télécharger. Les projets créés avant cette version sont marqués comme
+  antérieurs au guide : il ne leur est pas imposé, et une vérification dédiée
+  indique ce qui manque à leur workflow.
+- Projets : recherche, ordre des environnements par glisser-déposer, filtre
+  des secrets.
+- Déploiement mobile : synchronisation des versions publiées et actions sur
+  les magasins depuis l'interface.
+
+### Modifié
+
+- `/api/health` renvoie la version de l'image (`"version": "X.Y.Z+sha"`), pour
+  savoir quelle version tourne réellement.
+
+### Sécurité
+
+- Import de clé SSH : le nombre de tours `bcrypt-pbkdf` est plafonné — une clé
+  forgée pouvait bloquer le serveur.
+
 ## [1.6.1] — 2026-09-26
 
 ### ⚠️ Rupture — le port n'est plus publié sur toutes les interfaces

@@ -24,7 +24,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const secrets = await prisma.secret.findMany({
     where: { environmentId: access.environment.id },
-    select: { id: true, key: true, category: true, tags: true, updatedAt: true, createdAt: true, rotationEnabled: true, rotationStrategy: true },
+    select: { id: true, key: true, category: true, tags: true, updatedAt: true, createdAt: true, rotationEnabled: true, rotationStrategy: true, rotationNextAt: true, rotationLastStatus: true },
     orderBy: { key: "asc" },
   });
 

@@ -226,6 +226,12 @@ html, body {
 }
 
 .btn-sm { padding: 5px 10px; font-size: 12px; }
+/* Bouton qui ne porte QU'UNE icône : le padding latéral se cale sur le vertical
+   pour qu'il reste carré. Sans ça, un chevron de 18 px dans un bouton fait pour
+   du texte donne un rectangle large et vide de chaque côté.
+   ⚠️ Son nom accessible vient de l'`aria-label` — un bouton sans texte n'en a
+   aucun, et un lecteur d'écran annonce alors « bouton », rien de plus. */
+.btn-icone { padding-left: 6px; padding-right: 6px; }
 .btn-xs { padding: 3px 8px; font-size: 11px; gap: 4px; }
 
 /* Bouton calé sur la hauteur d'un champ .input (même padding vertical +
@@ -461,19 +467,30 @@ h1.page-hero-title {
 .group-drag-handle:active { cursor: grabbing; }
 .group-manage-empty { color: var(--muted); font-size: 13px; margin: 0; }
 
-/* Ligne de création : « Créer un projet » (2/3) + « Créer un groupe » (1/3) */
-.create-row {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
+/* Paramètres du projet → Environnements : poignée de glisser-déposer + ligne.
+   La poignée vit HORS de `.row` (grille à 3 colonnes) pour ne pas la décaler. */
+.env-order-row { display: flex; align-items: stretch; gap: 6px; border-radius: 12px; }
+.env-order-row > :last-child { flex: 1; min-width: 0; }
+.env-order-row.is-over { box-shadow: 0 -3px 0 0 var(--accent); }
+
+/* Barre d'accueil de la page Projets : recherche à gauche, boutons « Créer un
+   projet » / « Créer un groupe » à droite. */
+.projects-toolbar {
+  display: flex; align-items: center; gap: 12px;
   margin-bottom: 20px;
 }
-.create-col-main { flex: 2 1 0; min-width: 0; }
-.create-col-aside { flex: 1 1 0; min-width: 0; }
-.create-row .create-card { margin-bottom: 0; }
+.projects-search { position: relative; flex: 1 1 auto; min-width: 0; max-width: 420px; }
+.projects-search .input { padding-left: 36px; }
+.projects-search-icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--muted); pointer-events: none;
+}
+.projects-toolbar-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
 @media (max-width: 760px) {
-  .create-row { flex-direction: column; }
-  .create-col-main, .create-col-aside { width: 100%; }
+  .projects-toolbar { flex-direction: column; align-items: stretch; }
+  .projects-search { max-width: none; }
+  .projects-toolbar-actions { margin-left: 0; }
+  .projects-toolbar-actions .btn { flex: 1; justify-content: center; }
 }
 
 /* Board kanban : sections de groupe empilées */
@@ -647,6 +664,28 @@ h1.page-hero-title {
 .row-meta a:hover { text-decoration: underline; }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ─── Une ligne qui porte un bloc de DÉTAIL ────────────────────────────
+ * Adresse de chat, alerte, diagnostic : du contenu qui appartient à la carte
+ * entière, pas à la colonne du milieu. Rendu dans `.row-info`, il était coincé
+ * entre l'icône et les boutons — une URL de 90 caractères s'y repliait sur
+ * quatre lignes pendant que la moitié droite de la carte restait vide.
+ * ⚠️ `align-items: start` : sans lui, l'icône et les boutons flottent au milieu
+ * d'une carte haute, loin du titre auquel ils se rapportent. */
+.row-detaillee { align-items: start; }
+.row-detail { grid-column: 1 / -1; min-width: 0; }
+
+/* Une adresse qu'on emporte : encadrée, et le geste tout à droite. */
+.url-box {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px;
+}
+/* ⚠️ `min-width: 0` sur la valeur ET `flex-shrink: 0` sur le bouton : sans les
+ * deux, une URL sans espace pousse le bouton hors du cadre au lieu de se
+ * couper. */
+.url-box .url-valeur { flex: 1; min-width: 0; word-break: break-all; }
+.url-box .btn { flex-shrink: 0; }
+
 /* ─── Forms ───────────────────────────────────────────────────────── */
 
 .form-row {
@@ -656,6 +695,13 @@ h1.page-hero-title {
   display: flex; flex-direction: column; gap: 5px;
   flex: 1; min-width: 160px;
 }
+/* Le champ qui ne demande QUE quelques caractères — une expression cron, un
+   seuil. ⚠️ `flex-grow: 0` : il ne réclame pas sa part de la largeur restante,
+   il la LAISSE à ses voisins, dont le libellé se coupait en trois lignes
+   pendant qu'un champ de quinze caractères occupait le même tiers d'écran.
+   Il peut encore RÉTRÉCIR (`flex-shrink: 1`), sinon il forcerait le repli de la
+   ligne entière sur un écran étroit. */
+.field-etroit { flex: 0 1 170px; }
 .field label {
   font-size: 11px;
   text-transform: uppercase;
@@ -663,6 +709,105 @@ h1.page-hero-title {
   font-weight: 600;
   color: var(--muted);
 }
+
+/* ─── L'aide d'un champ, repliée derrière une icône ────────────────────────
+ * Le POURQUOI est dans `AideChamp` (automation-tabs.tsx) ; ici, la mécanique.
+ *
+ * ⚠️ L'icône vit DANS le `<label>`, dont elle hérite la casse et l'interligne :
+ * `text-transform: none` sur la bulle, sinon l'aide se lit tout en capitales.
+ * `vertical-align` par un `inline-flex` aligné sur le texte, pour ne pas
+ * décaler la ligne du nom du champ. */
+.aide-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  color: var(--muted);
+  opacity: 0.75;
+  cursor: help;
+  vertical-align: -2px;
+}
+.aide-info:hover, .aide-info:focus-visible { opacity: 1; color: var(--accent-text); }
+.aide-info:focus-visible { outline: none; }
+
+/* ⚠️ La bulle est TOUJOURS dans le DOM, jamais `display: none` : c'est ce qui
+   la laisse lire par un lecteur d'écran avec le nom du champ, même masquée.
+   `visibility` + `opacity` la retirent de l'écran sans la retirer de l'arbre. */
+.aide-bulle {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -8px;
+  z-index: 40;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--fg);
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.45);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s;
+  /* La bulle ne doit pas se mettre entre le curseur et le champ : sans ça, la
+     survoler puis descendre vers la saisie passe par une zone qui intercepte
+     le clic. */
+  pointer-events: none;
+}
+/* La pointe, tournée vers l'icône. */
+.aide-bulle::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  border: 5px solid transparent;
+  border-top-color: var(--fg);
+}
+.aide-info:hover .aide-bulle,
+.aide-info:focus-visible .aide-bulle { visibility: visible; opacity: 1; }
+
+/* La même bulle, ancrée à DROITE. Une icône posée dans le coin droit d'une carte
+   ferait déborder une bulle qui s'étend vers la droite — hors du cadre, voire
+   hors de l'écran sur un portable. */
+.aide-bulle-droite { left: auto; right: -8px; }
+.aide-bulle-droite::after { left: auto; right: 12px; }
+
+/* ─── Les marques d'un gabarit : ce à quoi il engage ───────────────────────
+ * Une icône par avertissement, alignées dans le coin haut-droit de sa carte.
+ *
+ * ⚠️ **Le doré des accents, pas le rouge des erreurs.** Aucune de ces marques
+ * n'est une panne : ce sont des PORTÉES — ce workflow parle dehors, il envoie
+ * du contenu à un fournisseur, il suppose une feuille déjà nommée. Le rouge les
+ * aurait fait lire comme des refus, et on aurait cherché quoi réparer.
+ * `attention` seul tire vers le rouge : c'est le fourre-tout, et il porte les
+ * dégâts possibles (un arriéré qui se déverse d'un coup).
+ *
+ * ⚠️ **Elles doivent RESTER visibles.** Le texte qu'elles remplacent était lu
+ * sans effort ; une icône trop pâle ne serait pas un repli, ce serait une
+ * suppression. D'où l'opacité pleine, à rebours de `.aide-info`. */
+.gabarit-marques {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.gabarit-marque {
+  margin-left: 0;
+  opacity: 1;
+  color: var(--accent-text);
+}
+.gabarit-marque:hover, .gabarit-marque:focus-visible { color: var(--accent-text); }
+.gabarit-marque-attention,
+.gabarit-marque-attention:hover,
+.gabarit-marque-attention:focus-visible { color: var(--danger); }
 .input, .select, .textarea {
   padding: 10px 14px;
   border: 1px solid var(--border);
@@ -684,6 +829,35 @@ h1.page-hero-title {
   font-size: 13px;
 }
 .input[readonly] { background: var(--code-bg); }
+
+/* Le chevron d'un `<select>`, dessiné par NOUS.
+ *
+ * ⚠️ Sans `appearance: none`, chaque navigateur pose le sien : une flèche
+ * système grise sur Chrome, un triangle sur Firefox, un chevron bleu sur Safari.
+ * Nos champs partagent la même bordure, le même rayon et la même hauteur ; la
+ * seule chose qui distinguait un menu d'une saisie était donc rendue par trois
+ * dessins différents, dont aucun n'était le nôtre.
+ *
+ * ⚠️ Le chevron est une IMAGE DE FOND, pas un pseudo-élément : un `<select>`
+ * n'accepte ni `::after` ni enfant de rendu, et l'envelopper dans un `<div>`
+ * positionné aurait demandé de toucher chaque formulaire. Sa couleur est celle
+ * de `--muted` recopiée dans le SVG — une URL de données ne connaît pas les
+ * variables CSS.
+ *
+ * ⚠️ `padding-right` réservé à sa largeur : sans lui, une option longue passe
+ * SOUS le chevron. */
+select.input, select.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%236b6258' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  background-size: 11px 8px;
+}
+/* Un menu qu'on ne peut pas ouvrir ne porte pas la même promesse : le chevron
+   s'efface avec le reste, sinon il invite à cliquer sur ce qui ne répond pas. */
+select.input:disabled, select.select:disabled { background-image: none; }
 
 /* Champ masqué SANS `type="password"` — cf. lib/masked-input.ts pour le
  * pourquoi (pop-up « Enregistrer ce mot de passe ? » et pré-remplissage par
@@ -965,6 +1139,29 @@ h1.page-hero-title {
 }
 .gold-section > .section-title { margin-top: 0; }
 
+/* Notification d'information — ni un succès, ni une erreur : le retour d'un
+   geste qu'on vient de faire. Le seul ton froid du système, pour qu'elle ne se
+   confonde ni avec le doré des cadres (qui GROUPE du contenu durable) ni avec
+   le rouge des erreurs. Elle est faite pour disparaître : le contenu qu'elle
+   commente reste à l'écran quand elle s'en va. */
+.info-box {
+  background: #e8f0fb;
+  border: 1px solid #bfd4ee;
+  color: #1c3d7a; /* WCAG AA : 8.3:1 sur le fond ci-dessus */
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+/* Même cadre, ton d'échec : une action qui n'a pas eu lieu se lit au même
+   endroit qu'un retour réussi — c'est la couleur qui les sépare, pas la forme. */
+.info-box.danger {
+  background: var(--danger-bg);
+  border-color: #f2c9c9;
+  color: var(--danger-fg);
+}
+
 /* Split 2/3 – 1/3 (admin client detail : Quotas | Accès). Passe en pile
    sous 900px, comme le reste des grilles admin. */
 .admin-split {
@@ -1037,6 +1234,59 @@ h1.page-hero-title {
 
 /* ─── Badges & roles ──────────────────────────────────────────────── */
 
+/* Barre d'étapes du guide d'installation (C-0051) : bulles posées sur une
+   ligne, libellé court dessous. */
+.setup-trail { position: relative; padding-top: 2px; }
+.setup-trail ol {
+  list-style: none; margin: 0; padding: 0; position: relative;
+  display: flex; justify-content: space-between;
+}
+.setup-trail li { flex: 1; display: flex; justify-content: center; min-width: 0; }
+/* Ligne de fond : du centre de la 1re bulle au centre de la dernière. */
+.setup-trail-line {
+  position: absolute; top: 15px; height: 2px; border-radius: 1px;
+  left: calc(100% / 16); right: calc(100% / 16);
+  background: var(--border);
+}
+.setup-trail-line-fill { height: 100%; background: var(--accent); border-radius: 1px; transition: width .2s; }
+.setup-trail-step {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 0; cursor: pointer; min-width: 0;
+  color: var(--muted); font: inherit;
+}
+.setup-trail-bubble {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%;
+  font-size: 12px; font-weight: 600;
+  background: var(--surface); color: var(--muted);
+  border: 2px solid var(--border);
+}
+.setup-trail-label {
+  font-size: 11px; line-height: 1.2; text-align: center;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.setup-trail-step:hover .setup-trail-bubble { border-color: var(--border-strong); color: var(--fg); }
+.setup-trail-step:focus-visible { outline: none; }
+.setup-trail-step:focus-visible .setup-trail-bubble { outline: 2px solid var(--accent); outline-offset: 2px; }
+.setup-trail-step.is-done .setup-trail-bubble { color: var(--success); border-color: var(--success); }
+.setup-trail-step.is-optional .setup-trail-bubble,
+.setup-trail-step.is-manual .setup-trail-bubble { border-style: dashed; }
+.setup-trail-step.is-current .setup-trail-bubble { border-color: var(--accent); }
+.setup-trail-step.is-selected .setup-trail-bubble {
+  background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent);
+}
+.setup-trail-step.is-selected .setup-trail-label { color: var(--fg); font-weight: 600; }
+@media (max-width: 640px) {
+  .setup-trail-label { display: none; }
+}
+
+/* Texte réservé aux lecteurs d'écran. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px; border-radius: 4px;
@@ -1079,6 +1329,17 @@ h1.page-hero-title {
 .role-free { background: #e3f2fd; color: #1565c0; }
 .role-shared { background: var(--code-bg); color: var(--muted); }
 .role-dedicated { background: var(--accent-bg); color: #6a4c14; }
+
+/* « C'est fait / c'est actif / oui » — le vert des pastilles d'état.
+   ⚠️ **Cette classe MANQUAIT**, alors que dix endroits l'écrivaient déjà :
+   instances connectées, workflows actifs, capacités de l'API, essai passé, note
+   promue, module ouvert. `.role` seul ne pose que la forme (10 px, gras,
+   capitales) — sans fond ni couleur, la pastille se lisait comme du texte nu, et
+   « CONNECTÉE » ne se distinguait plus de ce qui l'entourait.
+   ⚠️ Le couple de `.role-admin_dev` et non celui de `.role-active` : ce
+   dernier (#3a7d44 sur #e7f3e9) plafonne à 4,38:1, sous le seuil AA des 4,5
+   qu'un texte de 10 px doit tenir. Celui-ci donne 6,93:1. */
+.role-done { background: #e6f4ea; color: #1b5e20; }
 
 /* ─── Plan options (signup radio cards) ──────────────────────────── */
 
@@ -2050,6 +2311,218 @@ a.text-accent { text-decoration: underline; }
 .tuto-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .tuto-nav-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tuto-nav-btn-primary:hover:not(:disabled) { filter: brightness(1.05); color: #fff; }
+
+/* ─── Automatisations ─────────────────────────────────────────────────
+ * Le cadre doré (`.gold-section`) groupe ce qui se lit ensemble ; les blocs
+ * blancs qu'il contient séparent les questions. Même motif que la fiche client
+ * de l'admin et que le formulaire de tâche.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* Un bloc blanc DANS une div dorée. `.card` ferait le même fond mais avec ses
+   20px de padding et son arrondi de 14 : trop lâche pour trois blocs empilés
+   dans un cadre qui a déjà son propre padding. */
+/* L'accueil du module d'automatisation : les instances, en grille de cartes
+   dans un cadre doré. Même forme que « Projets récents » du tableau de bord —
+   un écran qui se reconnaît est un écran qu'on n'apprend pas deux fois.
+   ⚠️ Bâti sur les jetons d'accent existants et non sur des valeurs en dur :
+   une couleur dorée recopiée ici aurait dérivé du reste au premier ajustement
+   de la charte. */
+/* ⚠️ Colonne flex et non un simple bloc : le cadre porte désormais DEUX enfants
+   quand on connecte une instance — la carte de la portée choisie, puis son
+   formulaire. Le `gap` les sépare sans qu'aucun des deux n'ait à porter une
+   marge que l'autre devrait connaître. */
+.auto-instances {
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-bg);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* La carte d'une instance. Elle vient en deux emballages — `<button>` quand elle
+   est connectée et donc cliquable en entier, `<div>` quand elle ne porte qu'un
+   bouton « Connecter » — d'où les remises à zéro de `font`, `text-align` et
+   `width` : sans elles, l'emballage bouton centrerait le texte et le mettrait
+   en 13,33 px system-ui. */
+.auto-instance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+/* Le titre à gauche, l'état à droite, sur la MÊME ligne. Collé derrière le
+   titre, l'état se lisait comme la fin de son nom — et il changeait de position
+   d'une carte à l'autre selon la longueur de la portée, donc on le cherchait. */
+.auto-instance-tete {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+/* ⚠️ `margin: 0` : l'espacement de la carte vient du `gap` de la colonne. Le
+   `margin-top` que `.help` porte partout ailleurs s'y ajouterait. */
+.auto-instance-detail { display: block; margin: 0; }
+/* La carte EST la cible, dans les deux états — seule l'action change. Même
+   réponse au survol que `.card-link`, parce que c'est la même promesse :
+   « ceci se clique ».
+   ⚠️ Le focus clavier est rendu VISIBLE : une carte devenue bouton se traverse
+   à la tabulation, et rien d'autre ici ne dirait où l'on est. */
+.auto-instance-card-clic { cursor: pointer; }
+.auto-instance-card-clic:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  box-shadow: 0 4px 16px -8px rgba(201, 148, 63, 0.25);
+}
+.auto-instance-card-clic:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.auto-instance-card-clic:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.auto-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.auto-block:last-child { margin-bottom: 0; }
+/* La ligne d'un workflow, quand elle sert d'en-tête à sa fiche ouverte : elle
+   garde sa forme de ligne mais cesse de réagir au survol — ce n'est plus une
+   cible cliquable dans une liste, c'est le titre de ce qu'on lit dessous. */
+.auto-block-row { margin-bottom: 12px; }
+
+/* Galerie des gabarits : 4 par ligne. Un bouton nu ne portait que le titre —
+   il fallait en ouvrir un pour savoir ce qu'il fait. */
+.gabarit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1180px) { .gabarit-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 860px) { .gabarit-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .gabarit-grid { grid-template-columns: 1fr; } }
+
+.gabarit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gabarit-card:hover { border-color: var(--accent-soft); }
+.gabarit-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: 0 4px 16px -8px rgba(201, 148, 63, 0.35);
+}
+.gabarit-card-titre {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  /* Le brun-doré foncé des boutons que ces cartes remplacent (`.btn-primary`,
+     `.org-pill`) : la carte a changé de forme, pas de famille. */
+  color: #6a4c14;
+}
+.gabarit-card-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* Dans la GALERIE, la carte ne porte qu'un résumé : trois lignes, pas une de
+   plus. Sans cette borne, une description longue étirait sa carte et la ligne
+   entière avec elle — quatre cartes de hauteurs inégales, dont une qui pousse
+   les suivantes hors de l'écran.
+   ⚠️ Le budget en caractères (`RESUME_MAX`) coupe déjà le texte au dernier mot
+   entier ; ce clamp est la garantie VISUELLE, celle qui tient quelle que soit
+   la largeur réelle de la carte. Les deux, pas l'un ou l'autre.
+   ⚠️ Portée à `.gabarit-grid` : la carte SEULE, une fois le gabarit choisi,
+   affiche la description entière — c'est précisément ce qu'on est venu lire. */
+.gabarit-grid .gabarit-card-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+/* La carte du gabarit CHOISI : seule, sur toute la largeur du cadre doré. Les
+   autres sont masquées — on ne choisit plus, on remplit.
+   ⚠️ **C'est le conteneur `.gabarit-solo` qui porte la carte**, pas le bouton :
+   il tient le titre, la description ET l'avertissement, qui ne parlent que d'une
+   seule chose. Le bouton, lui, ne garde que le clic qui dé-sélectionne — un
+   avertissement cliquable qui referme le formulaire ferait perdre la saisie.
+   ⚠️ BLANCHE, là où une carte sélectionnée est dorée. La sélection se voyait
+   dans la galerie, parmi ses voisines ; seule sur un fond doré, la même teinte
+   ne distingue plus rien et rapproche le titre du cadre au lieu de l'en
+   détacher. Le liseré et l'ombre dorés d'`is-selected`, eux, restent. */
+.gabarit-solo {
+  position: relative; /* l'ancre du repère « émet vers l'extérieur » */
+  margin-top: 12px;
+  /* ⚠️ Et une marge EN BAS : le formulaire commence juste dessous, et deux
+     cartes blanches qui se touchent se lisent comme une seule coupée en deux. */
+  margin-bottom: 14px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 16px -8px rgba(201, 148, 63, 0.35);
+}
+/* Le bouton redevient nu à l'intérieur : le cadre, le fond et l'ombre sont
+   maintenant au conteneur, et les redoubler dessinerait une carte dans la
+   carte. */
+.gabarit-solo .gabarit-card-solo {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+/* L'avertissement n'est plus un bloc séparé mais le BAS de cette carte : il
+   perd son cadre et garde un filet de séparation, pour rester distinct de la
+   description sans se poser en second sujet. */
+.gabarit-solo .gabarit-avertissement {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+}
+
+/* L'avertissement du gabarit choisi, entre sa description et son formulaire.
+   ⚠️ Un bloc à part et non une ligne d'aide de plus : ce qu'il dit — vos données
+   partent chez un fournisseur, chaque exécution vous est facturée — se décide
+   AVANT de remplir le formulaire, pas après l'avoir envoyé. Noyé dans du gris à
+   12 px, il se lisait après coup. */
+.gabarit-avertissement {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+.gabarit-avertissement p { margin: 0; font-size: 13px; line-height: 1.5; }
+.gabarit-avertissement p + p { margin-top: 6px; }
+/* Le ⚠️ du catalogue en premier et en foncé ; les rappels de conduite (« ne
+   modifie rien », « naît désactivé ») sous lui, en gris. Deux poids, parce que
+   ce ne sont pas deux choses de même gravité. */
+.gabarit-avertissement-fort { color: var(--danger-fg); font-weight: 500; }
+.gabarit-avertissement-note { color: var(--muted); }
 
 /* ─── Responsive (mobile) ─────────────────────────────────────────────
  * Quick wins globaux : on adresse les patterns les plus repandus

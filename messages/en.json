@@ -1,4 +1,11 @@
 {
+  "rotationBadge": {
+    "auto": "Automatic rotation",
+    "assisted": "Assisted rotation",
+    "nextAt": "next due on {date}",
+    "due": "Due",
+    "failed": "Failed"
+  },
   "rotationAssisted": {
     "title": "Rotate — {key}",
     "desc": "Assisted rotation: generate or enter the new value. Physalis stores it (the old one stays recoverable via history) but does not apply it at the source — you must change it yourself on the relevant account.",
@@ -148,7 +155,8 @@
       "closeMenu": "Close menu",
       "openMenu": "Open menu",
       "ariaLabel": "Main navigation",
-      "parameters": "Settings"
+      "parameters": "Settings",
+      "automation": "Automations"
     },
     "orgSwitcher": {
       "placeholder": "Choose an organisation",
@@ -185,6 +193,8 @@
     "recentProjects": "Recent projects",
     "activity": {
       "title": "Recent activity",
+      "hide": "Hide",
+      "show": "Show",
       "pagination": "{start}–{end} of {total}",
       "ariaLabel": "Filter activity",
       "emptyAll": "No recent activity",
@@ -265,7 +275,11 @@
       "DEPLOY_AUTHORIZED": "Deploy authorized",
       "DEPLOY_DENIED": "Deploy denied",
       "PLUGIN_AUTH_SUCCESS": "Extension login",
-      "PLUGIN_AUTH_FAILURE": "Extension login failed"
+      "PLUGIN_AUTH_FAILURE": "Extension login failed",
+      "CLI_SESSION_APPROVED": "CLI session approved",
+      "CLI_SESSION_DENIED": "CLI sign-in denied",
+      "CLI_SESSION_REVOKED": "CLI session revoked",
+      "SSH_KEY_SIGN": "SSH signature"
     },
     "time": {
       "justNow": "just now",
@@ -626,6 +640,32 @@
         "prevPage": "Previous page",
         "nextPage": "Next page"
       },
+      "cliSessions": {
+        "title": "CLI sessions",
+        "desc": "Terminals signed in with “physalis login”. Each session lasts 12 hours and gives access to all your projects; revoke any you don't recognise.",
+        "noSessions": "No CLI session.",
+        "loading": "Loading…",
+        "loadError": "Failed to load.",
+        "unknownDevice": "Unnamed device",
+        "kind": {
+          "HUMAN": "Human",
+          "AI": "AI agent"
+        },
+        "createdAt": "Opened on {date}",
+        "expires": "expires on {date}",
+        "lastUsed": "last used on {date}",
+        "ip": "from {ip}",
+        "status": {
+          "active": "Active",
+          "revoked": "Revoked",
+          "expired": "Expired"
+        },
+        "revokeBtn": "Revoke session",
+        "revokeError": "Could not revoke the session.",
+        "prevPage": "Previous page",
+        "nextPage": "Next page",
+        "aiScope": "can read: {scope}"
+      },
       "social": {
         "title": "Sign in with an external account",
         "desc": "Link your personal Google, GitHub or Microsoft account to sign in to Physalis in one click, in addition to your password. You can unlink at any time.",
@@ -688,7 +728,9 @@
     "pageTitle": "Projects",
     "noOrg": "You are not a member of any organisation. Create one via the menu at the top left.",
     "empty": "No projects yet",
-    "emptyHint": "Use the form above to create your first one.",
+    "emptyHint": "Click “Create a project” to create your first one.",
+    "searchPlaceholder": "Search projects (name, slug)…",
+    "searchNoMatch": "No project matches “{query}”.",
     "createForm": {
       "title": "Create a project",
       "nameLabel": "Name",
@@ -826,7 +868,8 @@
       "email": "Email",
       "backup": "Backup",
       "mobile": "Mobile",
-      "rotation": "Rotation"
+      "rotation": "Rotation",
+      "deployments": "Deployments"
     },
     "mobile": {
       "title": "Mobile deployment",
@@ -937,7 +980,33 @@
           "halted": "halted",
           "rejected": "rejected",
           "failed": "failed"
-        }
+        },
+        "sync": "Refresh from the store",
+        "syncing": "Asking the store…",
+        "syncDone": "{matched} release(s) found at the store, {changed} updated.",
+        "fromStore": "(store)",
+        "fromStoreHint": "Status observed at Google or Apple, not declared by the pipeline.",
+        "syncErr": {
+          "failed": "Refresh failed.",
+          "store_unreachable": "The store did not answer — your releases are unchanged.",
+          "play_key_missing": "No Google Play service account on this application.",
+          "asc_key_missing": "Incomplete App Store Connect API key on this application.",
+          "unsupported_platform": "Unsupported platform."
+        },
+        "promote": "Promote…",
+        "halt": "Halt",
+        "promoteConfirm": "Promote build {build} to the “{track}” track? The version becomes available to that track's users. ⚠️ Irreversible: Google refuses to go back to a lower build number — rolling back means publishing a fixed version.",
+        "haltConfirm": "Halt rollout of build {build} on “{track}”? Google stops serving it to new users. ⚠️ People who ALREADY installed it keep it: the only remedy is publishing a fixed version.",
+        "actionDone": "Action sent to the store.",
+        "actionErr": "The store refused the action.",
+        "promoteConfirmBtn": "Promote",
+        "promoteTrackLabel": "Target track",
+        "promoteTrackChoose": "Choose a track…",
+        "currentTrack": "current track",
+        "promoteFractionLabel": "Percentage of users",
+        "promoteFractionPlaceholder": "% (opt.)",
+        "promoteFractionHint": "Leave empty for a full rollout. Between 1 and 99 for a staged rollout: Google serves the version to that share of the track's users only.",
+        "promoteConfirmProduction": "⚠️ PRODUCTION — promoting build {build} makes it available to ALL real users of the application. Irreversible: Google refuses to go back to a lower build number, and rolling back means publishing a fixed version. Confirm?"
       },
       "certificates": {
         "load": "Show Apple certificates",
@@ -959,13 +1028,14 @@
         "failed": "Generation failed.",
         "hintAndroid": "Physalis builds the upload key (RSA pair + certificate, ~27 years) and its password. No account required. The private key never leaves the vault. ⚠️ This is the upload key, which Google can reset if Play App Signing is on — not the app signing key.",
         "hintIos": "From your App Store Connect API key (.p8) alone, Physalis builds the key pair, the CSR, the distribution certificate, the .p12 and the provisioning profile. No Mac required: a Mac is only needed to compile, not to generate.",
-        "replaceConfirmAndroid": "This app already has a keystore. Generating a new one does NOT touch the app signing key held by Google — only the upload key — but any pipeline still holding the old one will fail, and Google will have to approve the new upload key. The old keystore stays available in history. Continue?",
-        "replaceConfirmIos": "This app already has a distribution certificate. Generating a new one consumes a slot at Apple (2 to 3 maximum) and profiles tied to the old certificate will stop signing. The old material stays available in history. Continue?",
+        "replaceConfirmAndroid": "This app already has a keystore. Generating a new one does NOT touch the app signing key held by Google — only the upload key — but any pipeline still holding the old one will fail, and Google will have to approve the new upload key. ⚠️ There is no restore: keep a local copy of the old keystore. Continue?",
+        "replaceConfirmIos": "This app already has a distribution certificate. Generating a new one consumes a slot at Apple (2 to 3 maximum) and profiles tied to the old certificate will stop signing. ⚠️ There is no restore: keep a local copy of the old .p12 and its profile. Continue?",
         "errAscKeyMissing": "Import the App Store Connect API key (.p8), its Key ID and its Issuer ID first: Apple only issues them in its portal, never through the API. That is the one manual bootstrap step.",
         "errCertCap": "Apple's distribution certificate cap is reached (2 to 3 per account). Revoke one in App Store Connect, then try again.",
         "errBundleIdNotRegistered": "This App ID is not registered in your Apple developer account. Create it in App Store Connect, then try again.",
         "errApple": "Apple refused:",
-        "actionProfileOnly": "Regenerate profile only"
+        "actionProfileOnly": "Regenerate profile only",
+        "errAscKeyMissingList": "Missing: {missing}. An App Store Connect API key is three items, and the .p8 file alone is not enough. 💡 The Key ID is in the filename Apple gives you (AuthKey_XXXXXXXXXX.p8); the Issuer ID is shown at the top of App Store Connect → Users and Access → Integrations."
       },
       "verify": {
         "action": "Verify material",
@@ -1024,7 +1094,10 @@
           "asc_forbidden": "key is valid but its role is too narrow for this operation.",
           "asc_app_not_found": "the key works but does not see this bundle id: the app does not exist in App Store Connect yet, or the key's role is too narrow.",
           "asc_unreachable": "App Store Connect did not answer — this says nothing about the key."
-        }
+        },
+        "refresh": "Refresh verification",
+        "never": "Never verified. Run the check to find out whether a release would go through.",
+        "badgeHint": "Failing checks: a release would not go through as things stand."
       },
       "kinds": {
         "android_keystore": "Android keystore (JKS/PKCS12)",
@@ -1038,6 +1111,12 @@
         "asc_api_key": "App Store Connect API key (.p8)",
         "asc_key_id": "Key ID (App Store Connect)",
         "asc_issuer_id": "Issuer ID (App Store Connect)"
+      },
+      "tabs": {
+        "material": "Material",
+        "verify": "Verification",
+        "releases": "Releases",
+        "ci": "CI access"
       }
     },
     "sync": {
@@ -1174,6 +1253,7 @@
         "loading": "Loading…",
         "lastStatus": "Last status:",
         "lastStatusSuccess": "Success",
+        "lastStatusReminder": "Reminder sent",
         "lastStatusError": "Error (×{count})",
         "nextAt": "· Next on {date}",
         "enableLabel": "Enable automatic rotation",
@@ -1239,6 +1319,8 @@
       "reorganizeBtn": "Reorganize",
       "reorganizeCancel": "Cancel",
       "reorganizeHint": "Tick the secrets to file, then pick a category. Shift+click selects a range.",
+      "filterPlaceholder": "Filter by name…",
+      "filterNoMatch": "No secret matches “{query}”.",
       "bulkPlaceholder": "{count, plural, =0 {Move to…} one {Move # secret to…} other {Move # secrets to…}}",
       "bulkPending": "Moving…",
       "bulkCategoryAria": "Move the selection to a category",
@@ -1460,7 +1542,8 @@
         "confirmKms": "Enable KMS envelope encryption for this project? The tenant key will be provisioned in OpenBao.",
         "confirmGpg": "Switch back to legacy GPG encryption for this project?",
         "redeployNote": "Change saved — redeploy the project to apply it.",
-        "kmsUnavailable": "KMS not configured on the platform."
+        "kmsUnavailable": "KMS not configured on the platform.",
+        "kmsError": "The encryption service (KMS) is temporarily unavailable. Try again later; if the problem persists, contact support."
       },
       "selectServer": "— choose a VPS —",
       "gpgNote": "Physalis will generate a dedicated GPG keypair (private key kept on your VPS). The config takes effect once the agent is deployed.",
@@ -1484,13 +1567,21 @@
       "restore": {
         "btn": "Restore",
         "target": "Target DB",
-        "targetHint": "Database to restore into: must be a FRESH, EMPTY DB, already created (a non-empty target is rejected). Never target the live database.",
+        "targetHint": "Database to restore into: an EMPTY or non-existent DB (the agent creates it if needed, which requires the CREATEDB privilege; a non-empty target is rejected). Never target the live database.",
         "modeNew": "New DB",
         "modeInPlace": "Replace in place",
         "inPlaceWarn": "Replaces the content of the live database \"{db}\" (roles/users are unchanged). Best done with the app stopped.",
         "confirmInPlace": "REPLACE the current database \"{db}\" with this backup? Current content will be overwritten (access unchanged). An archive made before in-place support may fail.",
         "confirm": "Restore into \"{db}\"? Existing data in this database will be overwritten.",
-        "queued": "Restore requested — the agent will run it on its next poll.",
+        "busy": "A restore is already pending or running — wait for its result.",
+        "status": {
+          "pending": "Restore of \"{db}\" sent to the agent on your server. It picks it up on its next check — about a minute, longer if a backup is running. You can follow progress here.",
+          "pendingSlow": "The agent hasn't picked up the restore of \"{db}\" yet. It will start on its next check; if nothing happens, make sure the agent is running on your server.",
+          "running": "Restoring \"{db}\" on your server… Duration depends on the database size.",
+          "success": "Restore of \"{db}\" completed.",
+          "failed": "Restore of \"{db}\" failed: {error}",
+          "dismiss": "Dismiss"
+        },
         "go": "Confirm",
         "cancel": "Cancel"
       },
@@ -1521,7 +1612,31 @@
       "groupSchedule": "Schedule",
       "groupRetention": "Retention",
       "historyEmptyReady": "No backup yet.",
-      "backupRunning": "Backup running… (may take 1-2 min, the page refreshes automatically)"
+      "backupRunning": "Backup running… (may take 1-2 min, the page refreshes automatically)",
+      "subtabs": {
+        "infos": "Info",
+        "alerts": "Alerts",
+        "history": "History"
+      },
+      "historyView": {
+        "backups": "Backups",
+        "restores": "Restores"
+      },
+      "restores": {
+        "empty": "No restore for this project.",
+        "h": {
+          "source": "Source backup",
+          "target": "Target database",
+          "by": "Requested by",
+          "duration": "Duration"
+        },
+        "status": {
+          "PENDING": "Pending",
+          "RUNNING": "Running",
+          "SUCCESS": "Succeeded",
+          "FAILED": "Failed"
+        }
+      }
     },
     "settings": {
       "title": "Project settings",
@@ -1563,6 +1678,8 @@
       "bitbucketIssuerHelp": "Bitbucket workspace OIDC URL (Repository settings → OpenID Connect).",
       "envsSection": "Environments",
       "addEnvBtn": "+ Add",
+      "envReorderHint": "Drag to reorder",
+      "envReorderError": "Could not save the new order.",
       "envNameLabel": "Name",
       "envNamePlaceholder": "qa",
       "envUrlLabel": "URL",
@@ -1576,7 +1693,16 @@
       "saveBtn": "Save",
       "cancelBtn": "Cancel",
       "saveError": "Cannot save.",
-      "slugChangeConfirm": "⚠ You are changing the project slug from \"{old}\" to \"{new}\".\n\nConsequences:\n• Scripts using the Bearer machine URL /api/secrets/{old}/[env] will return 403 until updated with the new slug.\n• Bookmarks /projects/{old} will no longer work.\n\nNo need to regenerate machine tokens (they remain valid) or touch the GitHub PAT. Continue?"
+      "slugChangeConfirm": "⚠ You are changing the project slug from \"{old}\" to \"{new}\".\n\nConsequences:\n• Scripts using the Bearer machine URL /api/secrets/{old}/[env] will return 403 until updated with the new slug.\n• Bookmarks /projects/{old} will no longer work.\n\nNo need to regenerate machine tokens (they remain valid) or touch the GitHub PAT. Continue?",
+      "setupGuideTitle": "Setup guide",
+      "setupGuideHint": "The \"Setup\" tab walks you through getting the project running, up to the first successful deployment.",
+      "setupGuideAuto": "Automatic (hidden after the first successful deployment)",
+      "setupGuideShown": "Always show",
+      "setupGuideHidden": "Hide",
+      "setupGuideCompleted": "First successful deployment on {date}.",
+      "setupGuideNotCompleted": "No successful deployment yet.",
+      "setupGuideError": "Could not save.",
+      "githubRepoDefaultHint": "Left empty, the saved repository will be {repo}."
     },
     "gateway": {
       "revokeKeyConfirm": "Revoke this key? It will be immediately invalidated.",
@@ -1658,6 +1784,7 @@
     },
     "infos": {
       "subtabs": {
+        "setup": "Setup",
         "access": "Access",
         "README": "Readme",
         "TECHNICAL": "Technical",
@@ -1667,6 +1794,233 @@
       "refreshing": "Refreshing…",
       "refreshHint": "Re-fetch docs from the repo",
       "docEmpty": "Document unavailable."
+    },
+    "deployments": {
+      "title": "Deployments — {env}",
+      "intro": "One row per pipeline run. Physalis records that it served the secrets, then reads the run's outcome from the platform (or receives the workflow's report).",
+      "empty": "No deployments for this environment yet. They show up here as soon as a workflow calls Physalis.",
+      "loading": "Loading…",
+      "loadError": "Could not load deployments.",
+      "colStatus": "Status",
+      "colRun": "Run",
+      "colBranch": "Branch",
+      "colWhen": "When",
+      "phase": {
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "running": "Running",
+        "long": "Running",
+        "abnormal": "Unusually long",
+        "expired": "Expired"
+      },
+      "hint": {
+        "long": "The deployment is taking a while, it should not be long now.",
+        "abnormal": "The deployment is taking unusually long. Check the run on the platform.",
+        "expired": "No outcome after 45 minutes: Physalis could not read the run on the platform (connection without a token?) and the workflow sent no report."
+      },
+      "uncorrelated": "Uncorrelated",
+      "uncorrelatedHint": "Report received for a run to which Physalis served no secrets: someone deployed under this pipeline's identity without going through the vault.",
+      "openRun": "View run",
+      "badgeTitle": "Last deployment: {phase}",
+      "source": {
+        "platform": "Outcome observed by Physalis on the platform.",
+        "reported": "Outcome reported by the pipeline (\"Report to Physalis\" step)."
+      },
+      "rerun": "Re-run",
+      "rerunning": "Re-running…",
+      "rerunDone": "Re-run requested from the platform: the new run will show up here as soon as it calls Physalis.",
+      "rerunError": "Could not re-run."
+    },
+    "setup": {
+      "title": "Project setup",
+      "progress": "{done} / {total} steps",
+      "loading": "Loading…",
+      "loadError": "Could not load the setup status.",
+      "hideError": "Could not hide the guide.",
+      "intro": "Follow these steps up to the first successful deployment. Each step completes on its own as soon as Physalis sees it done.",
+      "completedTitle": "Setup complete",
+      "completedText": "First successful deployment on {date}. You can hide this guide in the project settings.",
+      "legacyTitle": "This project predates the setup guide",
+      "legacyText": "It may already be deployed through Physalis. The steps below reflect its current configuration; the guide goes away at the first deployment whose workflow reports back to Physalis.",
+      "hide": "Hide this guide",
+      "hideHint": "This project is not deployed through Physalis? You can show the guide again in the project settings.",
+      "askEditor": "Ask a project editor to complete this step.",
+      "firstCallDenied": "Nothing shows up after your run? It was probably rejected before reaching this project: check the /api/deploy response in the run logs. 403 = the repository, workflow or branch does not exactly match the policy above; 401 = the OIDC audience does not match.",
+      "lastFailed": "The last deployment ({env}) failed: see its details in the Deployments tab, then run the workflow again.",
+      "lastWaiting": "A deployment ({env}) is running: Physalis will read its outcome from the platform as soon as it finishes.",
+      "policyRepo": "Repository",
+      "policyKey": {
+        "github": "Workflow file",
+        "gitlab": "CI environment",
+        "bitbucket": "Deployment"
+      },
+      "policyBranch": "Branch",
+      "policyEnv": "Environment",
+      "status": {
+        "done": "done",
+        "todo": "to do",
+        "optional": "recommended",
+        "manual": "check on your side"
+      },
+      "actions": {
+        "settings": "Project settings",
+        "createConnection": "Organisation CI/CD connections",
+        "createServer": "Organisation servers",
+        "secrets": "{env} secrets",
+        "policies": "Policies tab",
+        "template": "Template → {path}",
+        "deployments": "{env} deployments"
+      },
+      "steps": {
+        "connection": {
+          "title": "Connect the CI/CD platform",
+          "text": {
+            "github": "Create a GitHub connection at organisation level (if there is none yet), then link it to this project in its settings.",
+            "gitlab": "Create a GitLab connection at organisation level (empty issuer for gitlab.com, the instance URL otherwise), then link it to this project in its settings.",
+            "bitbucket": "Create a Bitbucket connection at organisation level, with your workspace OIDC URL as issuer, then link it to this project in its settings."
+          },
+          "short": "CI/CD"
+        },
+        "repo": {
+          "title": "Set the repository",
+          "text": {
+            "github": "In the project settings, enter the GitHub repository as owner/repo.",
+            "gitlab": "In the project settings, enter the GitLab project path (e.g. group/project).",
+            "bitbucket": "In the project settings, enter the Bitbucket repository UUID, braces included."
+          },
+          "short": "Repository"
+        },
+        "server": {
+          "title": "Link an environment to a server",
+          "text": {
+            "github": "Declare your server (VPS) in the organisation with its deploy SSH key, then link it to an environment in the project settings.",
+            "gitlab": "Declare your server (VPS) in the organisation with its deploy SSH key, then link it to an environment in the project settings.",
+            "bitbucket": "Declare your server (VPS) in the organisation with its deploy SSH key, then link it to an environment in the project settings."
+          },
+          "short": "Server"
+        },
+        "secrets": {
+          "title": "Add the application secrets",
+          "text": {
+            "github": "The environment variables are written to the server's .env at each deployment. Recommended step: an application may have none.",
+            "gitlab": "The environment variables are written to the server's .env at each deployment. Recommended step: an application may have none.",
+            "bitbucket": "The environment variables are written to the server's .env at each deployment. Recommended step: an application may have none."
+          },
+          "short": "Secrets"
+        },
+        "policy": {
+          "title": "Create the deployment policy",
+          "text": {
+            "github": "The policy allows one specific workflow (repository, file, branch) to deploy an environment. Create it in the Policies tab.",
+            "gitlab": "The policy allows one specific pipeline (GitLab project, CI environment, branch) to deploy an environment. Create it in the Policies tab.",
+            "bitbucket": "The policy allows one specific pipeline (repository, deployment, branch) to deploy an environment. Create it in the Policies tab."
+          },
+          "short": "Policy"
+        },
+        "workflow": {
+          "title": "Add the workflow to the repository",
+          "text": {
+            "github": "Copy the template into your repository, at the path shown. Once a policy exists, it is pre-filled with this project's values: nothing to adjust. Its file name and branch are those of the policy below.",
+            "gitlab": "Copy the template as .gitlab-ci.yml. Once a policy exists, it is pre-filled with this project's values: nothing to adjust. The job's `environment: name:` and the branch are those of the policy below.",
+            "bitbucket": "Copy the template as bitbucket-pipelines.yml. Once a policy exists, it is pre-filled with this project's values: nothing to adjust. The step's `deployment:` must exist in Bitbucket and match the policy below."
+          },
+          "short": "Workflow"
+        },
+        "firstCall": {
+          "title": "Run the workflow",
+          "text": {
+            "github": "Push to the branch of each policy below (or use the Redeploy button). The table shows each workflow's last run on the platform; this step completes as soon as Physalis receives the first call.",
+            "gitlab": "Push to the branch of each policy below (or use the Redeploy button). The table shows each workflow's last run on the platform; this step completes as soon as Physalis receives the first call.",
+            "bitbucket": "Push to the branch of each policy below (or use the Redeploy button). The table shows each workflow's last run on the platform; this step completes as soon as Physalis receives the first call."
+          },
+          "short": "Run"
+        },
+        "firstSuccess": {
+          "title": "First successful deployment",
+          "text": {
+            "github": "Physalis reads the run's outcome from the platform with the CI connection's token, or receives the workflow's report (\"Report to Physalis\" step). The guide ends at the first successful deployment.",
+            "gitlab": "Physalis reads the run's outcome from the platform with the CI connection's token, or receives the workflow's report (\"Report to Physalis\" step). The guide ends at the first successful deployment.",
+            "bitbucket": "Physalis reads the run's outcome from the platform with the CI connection's token, or receives the workflow's report (\"Report to Physalis\" step). The guide ends at the first successful deployment."
+          },
+          "short": "Success"
+        }
+      },
+      "templateIntro": "Templates pre-filled with this project's and its policy's values:",
+      "templateName": {
+        "deploy": "Deploy",
+        "redeploy": "Redeploy",
+        "gitlab": "GitLab pipeline",
+        "bitbucket": "Bitbucket pipeline"
+      },
+      "templatePath": "Save it in your repository as",
+      "copy": "Copy",
+      "copied": "Copied",
+      "download": "Download",
+      "templateError": "Could not generate this template.",
+      "copyError": "Could not copy: select the text and copy it by hand.",
+      "verify": {
+        "run": "Run the check",
+        "running": "Checking…",
+        "error": "The check failed. Try again in a moment.",
+        "outcome": {
+          "ready": "This project is deployed through Physalis (last deployment on {date}). The guide will close at the next successful deployment.",
+          "noReport": "This project is deployed through Physalis, but its workflow sends no report: add the step below, or hide the guide if you do not want tracking.",
+          "neverDeployed": "No deployment through Physalis since {since} (start of the retained history). Follow the steps below.",
+          "configIncomplete": "This project was already deployed through Physalis (last deployment on {date}), but its configuration is incomplete today: the next run would fail. Complete the unfinished steps below.",
+          "notLinked": "This project is not linked to any repository. Follow the steps below, or hide the guide if it is not deployed through Physalis.",
+          "completed": "This project has already been deployed successfully through Physalis: the guide is complete."
+        },
+        "check": {
+          "config": "Physalis configuration complete (connection, repository, server, policy)",
+          "deployed": "Secrets already served to a deployment (last on {date}, history since {since})",
+          "workflowFile": "Workflow present in the repository: {path} on {branch}",
+          "reportStep": "The workflow contains the \"Report to Physalis\" step"
+        },
+        "status": {
+          "ok": "yes",
+          "ko": "no",
+          "unknown": "cannot be checked"
+        },
+        "snippetIntro": "Step to add at the end of your workflow (GitLab: also set a `timeout:` on the job):",
+        "snippetUnreadable": "Physalis could not read your workflow (connection without a token or without repository access). If it lacks the report step, add this one at the end:",
+        "copy": "Copy the step",
+        "copied": "Copied",
+        "resultTitle": "Check result"
+      },
+      "trailLabel": "Setup steps",
+      "previewTitle": "Feature under development",
+      "previewText": "This guide is still being tested: use it as an indication only for now.",
+      "repo": {
+        "notFound": "The repository {repo} cannot be found on the platform (or the connection has no access to it). Check its name in the project settings.",
+        "defaultFound": "The repository {repo} exists: it is this project's default repository (connection registry user + project slug).",
+        "defaultUnverified": "Suggested default repository: {repo} (connection registry user + project slug). Its existence could not be checked.",
+        "defaultNotFound": "The default repository {repo} does not exist: set the repository in the project settings.",
+        "useDefault": "Use {repo}",
+        "saveError": "Could not save the repository."
+      },
+      "policyFile": "In the repository",
+      "policyReport": "Report step",
+      "fileStatus": {
+        "found": "✓ present",
+        "absent": "✗ missing",
+        "unreadable": "? cannot be checked"
+      },
+      "reportYes": "✓ yes",
+      "reportNo": "✗ no",
+      "lastRun": "Last run on the branch",
+      "openRun": "view run",
+      "runFailedNoCall": "A run failed without any call reaching this project.",
+      "runState": {
+        "running": "⏳ running",
+        "success": "✓ succeeded",
+        "failure": "✗ failed",
+        "cancelled": "— cancelled",
+        "none": "no run",
+        "unknown": "? cannot be checked"
+      },
+      "lastWaitingNoReport": "A deployment ({env}) took its secrets, but Physalis cannot read its outcome (CI connection without a token) and {workflows} lacks the \"Report to Physalis\" step. Add a token to the connection, or the step to the workflow (pre-filled template in step 6).",
+      "prevStep": "Previous step",
+      "nextStep": "Next step"
     }
   },
   "orgs": {
@@ -1681,7 +2035,8 @@
       "members": "Members",
       "tokens": "Tokens",
       "rotation": "Rotation",
-      "settings": "Settings"
+      "settings": "Settings",
+      "alerts": "Alerts"
     },
     "cicd": {
       "title": "CI/CD connections",
@@ -2214,7 +2569,25 @@
       "submittingBtn": "Sending…",
       "cancelBtn": "Cancel",
       "error": "The request failed. Please try again."
-    }
+    },
+    "automation": {
+      "title": "Automations",
+      "desc": "Create automations in plain language. Physalis builds them and pushes them to YOUR N8N instance — it does not host it, and your secrets are never copied there.",
+      "enable": "Enable service",
+      "disable": "Disable",
+      "active": "active",
+      "working": "Working…",
+      "loading": "Loading…",
+      "loadError": "Could not read the service state.",
+      "saveError": "Saving failed.",
+      "readOnly": "Only an organization OWNER or ADMIN can enable this service.",
+      "cleModeleLabel": "Model key (your Anthropic key)",
+      "cleModeleAucune": "None — use the host's key",
+      "cleModeleDisparue": "⚠️ The selected entry no longer exists, or lost its value. The service falls back to the host's key: pick another one.",
+      "cleModeleAide": "Physalis does not store your key: it remembers which team vault entry to read it from, and reads it there on every conversation.",
+      "cleModeleAideHote": "With no key selected, model calls use the host's key — at Physalis's expense. Put yours in the team vault and pick it here."
+    },
+    "tabNotifications": "Notifications"
   },
   "vault": {
     "pageTitle": "Personal vault",
@@ -2326,7 +2699,8 @@
       "emptyMembers": "No explicit members. OrgADMIN+ have implicit OWNER access, OrgDEV has implicit EDITOR access on all collections.",
       "loading": "Loading…",
       "cancelBtn": "Cancel",
-      "addMemberBtn": "Add"
+      "addMemberBtn": "Add",
+      "noSearchMatch": "No entry matches “{query}”."
     },
     "generator": {
       "title": "Generate a password",
@@ -2400,7 +2774,8 @@
         "username": "Not possible: this entry has a username, which that type cannot hold. Remove it and save first.",
         "totp": "Not possible: this entry has a 2FA code, which that type cannot hold. Remove it and save first.",
         "items": "Not possible: this list holds several secrets, which that type cannot hold."
-      }
+      },
+      "payloadLocked": "This entry's secrets are not shown yet. Load them before editing — otherwise saving would overwrite what is stored."
     },
     "move": {
       "noDestError": "Select a destination.",
@@ -2446,6 +2821,42 @@
         "label": "Note",
         "hint": "Free text, encrypted like everything else.",
         "namePlaceholder": "Recovery procedure"
+      }
+    },
+    "sshKeys": {
+      "title": "SSH keys",
+      "intro": "Keys that exist on no disk: Physalis will sign in their place with “physalis ssh-agent” (coming soon). Only the public key is shown, to copy into authorized_keys or GitHub.",
+      "addBtn": "Add an SSH key",
+      "loading": "Loading…",
+      "loadError": "Failed to load.",
+      "empty": "No SSH key. Generate one: it will never exist on your machine.",
+      "copyPublicKey": "Copy public key",
+      "copied": "Public key copied.",
+      "deleteBtn": "Delete",
+      "deleteConfirm": "Delete the key “{name}”? Servers that accept it will no longer recognise it from any machine: remember to remove its public key from their authorized_keys.",
+      "deleteError": "Could not delete.",
+      "modeGenerate": "Generate (recommended)",
+      "modeImport": "Import an existing key",
+      "generateHint": "Physalis creates an ed25519 key. The private key only exists encrypted in your vault and never leaves it, not even to you.",
+      "importHint": "OpenSSH (ssh-keygen), PKCS#8 and RSA PEM formats; ed25519 or RSA 3072 bits and up. A passphrase-protected key is accepted: no need to remove it.",
+      "importAfter": "Once imported, delete the copy from your disk (~/.ssh): that is the whole point.",
+      "nameLabel": "Name",
+      "namePlaceholder": "E.g. Production servers",
+      "privateKeyLabel": "Private key",
+      "passphraseLabel": "Passphrase (if the key has one)",
+      "generateBtn": "Generate key",
+      "importBtn": "Import",
+      "cancelBtn": "Cancel",
+      "errors": {
+        "unrecognized_format": "This text is not a recognised private key (expected: -----BEGIN … PRIVATE KEY-----).",
+        "passphrase_required": "This key is protected: enter its passphrase.",
+        "wrong_passphrase": "Wrong passphrase.",
+        "unsupported_algorithm": "Unsupported key type: ed25519 or RSA only (no ECDSA or DSA).",
+        "rsa_too_short": "RSA key too short: 3072 bits minimum.",
+        "unsupported_cipher": "Unsupported key encryption (expected: the one used by ssh-keygen).",
+        "duplicate_key": "This key is already in your vault.",
+        "generic": "The operation failed.",
+        "kdf_rounds_too_high": "This key asks for too many derivation rounds (over 128): reduce them with “ssh-keygen -p -a 64” before importing."
       }
     }
   },
@@ -2664,6 +3075,45 @@
         "subject": "[Physalis] {kind} for {app} — EXPIRED on {date}",
         "body": "The {kind} for app “{app}” ({bundleId}), project {project},\nexpired on {date}.\n\nYour releases are already broken: a build signed with an expired certificate\nis rejected at upload.\n\nRenew it, then replace it in Physalis (project's Mobile tab)."
       }
+    },
+    "notifications": {
+      "openLink": "Open in Physalis",
+      "test": {
+        "subject": "[Physalis] Alert test — {scope}",
+        "body": "This is a test message sent from Physalis by {actor}.\n\nIf you can read it, alerts for \"{scope}\" arrive here."
+      },
+      "backup": {
+        "failed": {
+          "subject": "[Physalis] Backup failed — {project} ({env})",
+          "body": "The backup of database {db} for project \"{project}\" (environment {env}) failed on {date}.\n\nCause reported by the agent: {error}\n\nNo new backup exists until this is fixed. You will be notified again if the failure persists, and when backups are back."
+        },
+        "failedRepeat": {
+          "subject": "[Physalis] Backup still failing — {project} ({env}), {count} failures",
+          "body": "The backup of database {db} for project \"{project}\" (environment {env}) is still failing: {count} consecutive failures, the last one on {date}.\n\nLast cause reported by the agent: {error}"
+        },
+        "recovered": {
+          "subject": "[Physalis] Backup back to normal — {project} ({env})",
+          "body": "The backup of database {db} for project \"{project}\" (environment {env}) succeeded again on {date}, after {count} failure(s)."
+        },
+        "overdue": {
+          "subject": "[Physalis] Backup overdue — {project} ({env})",
+          "body": "No report from the backup agent of project \"{project}\" (environment {env}) was received within the expected interval.\n\nLast successful backup: {last}.\n\nCheck that the backup agent is running on the VPS and can reach Physalis."
+        }
+      },
+      "rotation": {
+        "preavis": {
+          "subject": "[Physalis] Rotation due soon: \"{name}\" expires on {date}",
+          "body": "Rotation due soon: \"{name}\" ({where}) expires on {date}.\n\nRotate it before that date. No secret value is included in this alert."
+        },
+        "echeance": {
+          "subject": "[Physalis] Rotation due: \"{name}\" has reached its due date",
+          "body": "Rotation due: \"{name}\" ({where}) has reached its due date.\n\nChange it at the source, then confirm the rotation in Physalis. No secret value is included in this alert."
+        },
+        "anciennete": {
+          "subject": "[Physalis] Time to rotate: \"{name}\" unchanged for {days} days",
+          "body": "Time to rotate: \"{name}\" ({where}) has not changed for {days} days.\n\nYou will be reminded every 30 days until it changes. No secret value is included in this alert."
+        }
+      }
     }
   },
   "invite": {
@@ -2688,7 +3138,8 @@
     "createAndAccept": "Create my account and accept"
   },
   "secretRequest": {
-    "metaTitle": "Secure sharing — Physalis",
+    "metaTitle": "Secret request — Physalis",
+    "metaDescription": "Someone is asking you to submit a secret. It is encrypted in your browser before it is sent, and only the requester can read it.",
     "tagInvalid": "Invalid link",
     "tag": "Secure sharing",
     "linkInvalid": "This link is no longer valid. It may have expired or already been used. Contact the person who sent it to you to get a new link.",
@@ -2764,6 +3215,466 @@
       "refresh": "Refresh",
       "status": "View service status"
     }
+  },
+  "automation": {
+    "backToDashboard": "Dashboard",
+    "pageTitle": "Automations",
+    "pageSubtitle": "Describe an automation, Physalis builds it and pushes it to <strong>your</strong> N8N instance. It stays with you: if you leave, your workflows stay.",
+    "secretsStayHere": "Your secrets are <strong>never copied</strong> into N8N: workflows read them at run time through the Physalis node. A password changed here is used on the next run, with nothing to touch over there — install <node>n8n-nodes-physalis</node> from Settings → Community Nodes. <docs>Documentation</docs>",
+    "statVersion": "N8N version",
+    "statVersionHint": "read at the last probe",
+    "statTrigger": "On-demand trigger",
+    "statTriggerHint": "decides the shape of generated workflows",
+    "connectTitle": "Connect an N8N instance",
+    "connectIntro": "Physalis does not host N8N: it talks to the instance you run. The API key grants <strong>full control</strong> of that instance — it is encrypted, and never leaves the server.",
+    "instanceCourante": "Instance",
+    "instanceChanger": "Switch instance",
+    "instanceTravailler": "Work on this instance",
+    "instanceIntrouvable": "⚠️ The selected instance no longer exists, or is no longer accessible to you. Pick another one — nothing was done on a different instance in its place.",
+    "detecteePort": "port {port} published",
+    "detecteeSansPort": "no published port — instance unreachable from Physalis",
+    "generaleVide": "No organization-wide instance yet. A general instance serves the automations that belong to no project — monitoring, alerts, team chores.",
+    "generaleCreer": "Connect",
+    "carteSelectionner": "Select",
+    "carteConnectee": "Connected",
+    "carteDetectee": "Detected",
+    "carteConnecter": "Connect",
+    "instancesTitre": "Your n8n instances",
+    "groupeConnectees": "Connected",
+    "groupeAConnecter": "To connect",
+    "champFigeParPortee": "Set by the instance you are working on — it is attached to this environment, and can only read its secrets.",
+    "porteeOrg": "The whole organization",
+    "fieldUrl": "URL",
+    "fieldUrlHelp": "No trailing slash. The instance must be reachable from Physalis.",
+    "fieldKey": "API key",
+    "fieldKeyHelp": "N8N → Settings → API → Create an API key.",
+    "submit": "Connect and probe",
+    "submitting": "Probing…",
+    "loading": "Loading…",
+    "reprobe": "Probe again",
+    "remove": "Remove",
+    "versionLabel": "Version",
+    "versionUnknown": "undetermined",
+    "probedAt": "probed on {date}",
+    "capTitle": "What the API can do",
+    "capSpecWarning": "OpenAPI specification not read: only reads were exercised. “Undecided” does not mean “no”.",
+    "capWorkflows": "Create / read / update a workflow",
+    "capActivate": "Activate / deactivate",
+    "capExecutions": "Read executions and their errors",
+    "capTrigger": "Trigger a run on demand",
+    "capCredentials": "Create a native credential (unused)",
+    "capCredentialsWrite": "Write and update a credential",
+    "capNonSondee": "Undetermined: this question did not exist at the last probe. Re-probe the connection to get an answer.",
+    "capYes": "yes",
+    "capNo": "no",
+    "capUnknown": "undecided",
+    "workflowsTitle": "Workflows on the instance ({count})",
+    "workflowsNone": "No workflow.",
+    "wfActive": "active",
+    "wfInactive": "inactive",
+    "errLoad": "Could not read the connections.",
+    "errWorkflowsLoad": "Could not load the tracked workflows. Physalis returned an error — the list below is not up to date, and an empty list does not mean “no workflows”.",
+    "errGeneric": "Failed.",
+    "errProbe": "Probe failed.",
+    "statInstance": "Instance",
+    "statInstanceHint": "the N8N you host",
+    "fieldKeyPlaceholder": "Paste the key generated in N8N",
+    "fieldVersion": "N8N version",
+    "fieldVersionHelp": "Shown in N8N at the bottom of the side menu. The API does not expose it: without it, generated workflows target the older node generation.",
+    "gabaritsIntro": "The workflow templates you can install.",
+    "gabaritChoisir": "Choose…",
+    "gabaritAjouterLigne": "Add",
+    "gabaritRetirerLigne": "Remove",
+    "gabaritPlafondLignes": "Maximum reached — beyond this, describing the need in the chat is faster than this form.",
+    "gabaritRetour": "← All templates",
+    "gabaritPrecedent": "Previous",
+    "gabaritSuivant": "Next",
+    "gabaritRang": "{rang} / {total}",
+    "gabaritLecture": "This template changes nothing.",
+    "gabaritModeleDefaut": "Use the default AI model ({modele})",
+    "modeleDefautTitre": "Default AI model",
+    "modeleDefautAide": "Templates that call an AI will use it without asking again. Each template can still pick another one, and workflows already pushed do not change: each keeps the model it was built with.",
+    "modeleDefautFournisseur": "Provider",
+    "modeleDefautModele": "Model",
+    "modeleDefautRetirer": "Remove the default",
+    "modeleDefautAucun": "No default set: every template asks you to pick a model.",
+    "modeleDefautEnregistre": "Saved.",
+    "gabaritBlocModele": "Choosing the AI model",
+    "gabaritBlocModeleAide": "Every run is billed to you by the provider, on your own credential — and the most capable model is the most expensive.",
+    "gabaritBlocRedaction": "What the model reads",
+    "gabaritBlocRedactionAide": "These texts are written for the AI, not for Physalis: they are what it decides from.",
+    "push": "Push to the instance",
+    "pushing": "Pushing…",
+    "noWorkflow": "No workflow pushed.",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "stateValidated": "inactive",
+    "stateBroken": "failed",
+    "couche_forme": "Rejected at the “shape” layer",
+    "couche_palette": "Rejected at the “palette” layer",
+    "couche_graphe": "Rejected at the “graph” layer",
+    "couche_semantique": "Rejected at the “semantics” layer",
+    "editVersion": "edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "stateOrphan": "missing from the instance",
+    "instanceUnreachable": "Instance unreachable: the states shown are those of the last contact.",
+    "tabChat": "Chat",
+    "tabWorkflows": "Workflows",
+    "tabInfos": "Info",
+    "chatTitle": "Describe an automation",
+    "chatIntro": "Describe what you want — “when X happens, do Y” — and Physalis builds the workflow, checks it and pushes it to your instance.",
+    "chatPlaceholder": "E.g. every morning at 8, check my site responds and tell me if it does not",
+    "connectFirst": "Connect your N8N instance first, in the Info tab.",
+    "tabGabarits": "Templates",
+    "chatSubmit": "Propose an automation",
+    "chatThinking": "Reading the request…",
+    "chatPropose": "Everything is there. Check the values, then push.",
+    "chatManquants": "Missing: {champs}.",
+    "coutTour": "This turn: {entree} input tokens, {sortie} output ({modele}) ≈ ${dollars}. An estimate — the number that counts is the console's, per month.",
+    "chatProposition": "What Physalis understood",
+    "chatAremplir": "to fill in",
+    "chatNonRenseigne": "not set",
+    "chatVerifier": "Check and push",
+    "chatCompleter": "Complete",
+    "modeleLabel": "Model",
+    "rechercheGabarits": "Search the templates first",
+    "rechercheGabaritsAide": "Haiku first looks for a template that covers the request, and pre-fills its fields",
+    "rechercheGabaritsDirecte": "The sentence goes straight to the chosen model, with no template search",
+    "gabaritRefusEnchaine": "{raison} — carrying on with a bespoke workflow.",
+    "libreResultat": "Generated workflow",
+    "libreNoeuds": "{n} nodes, all within the palette. Validated before being shown to you.",
+    "effetLecture": "This workflow changes nothing and emits nothing.",
+    "effetEcriture": "⚠️ This workflow acts on the outside world:",
+    "essai": "Dry run",
+    "confirmTitre": "Confirm activation",
+    "confirmOui": "I have read, activate",
+    "credChoixTitre": "Which “{type}” credential?",
+    "credChoixIntro": "Your instance holds several “{type}” credentials and Physalis cannot tell which one to use — the N8N API never returns their contents. Pick the one to attach: the workflow is sent again with it right away.",
+    "confirmIntro": "Once active, this workflow will really act, on the set schedule:",
+    "essaiVert": "Dry run passed: the workflow ran without error (execution {execution} in N8N). It has been restored and stays inactive — activating it is a separate step.",
+    "stateEssaiOk": "dry run passed",
+    "diagVerifier": "Check for errors",
+    "diagBouton": "Why did it break?",
+    "diagTitre": "What happened",
+    "diagQuoiFaire": "To do:",
+    "diagDansPhysalis": "This is fixed in Physalis — no need to open N8N.",
+    "diagAilleurs": "This is not fixed in Physalis.",
+    "diagAucune": "No failed execution: this workflow has broken nothing.",
+    "adoptTitre": "Workflows already on the instance",
+    "adoptIntro": "Your instance may hold workflows Physalis doesn't know about — written by hand, or pushed from another Physalis. Physalis never claims them on its own: look them up, and adopt the ones you want to drive from here. Only those Physalis could regenerate can be adopted; for the others, the reason is shown.",
+    "adoptChercher": "Look on the instance",
+    "adoptAucun": "No workflow unknown to Physalis on this instance.",
+    "adoptBouton": "Adopt",
+    "adoptNon": "Not adoptable",
+    "adoptFait": "Workflow adopted. It now appears in the list above, in the state the instance holds it.",
+    "origineAdopte": "adopted",
+    "origineLibre": "custom",
+    "adoptOublier": "Stop tracking",
+    "ficheBouton": "View / edit",
+    "ficheFermer": "Close",
+    "ficheTitre": "What this workflow does",
+    "ficheSecrets": "Secrets read",
+    "ficheAppels": "Outgoing calls",
+    "ficheAutres": "Other steps",
+    "ficheEffetInconnu": "⚠️ This workflow contains nodes Physalis does not model: it cannot say what effect it has on the outside world.",
+    "ficheIllisible": "Physalis cannot read this workflow — it can neither describe nor modify it.",
+    "ficheActif": "⚠️ This workflow is active. An edit puts it back in service immediately, modified: there is no “let me re-read it before it restarts” step.",
+    "ficheNonEditable": "This workflow cannot be edited from Physalis:",
+    "editLabel": "Requested change",
+    "editPlaceholder": "e.g. add an alert if the status code isn't 200",
+    "editProposer": "Propose the change",
+    "editResultat": "What changes",
+    "editAucunChangement": "The model changed nothing in the workflow. Rephrase your request: applying it would only be a pointless round trip to the instance.",
+    "editApres": "After the change",
+    "editAppliquer": "Apply on the instance",
+    "editApplique": "Change applied. The workflow keeps its id and its run history, and it is back in service in its new version.",
+    "editAppliqueInactif": "Change applied. The workflow keeps its id and its run history, and stays inactive — activating it is a separate action.",
+    "confirmEditIntro": "This workflow is active: the modified version restarts right away, and it will really act.",
+    "tabCredentials": "Credentials",
+    "credIntro": "What your N8N instance actually holds, and how it differs from the team folder. Physalis writes and maintains credentials that come from the vault; the ones you created in N8N, it only references.",
+    "credInstanceKo": "N8N instance unreachable: the gap with the vault cannot be computed.",
+    "credManaged": "Written from “{collection}”",
+    "credNoCollection": "No team folder is linked to this connection. Link one so Physalis can read the secrets to copy into N8N.",
+    "credNoEntries": "This folder has no entries.",
+    "credNotAList": "This entry is not a list: a credential has several fields.",
+    "credNeverTested": "Never tested.",
+    "credTestedOk": "Tested: the connection works.",
+    "credTestedKo": "Last test failed: {message}",
+    "credWriteBtn": "Write to N8N",
+    "credUpdateBtn": "Update",
+    "credTestBtn": "Test",
+    "credForgetBtn": "Stop maintaining",
+    "credOrphans": "Links without an entry",
+    "credOrphansHint": "The vault entry is gone, but the credential still exists in your N8N — and a workflow may be using it. Physalis can no longer update it.",
+    "credRegimeA": "Created in N8N",
+    "credRegimeAHint": "Physalis neither writes them nor ever sees them in clear: it finds them by type and attaches them to your workflows. This is the only possible regime for OAuth credentials.",
+    "credRegimeAEmpty": "No other credential on the instance.",
+    "credAdoptBtn": "Adopt",
+    "credAdoptNon": "Cannot be adopted",
+    "credAdoptTitle": "Adopt “{name}”",
+    "credAdoptIntro": "Pick the team-folder entry that will feed this credential. Physalis will keep it up to date on every vault change, keeping its identifier: the workflows using it keep running.",
+    "credAdoptWarning": "⚠️ Adopting WRITES right away: the credential's current value in n8n is replaced by the chosen entry's. Check that the entry carries one secret per field, with the exact field name as its label.",
+    "credAdoptEntryLabel": "Vault entry",
+    "credAdoptNoEntry": "No entry available: you need a “List” entry in the attached folder that does not already feed another credential.",
+    "credAdoptConfirm": "Adopt and write",
+    "credAdoptType": "Type on the instance: {type}",
+    "credEditBtn": "Edit",
+    "credEditTitle": "Edit “{name}”",
+    "credEditIntro": "The fields of this team-folder entry. A field's label IS the field name n8n expects.",
+    "credEditChamps": "Fields expected by “{type}”: {champs}",
+    "credEditChampsKo": "Physalis could not read the shape the instance expects for “{type}”.",
+    "credEditSave": "Save",
+    "credEditSaved": "Entry updated. The n8n credential is now “behind”: click “Update” to copy it over.",
+    "credEditLoadKo": "Cannot read this entry: {message}",
+    "credAdoptFait": "Credential adopted. Physalis now maintains it from the vault.",
+    "credCreateBtn": "Create a credential",
+    "credCreateTitle": "Create a credential",
+    "credCreateAdoptTitle": "Take over “{name}”",
+    "credCreateIntro": "Physalis creates the entry in the team folder, with one field per property n8n expects, then writes it to your instance.",
+    "credCreateAdoptIntro": "This credential already exists in n8n. Its contents cannot be read back — n8n's API never returns them — so retype them here: Physalis will create the vault entry, then write it INTO that credential, keeping its identifier.",
+    "credCreateNameLabel": "Entry name",
+    "credCreateNameHint": "The name it will appear under in the team folder, and in n8n.",
+    "credCreateFields": "Fields expected by “{type}”",
+    "credCreateRequired": "required",
+    "credCreateOptionalShow": "Show the {n} optional fields",
+    "credCreateOptionalHide": "Hide optional fields",
+    "credCreateBool": "true or false",
+    "credCreateNumber": "a number",
+    "credCreateNoFields": "This instance declares no field for that type.",
+    "credCreateChooseType": "Pick a type first.",
+    "credCreateConfirm": "Create and write",
+    "credCreateAdoptConfirm": "Create and take over",
+    "credCreateEntryOnly": "Entry “{name}” was created in the vault, but writing to n8n failed: {message} You will find it in the list above, with the “Write to n8n” button.",
+    "credCreateFait": "Credential created and written to your instance.",
+    "credAdoptOrCreate": "No suitable entry? Physalis can create one for you, in the exact shape of this type.",
+    "credAdoptCreateBtn": "Create the entry",
+    "credOauthChip": "OAuth",
+    "credTypeTitle": "Write “{entry}” to N8N",
+    "credTypeIntro": "Pick the N8N credential type. Each secret in the entry must be labelled with the exact name of a field of that type.",
+    "credTypeLabel": "Credential type",
+    "credTypePlaceholder": "Choose…",
+    "credTypeOther": "Another type…",
+    "credTypeOtherLabel": "Technical type name",
+    "credTypeOtherHint": "The internal name N8N expects, for example “imap” or “postgres”.",
+    "credWriteWarning": "⚠️ This secret will be copied into your N8N instance, and Physalis will keep it up to date there on every change in the vault.",
+    "credWriteConfirm": "Write",
+    "credEcriteEtTestee": "Credential written to N8N, and the connection test passes.",
+    "credEcriteNonTestee": "Credential written to N8N. The test could not run — that is not a failure, but nothing proves yet that it works.",
+    "credEcriteTestKo": "Credential written, but the test fails: {message}",
+    "credTestOk": "The connection works.",
+    "credTestKo": "Test failed: {message}",
+    "credOubliee": "Physalis no longer maintains this credential.",
+    "credEtat": {
+      "jamais_ecrite": "Never written to N8N",
+      "a_jour": "Up to date",
+      "en_retard": "Behind — changed in the vault since",
+      "absente_de_n8n": "Deleted in N8N"
+    },
+    "credCollectionLabel": "Team folder",
+    "credCollectionAttach": "Link",
+    "credLoadFailed": "Could not load credentials ({statut}). Details are in the server logs.",
+    "regabPerime": "⚠️ The template this workflow came from has changed since it was created. The live version is no longer what Physalis would produce today.",
+    "regabIndecidableAide": "Re-enter the original parameters: Physalis rewrites the workflow IN PLACE — its n8n ID, execution history and activation state are kept. It will be able to judge itself from then on.",
+    "regabAJour": "This workflow matches its template. You can adjust its parameters directly — the update happens in place, keeping its ID and its history.",
+    "regabBoutonParams": "Edit parameters",
+    "regabBouton": "Update from template",
+    "regabAppliquer": "Reapply",
+    "regabApplique": "Workflow updated from its template ({n} change(s)). Its id, history and activation state are preserved.",
+    "regabInconnu": "This workflow is now CUSTOM: template “{cle}” is no longer in the catalogue. It keeps running and can still be changed through chat; only reapplying from a template is no longer possible.",
+    "regabConfirmIntro": "This workflow is ACTIVE: the reapplied version goes back into service immediately, and it acts on the outside world.",
+    "tagTous": "All ({n})",
+    "tagAucun": "No workflow tagged “{tag}”.",
+    "tagEditer": "Tags",
+    "chatUrlTitre": "Chat address",
+    "chatUrlCopier": "Copy",
+    "chatUrlCopiee": "Copied",
+    "chatUrlEmbarque": "Nothing to open at this address: embed a chat widget there, or call it with a POST.",
+    "chatUrlPage": "N8N serves a chat page at this address.",
+    "chatUrlSansMdp": "No password: anyone who finds the address can use it.",
+    "chatUrlAvecMdp": "Protected by a password (Basic Auth).",
+    "chatUrlInstable": "Address assigned by N8N and read just now. Physalis carries it over on every re-apply or edit: it only changes if you rename the trigger node in N8N, or if the workflow is recreated.",
+    "tagLabel": "Tags for this workflow",
+    "tagPlaceholder": "prod, alerts, mail",
+    "tagEnregistrer": "Save tags",
+    "tagAide": "You can enter several tags separated by commas",
+    "listeTronquee": "⚠️ Your instance holds more workflows than Physalis read. The list below is partial, and the states shown apply only to it.",
+    "cat_ia": "AI and agents",
+    "cat_support": "Support",
+    "cat_sales": "Sales and CRM",
+    "cat_marketing": "Marketing and content",
+    "cat_itops": "IT Ops",
+    "cat_documents": "Document Ops",
+    "objectifAVenir": "coming",
+    "objectifManque": "Still needs {manque}.",
+    "porteeGenerale": "General",
+    "oauthTitre": "OAuth authorisations",
+    "oauthIntro": "Connect a Google account once, here; Physalis holds the authorisation and places it on your instances.",
+    "oauthUriIntro": "Register this in your OAuth application as an authorised redirect URI, before the first consent:",
+    "oauthAucune": "No authorisation yet.",
+    "oauthAjouter": "Add an authorisation",
+    "oauthCreer": "Create",
+    "oauthChampNom": "Name",
+    "oauthChampType": "Service",
+    "oauthChampClientId": "Client ID",
+    "oauthChampClientSecret": "Client secret",
+    "oauthChampProjet": "Project (optional)",
+    "oauthChampProjetAide": "Empty = the whole organisation",
+    "oauthPorteeOrg": "whole organisation",
+    "oauthConsentir": "Connect the account",
+    "oauthReconnecter": "Reconnect",
+    "oauthPoser": "Place on the instance",
+    "oauthEtatCreee": "Not connected yet — no token. Start the consent flow.",
+    "oauthEtatAutorisee": "Connected to {compte}, authorised by {par}.",
+    "oauthCompteInconnu": "(account not identified)",
+    "oauthPoseeSur": "Placed on: {instances}",
+    "oauthRetourOk": "“{nom}” is connected. You can now place it on an instance.",
+    "oauthRetour_refus": "Consent was declined on the provider's screen. Nothing was stored.",
+    "oauthRetour_incomplet": "The provider's response was incomplete. Please start again.",
+    "oauthRetour_etat_invalide": "This consent response is no longer valid. Start the connection again from this screen.",
+    "oauthRetour_introuvable": "Authorisation not found.",
+    "oauthRetour_echange_refuse": "The provider refused the exchange. Check your OAuth application's client ID and secret, and the registered redirect URI.",
+    "oauthRetour_echange_injoignable": "The provider could not be reached. Please try again.",
+    "oauthRetour_sans_refresh": "The provider returned no refresh token: the authorisation would have stopped working within the hour. Nothing was stored. Check that your application allows offline access, then start again.",
+    "oauthErreurGenerique": "The operation failed.",
+    "tabOAuth": "OAuth",
+    "oauthAideIdentifiants": "Google Cloud console → APIs & Services → Credentials → your “OAuth 2.0 Client IDs”.",
+    "oauthErreurChargement": "Authorisations could not be loaded (error {code}). The redirect URI to register with your provider therefore cannot be shown.",
+    "oauthModifier": "Edit",
+    "oauthSupprimer": "Delete",
+    "oauthEnregistrer": "Save",
+    "oauthSecretInchange": "Leave empty to keep the current one",
+    "oauthTypeVerrouille": "The service can no longer be changed: an account is connected, and the token obtained is only valid for this service. Disconnect and reconnect the account, or delete this authorisation.",
+    "oauthSupprimerConfirme": "Delete the authorisation “{nom}”?",
+    "oauthSupprimerConfirmePosee": "Delete the authorisation “{nom}”? ⚠️ It is placed on {n} N8N instance(s): the credentials will REMAIN there, with a live token, so your workflows keep running. To actually cut off access, revoke it from the account concerned at the provider."
+  },
+  "alerts": {
+    "owners": "Notify OWNERs (of the organization and the project)",
+    "emails": "Additional addresses",
+    "emailsHelp": "One address per line (20 max), including people outside Physalis — for instance the client's technical contact.",
+    "webhook": "Post to a team channel (Slack, Discord, Teams)",
+    "collection": "Team vault",
+    "entry": "Entry",
+    "format": "Platform",
+    "loading": "Loading…",
+    "choose": "— choose —",
+    "projectCollection": "project",
+    "webhookSummary": "webhook \"{entry}\" ({format})",
+    "webhookHelp": "The webhook URL is a secret: store it in the team vault, in the secret field of an entry or in an item of a list. Physalis reads it when sending and never displays it.",
+    "webhookEntryRequired": "Choose the vault entry that holds the webhook URL.",
+    "webhookLabel": "Webhook",
+    "lastError": "Last webhook failure ({date}): {error}",
+    "lastOk": "Last successful webhook delivery: {date}",
+    "recipients": "Email recipients: {list}",
+    "noRecipients": "No email recipient.",
+    "save": "Save",
+    "saved": "Saved.",
+    "saveError": "Could not save.",
+    "test": "Send a test",
+    "testError": "Could not send the test.",
+    "testNobody": "No destination configured: nothing was sent.",
+    "orgTitle": "Alerts",
+    "orgIntro": "Where alerts for the organization's projects go: failed backup, backup back to normal, silent agent. A project can define its own setting in its Backup tab.",
+    "loadError": "Loading error.",
+    "sourceDefault": "No setting: alerts go to OWNERs.",
+    "sourceOrg": "Organization setting, applied to every project without its own.",
+    "resetOrg": "Back to the default (OWNERs only)",
+    "resetConfirm": "Delete this setting? Alerts will go to OWNERs only.",
+    "projectTitle": "Alerts",
+    "sourceProject": "Customized for this project",
+    "sourceInherited": "Organization setting",
+    "customize": "Customize for this project",
+    "revert": "Back to the organization setting",
+    "revertConfirm": "Delete this project's own setting? It will follow the organization's again.",
+    "cancel": "Cancel",
+    "inheritedReadOnly": "This project's alerts follow the organization setting.",
+    "item": "List item",
+    "webhookItemRequired": "Choose the list item that holds the webhook URL.",
+    "rotation": {
+      "title": "Rotation reminders",
+      "intro": "Warn before a manual rotation is due, and remind about secrets that have not changed for a long time — team vault entries and project secrets. Reminders go to the destinations above.",
+      "preavis": "Advance notice (days before)",
+      "preavisHelp": "0 = off. Only for manual rotations; the due-day reminder is sent as well.",
+      "rotationOff": "Rotation is not enabled for this organization (Info tab): no advance notice will be sent.",
+      "anciennete": "Remind about secrets unchanged for",
+      "ancienneteUnit": "days",
+      "preview": "{count, plural, =0 {No item exceeds this threshold today.} one {# item already exceeds this threshold.} other {# items already exceed this threshold.}} At most {max} reminders are sent per day; each is then repeated every {silence} days until it changes.",
+      "save": "Save reminders",
+      "saved": "Reminders saved.",
+      "saveError": "Could not save."
+    }
+  },
+  "notificationsCenter": {
+    "badgeLabel": "{count, plural, one {# unread notification} other {# unread notifications}}",
+    "title": "Notifications",
+    "intro": "What Physalis reported about the organizations and projects you can access.",
+    "markAllRead": "Mark all as read",
+    "markRead": "Mark as read",
+    "loadError": "Loading error.",
+    "empty": "No notifications yet.",
+    "items": {
+      "backup": {
+        "failed": {
+          "title": "Backup failed — {project} ({env})"
+        },
+        "failedRepeat": {
+          "title": "Backup still failing — {project} ({env}), {count} failures"
+        },
+        "recovered": {
+          "title": "Backup back to normal — {project} ({env})"
+        },
+        "overdue": {
+          "title": "Backup overdue — {project} ({env})"
+        }
+      },
+      "test": {
+        "title": "Alert test — {scope}"
+      },
+      "rotation": {
+        "preavis": {
+          "title": "Rotation due soon: \"{name}\" ({where}) expires on {date}"
+        },
+        "echeance": {
+          "title": "Rotation due: \"{name}\" ({where}) has reached its due date"
+        },
+        "anciennete": {
+          "title": "Time to rotate: \"{name}\" ({where}) unchanged for {days} days"
+        }
+      }
+    },
+    "announcements": {
+      "title": "What's new",
+      "intro": "What changes in Physalis: new features and fixes.",
+      "empty": "Nothing new yet.",
+      "new": "new",
+      "readMore": "Learn more",
+      "badgeLabel": "{count, plural, one {# Physalis update} other {# Physalis updates}}"
+    }
+  },
+  "cliDevice": {
+    "title": "Connect a terminal",
+    "subtitle": "Approve the sign-in requested by “physalis login”.",
+    "codeLabel": "Code shown in the terminal",
+    "lookupBtn": "Check",
+    "loading": "Checking…",
+    "notFound": "No pending request for this code. It may have expired (10 minutes): run “physalis login” again.",
+    "invalidCode": "The code has 8 letters, for example BCDF-GHJK.",
+    "warning": "Only approve if you just ran “physalis login” yourself and the code matches the one in your terminal. Someone sending you this link is trying to get into your account.",
+    "device": "Device",
+    "ip": "IP address",
+    "requestedAt": "Requested on",
+    "expiresAt": "Expires on",
+    "grants": "The session will last 12 hours and give access to all your projects on this instance.",
+    "approveBtn": "Approve",
+    "denyBtn": "Deny",
+    "approved": "Terminal connected. You can go back to your terminal.",
+    "denied": "Sign-in denied. The terminal received no access.",
+    "error": "The operation failed. Try again.",
+    "aiTitle": "AI agent.",
+    "aiIntro": "This request comes from an agent (for example Claude Code), not from you. It will only access what you tick below, read-only, and cannot download any .env file.",
+    "aiScopeLegend": "Projects and environments opened to the agent (development environments only)",
+    "aiNothingSelectable": "None of your projects has a development environment (development, dev, local, test, testing, sandbox): there is nothing to open to an agent.",
+    "aiGrants": "The session will last 12 hours. Your own rights still apply: if you lose access to a project, so does the agent."
   },
   "admin": {
     "layout": {

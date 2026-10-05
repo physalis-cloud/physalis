@@ -9,7 +9,8 @@ export type TokenKind =
   | "SHARE"
   | "SECRET_REQUEST"
   | "USER"
-  | "ORG";
+  | "ORG"
+  | "CLI";
 
 export type TokenIndexEntry = {
   tokenHash: string;

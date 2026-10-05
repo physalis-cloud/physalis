@@ -17,6 +17,7 @@ import TagsInput from "@/components/TagsInput";
 import SecretsImportDialog from "./secrets-import-dialog";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ImmediateRotationSection from "@/components/ImmediateRotationSection";
+import RotationBadge from "@/components/RotationBadge";
 import { maskedInputProps } from "@/lib/masked-input";
 
 type RotationStrategy = "DATABASE" | "JWT_SECRET" | "REMINDER" | "API_KEY" | "WEBHOOK";
@@ -28,6 +29,8 @@ type SecretListItem = {
   updatedAt: string;
   rotationEnabled: boolean;
   rotationStrategy: RotationStrategy | null;
+  rotationNextAt: string | null;
+  rotationLastStatus: string | null;
 };
 
 const ROLE_RANK: Record<ProjectRole, number> = {
@@ -35,6 +38,24 @@ const ROLE_RANK: Record<ProjectRole, number> = {
   EDITOR: 2,
   OWNER: 3,
 };
+
+/**
+ * Teinte et libellé du bandeau « dernier état » d'une rotation.
+ *
+ * ⚠️ `rotationLastStatus` n'est pas un booléen déguisé : il vaut "success",
+ * "reminder" (un rappel manuel est parti) ou "error". Les traiter en deux cas
+ * — « succès, sinon erreur » — affichait un rappel normal en rouge, avec le
+ * compteur d'erreurs à 0 (T-0263). Le défaut par défaut reste l'erreur : une
+ * valeur inconnue doit se voir, pas se fondre dans le vert.
+ */
+function tonDernierEtat(statut: string): {
+  rgb: string;
+  cle: "lastStatusSuccess" | "lastStatusReminder" | "lastStatusError";
+} {
+  if (statut === "success") return { rgb: "34,197,94", cle: "lastStatusSuccess" };
+  if (statut === "reminder") return { rgb: "234,179,8", cle: "lastStatusReminder" };
+  return { rgb: "239,68,68", cle: "lastStatusError" };
+}
 
 export default function SecretsPanel({
   slug,
@@ -71,6 +92,9 @@ export default function SecretsPanel({
   // Ancre de la sélection par plage (shift+clic).
   const [anchor, setAnchor] = useState<string | null>(null);
   const [bulkPending, setBulkPending] = useState(false);
+  // Filtre sur le nom des secrets. Gardé d'un environnement à l'autre : on
+  // compare souvent la même clé entre staging et production.
+  const [query, setQuery] = useState("");
 
   const canEdit = ROLE_RANK[role] >= ROLE_RANK.EDITOR;
 
@@ -114,8 +138,10 @@ export default function SecretsPanel({
     { category: SecretCategory | null; label: string; items: SecretListItem[] }[]
   >(() => {
     if (!secrets) return [];
+    const q = query.trim().toLowerCase();
     const buckets = new Map<SecretCategory | null, SecretListItem[]>();
     for (const s of secrets) {
+      if (q && !s.key.toLowerCase().includes(q)) continue;
       const arr = buckets.get(s.category) ?? [];
       arr.push(s);
       buckets.set(s.category, arr);
@@ -136,7 +162,7 @@ export default function SecretsPanel({
       result.push({ category: null, label: UNCATEGORIZED_LABEL, items: uncategorized });
     }
     return result;
-  }, [secrets]);
+  }, [secrets, query]);
 
   // Ordre d'affichage aplati — c'est lui qui définit ce qu'est une
   // « plage » pour shift+clic (l'ordre à l'écran, pas celui de l'API).
@@ -341,14 +367,8 @@ export default function SecretsPanel({
         <div className="row-info">
           <div className="row-name code-mono" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             {s.key}
-            {s.rotationEnabled && (
-              <span
-                className="chip"
-                style={{ fontSize: 10, background: "rgba(99, 102, 241, 0.15)", color: "#6366f1", fontFamily: "inherit" }}
-                title={`Rotation automatique (${s.rotationStrategy ?? ""})`}
-              >
-                ↻
-              </span>
+            {rotationFeatureEnabled && s.rotationEnabled && (
+              <RotationBadge strategy={s.rotationStrategy} nextAt={s.rotationNextAt} lastStatus={s.rotationLastStatus} />
             )}
           </div>
           <div className="row-meta">
@@ -537,6 +557,18 @@ export default function SecretsPanel({
         </div>
       )}
 
+      {secrets && secrets.length > 0 && (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("filterPlaceholder")}
+          aria-label={t("filterPlaceholder")}
+          className="input"
+          style={{ maxWidth: 360 }}
+        />
+      )}
+
       {selecting && <p className="help">{t("reorganizeHint")}</p>}
 
       {error && <p className="error-text">{error}</p>}
@@ -559,6 +591,8 @@ export default function SecretsPanel({
             ) : undefined
           }
         />
+      ) : grouped.length === 0 && query.trim() ? (
+        <p className="help">{t("filterNoMatch", { query: query.trim() })}</p>
       ) : (
         <div className="flex flex-col gap-4">
           {grouped.map((group) => (
@@ -1046,6 +1080,15 @@ function SecretRotationDialog({
     });
   }
 
+  // ⚠️ TROIS états et non deux (T-0263). Le bandeau rendait en rouge, avec le
+  // libellé d'erreur et le compteur, TOUT ce qui n'était pas "success" — donc
+  // aussi "reminder", qui signale un rappel PARTI. Un secret en stratégie
+  // REMINDER s'affichait ainsi comme une rotation en échec chaque fois que le
+  // système avait fait son travail, avec un compteur d'erreurs figé à 0.
+  const dernierEtat = config?.rotationLastStatus
+    ? tonDernierEtat(config.rotationLastStatus)
+    : null;
+
   return (
     <div className="dialog-overlay">
       {/* Pas de fermeture au clic sur le backdrop (config longue, évite la perte
@@ -1063,15 +1106,15 @@ function SecretRotationDialog({
             <p className="help">{t("loading")}</p>
           ) : (
             <form onSubmit={save} className="flex flex-col gap-4">
-              {config.rotationLastStatus && (
+              {dernierEtat && (
                 <div
                   style={{
                     padding: "8px 12px", borderRadius: 4, fontSize: 13,
-                    background: config.rotationLastStatus === "success" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-                    border: `1px solid ${config.rotationLastStatus === "success" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                    background: `rgba(${dernierEtat.rgb},0.1)`,
+                    border: `1px solid rgba(${dernierEtat.rgb},0.3)`,
                   }}
                 >
-                  {t("lastStatus")} <strong>{config.rotationLastStatus === "success" ? t("lastStatusSuccess") : t("lastStatusError", { count: config.rotationErrorCount })}</strong>
+                  {t("lastStatus")} <strong>{dernierEtat.cle === "lastStatusError" ? t("lastStatusError", { count: config.rotationErrorCount }) : t(dernierEtat.cle)}</strong>
                   {config.rotationLastAt && (
                     <span className="text-muted" style={{ marginLeft: 8, fontSize: 11 }}>
                       {new Date(config.rotationLastAt).toLocaleString()}

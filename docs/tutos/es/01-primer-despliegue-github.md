@@ -234,11 +234,14 @@ Haz un `git push` en `main` (o el nombre de la rama definida). El workflow arran
 1. Job **build**: recupera las `VITE_*`, compila la imagen y la sube a GHCR
 2. Job **deploy**: recupera el bundle, escribe `.env` + `docker-compose.yml` en
    el VPS, ejecuta `docker compose up -d`
+3. Último paso **«Report to Physalis»**: indica a Physalis si el despliegue
+   tuvo éxito o falló
 
 ## Comprobar que todo funciona
 
 - En Physalis: página de la organización → **Audit log** → deberías ver un
-  evento **`DEPLOY_AUTHORIZED`** con el repo, la rama y el entorno.
+  evento **`DEPLOY_AUTHORIZED`** con el repo, la rama y el entorno, y después
+  un **`DEPLOY_REPORTED`** con `status: succeeded` al final del run.
 - Tu aplicación responde en su URL pública.
 
 ## En caso de problema

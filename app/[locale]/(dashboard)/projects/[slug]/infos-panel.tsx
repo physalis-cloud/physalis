@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import AccessPanel from "./access-panel";
 
 // InfosPanel = l'onglet « Infos » (ex-Accès). Sous-onglets : Accès (le contenu
 // actuel) + Readme/Technique/Sécurité (docs du repo, servies depuis le cache DB ;
 // affichées seulement si le fichier existe). Refresh manuel + auto au deploy.
+// + « Installation » (C-0051) en premier, tant que le guide est visible.
 
 // Props publiques de l'onglet Infos : on retire les props « controllees » de
 // AccessPanel (etat ajout / vide / readme), gerees ici et passees explicitement.
@@ -20,21 +21,33 @@ type Props = Omit<
   | "setAddingAccount"
   | "onServicesEmptyChange"
   | "onAccountsEmptyChange"
->;
+> & {
+  /** Guide d'installation déjà rendu (onglet « Installation », C-0051). Absent
+   *  = guide masqué : pas de sous-onglet. Optionnel, le jumeau overlay de
+   *  project-view.tsx ne le passe pas. */
+  setup?: ReactNode;
+};
 type DocKind = "README" | "TECHNICAL" | "SECURITY";
 type Doc = { kind: DocKind; html: string; fetchedAt: string };
-type Sub = "access" | DocKind;
+type Sub = "setup" | "access" | DocKind;
 
 const ROLE_RANK = { VIEWER: 1, EDITOR: 2, OWNER: 3 } as const;
 const DOC_ORDER: DocKind[] = ["README", "TECHNICAL", "SECURITY"];
 
-export default function InfosPanel(props: Props) {
+export default function InfosPanel({ setup, ...props }: Props) {
   const { slug, role } = props;
   const t = useTranslations("projects.infos");
   const tAccess = useTranslations("projects.access");
   const canEdit = ROLE_RANK[role] >= ROLE_RANK.EDITOR;
 
-  const [sub, setSub] = useState<Sub>("access");
+  // Tant que l'utilisateur n'a rien choisi, le défaut se RECALCULE : le guide
+  // s'il est visible, sinon « Accès ». Un useState(défaut) figerait la valeur
+  // du premier rendu, avant que le plan (useFeature) ne soit connu.
+  const [chosen, setSub] = useState<Sub | null>(null);
+  const preferred: Sub = chosen ?? (setup ? "setup" : "access");
+  // Guide masqué entre-temps (paramètres, bouton « Masquer ») : on retombe sur
+  // « Accès » plutôt que sur un contenu vide.
+  const sub: Sub = preferred === "setup" && !setup ? "access" : preferred;
   const [docs, setDocs] = useState<Doc[]>([]);
   const [canRefresh, setCanRefresh] = useState(false);
   const [busy, startBusy] = useTransition();
@@ -67,7 +80,8 @@ export default function InfosPanel(props: Props) {
   }
 
   const has = (k: DocKind) => docs.some((d) => d.kind === k);
-  const current = sub !== "access" ? docs.find((d) => d.kind === sub) : null;
+  const current =
+    sub !== "access" && sub !== "setup" ? docs.find((d) => d.kind === sub) : null;
   const readmeHtml = docs.find((d) => d.kind === "README")?.html ?? null;
 
   // Bloc d'ajout rapide (sections Services/Comptes vides). Poussé tout à droite
@@ -86,6 +100,15 @@ export default function InfosPanel(props: Props) {
     <div className="flex flex-col gap-4">
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div className="subtab-bar" style={{ alignItems: "center" }}>
+          {setup && (
+            <button
+              type="button"
+              className={`subtab ${sub === "setup" ? "active" : ""}`}
+              onClick={() => setSub("setup")}
+            >
+              {t("subtabs.setup")}
+            </button>
+          )}
           <button
             type="button"
             className={`subtab ${sub === "access" ? "active" : ""}`}
@@ -149,7 +172,9 @@ export default function InfosPanel(props: Props) {
         )}
       </div>
 
-      {sub === "access" ? (
+      {sub === "setup" ? (
+        setup
+      ) : sub === "access" ? (
         <AccessPanel
           {...props}
           readmeHtml={readmeHtml}

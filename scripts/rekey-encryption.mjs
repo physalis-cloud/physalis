@@ -131,6 +131,11 @@ export const REGISTRY = [
   { model: "OrgSecret", triplets: [["encryptedValue", "iv", "tag"]] },
   { model: "OrgSecretVersion", triplets: [["encryptedValue", "iv", "tag"]] },
   { model: "CiConnectionSecret", triplets: [["encryptedValue", "iv", "tag"]] },
+  { model: "N8nConnectionSecret", triplets: [["encryptedValue", "iv", "tag"]] },
+  // T-0260 — client_secret / refresh_token / access_token de la custody OAuth.
+  // ⚠️ Sans `@map` sur ses colonnes, DÉLIBÉRÉMENT : c'est le `@map` de
+  // `sso_configs` qui avait rendu le garde-fou aveugle (cf. son entrée plus bas).
+  { model: "AutomationOAuthSecret", triplets: [["encryptedValue", "iv", "tag"]] },
   {
     model: "Service",
     triplets: [
@@ -163,6 +168,12 @@ export const REGISTRY = [
     triplets: [
       ["encryptedPassword", "passwordIv", "passwordTag"],
       ["encryptedTotpSecret", "totpSecretIv", "totpSecretTag"],
+      // Charge utile des types LIST / NOTE, ajoutée par C-0047 en même temps
+      // que sur `VaultEntry`. ⚠️ Un triplet oublié ici ne casse rien : il est
+      // simplement SAUTÉ par la rotation, en silence, et ne se découvre qu'à la
+      // destruction de l'ancienne clé — quand il est trop tard. C'est le
+      // garde-fou `rekey-registry.test.ts` qui a rattrapé cet oubli-ci.
+      ["encryptedData", "dataIv", "dataTag"],
     ],
   },
   { model: "Api", triplets: [["jwtSecret", "jwtSecretIv", "jwtSecretTag"]] },

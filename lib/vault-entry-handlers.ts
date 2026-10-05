@@ -18,6 +18,7 @@ import {
   type EntryPatchBody,
 } from "@/lib/vault-entries";
 import { hasVaultRole, type CollectionAccess } from "@/lib/vault-access";
+import { CARRIES, conversionBlocker, decodePayload, normalizeEntryType } from "@/lib/vault-entry-types";
 import {
   computeReminderNextAt,
   pushRotationHistory,
@@ -39,12 +40,23 @@ const PROJECT_TO_VAULT_LOCAL: Record<ProjectRole, VaultRole> = {
 
 const ENTRY_LIST_FIELDS = {
   id: true,
+  // ⚠️ `type` et `itemCount` sont EN CLAIR et appartiennent à la liste (C-0047) :
+  // ils décident de l'icône, du formulaire d'édition et de la conversion
+  // possible, tout ça sans déchiffrer. Les faire attendre la révélation
+  // obligerait l'écran à déchiffrer une entrée pour savoir comment l'afficher.
+  type: true,
+  itemCount: true,
   name: true,
   url: true,
   username: true,
   tags: true,
   favorite: true,
   encryptedTotpSecret: true,
+  // Pastille rotation de la liste (RotationBadge) : champs en clair, comme
+  // `type` — l'écran sait qu'un rappel est configuré sans rien déchiffrer.
+  rotationEnabled: true,
+  rotationNextAt: true,
+  rotationLastStatus: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -131,9 +143,23 @@ export async function createEntry(access: CollectionAccess, req: Request) {
     totpSecretTag = payload.tag;
   }
 
+  // La charge utile d'une LIST ou d'une NOTE (C-0047). ⚠️ `payload` vaut null
+  // pour LOGIN et SECRET : on écrit alors NULL plutôt que de chiffrer un objet
+  // creux, comme le fait déjà le coffre personnel.
+  let encryptedData: string | null = null;
+  let dataIv: string | null = null;
+  let dataTag: string | null = null;
+  if (v.payload !== null) {
+    const chiffre = encrypt(v.payload);
+    encryptedData = chiffre.encryptedValue;
+    dataIv = chiffre.iv;
+    dataTag = chiffre.tag;
+  }
+
   const entry = await prisma.teamVaultEntry.create({
     data: {
       collectionId: access.collection.id,
+      type: v.type,
       name: v.name,
       url: v.url,
       username: v.username,
@@ -143,6 +169,10 @@ export async function createEntry(access: CollectionAccess, req: Request) {
       encryptedTotpSecret,
       totpSecretIv,
       totpSecretTag,
+      encryptedData,
+      dataIv,
+      dataTag,
+      itemCount: v.itemCount,
       tags: v.tags,
       favorite: v.favorite,
     },
@@ -162,6 +192,10 @@ export async function createEntry(access: CollectionAccess, req: Request) {
       collectionName: access.collection.name,
       hasPassword: encryptedPassword !== null,
       tagsCount: v.tags.length,
+      // ⚠️ Le TYPE est tracé, jamais le contenu : « une LIST de 6 items » se
+      // journalise, les libellés non — ils en disent plus long qu'une URL.
+      type: v.type,
+      itemCount: v.itemCount,
     },
     req,
   });
@@ -218,18 +252,36 @@ export async function revealEntry(
       source: inferSource(access),
       collectionId: access.collection.id,
       name: entry.name,
+      type: normalizeEntryType(entry.type),
     },
     req,
   });
 
+  // La charge utile d'une LIST ou d'une NOTE (C-0047). ⚠️ Elle est déchiffrée
+  // ICI, avec le mot de passe et le secret 2FA — la révélation d'une entrée est
+  // tout-ou-rien par conception, et un déchiffrement item par item multiplierait
+  // les journaux d'accès sans rien protéger de plus : qui peut révéler l'entrée
+  // peut révéler tous ses items.
+  const type = normalizeEntryType(entry.type);
+  const charge = entry.encryptedData && entry.dataIv && entry.dataTag
+    ? decodePayload(decrypt({
+      encryptedValue: entry.encryptedData, iv: entry.dataIv, tag: entry.dataTag,
+    }))
+    : {};
+
   return NextResponse.json({
     entry: {
       id: entry.id,
+      type,
       name: entry.name,
       url: entry.url,
       username: entry.username,
       password,
       totpSecret,
+      // ⚠️ Présents SEULEMENT pour la forme concernée. `items: []` sur une LOGIN
+      // laisserait croire à une liste vide là où il n'y a pas de liste du tout.
+      ...(type === "LIST" ? { items: charge.items ?? [] } : {}),
+      ...(type === "NOTE" ? { text: charge.text ?? "" } : {}),
       tags: entry.tags,
       favorite: entry.favorite,
       createdAt: entry.createdAt,
@@ -249,7 +301,13 @@ export async function patchEntry(
 
   const existing = await prisma.teamVaultEntry.findFirst({
     where: { id: entryId, collectionId: access.collection.id },
-    select: { id: true },
+    // ⚠️ Assez de MÉTADONNÉES EN CLAIR pour statuer sur une conversion de forme
+    // (C-0047), et rien de plus : `conversionBlocker` a été écrit pour se
+    // décider sans déchiffrer, côté client comme côté serveur.
+    select: {
+      id: true, type: true, url: true, username: true,
+      encryptedTotpSecret: true, itemCount: true,
+    },
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -273,6 +331,11 @@ export async function patchEntry(
     totpSecretTag?: string | null;
     tags?: string[];
     favorite?: boolean;
+    type?: string;
+    encryptedData?: string | null;
+    dataIv?: string | null;
+    dataTag?: string | null;
+    itemCount?: number | null;
   } = {};
   if (v.data.name !== undefined) data.name = v.data.name;
   if ("url" in v.data) data.url = v.data.url ?? null;
@@ -303,6 +366,83 @@ export async function patchEntry(
   }
   if (v.data.tags !== undefined) data.tags = v.data.tags;
   if (v.data.favorite !== undefined) data.favorite = v.data.favorite;
+
+  // ⚠️ Un PATCH qui n'annonce AUCUNE forme peut quand même viser une entrée
+  // qui, elle, en a une. Écrire `url` sur une LIST la ferait apparaître dans le
+  // remplissage automatique de l'extension (qui sélectionne par
+  // `url: { not: null }`), avec un mot de passe vide. La forme effective —
+  // celle qu'on convertit, sinon celle en base — décide de ce qui est écrit.
+  const formeEffective = v.forme ? v.forme.type : normalizeEntryType(existing.type);
+  const porteEffectif = CARRIES[formeEffective];
+  if (!porteEffectif.url) delete data.url;
+  if (!porteEffectif.username) delete data.username;
+  if (!porteEffectif.password) {
+    delete data.encryptedPassword;
+    delete data.passwordIv;
+    delete data.passwordTag;
+  }
+  if (!porteEffectif.totp) {
+    delete data.encryptedTotpSecret;
+    delete data.totpSecretIv;
+    delete data.totpSecretTag;
+  }
+
+  // ─── Changement de forme (C-0047) ───────────────────────────────────
+  if (v.forme) {
+    const depuis = normalizeEntryType(existing.type);
+    const vers = v.forme.type;
+
+    // ⚠️ Une conversion ne doit RIEN détruire en silence. `conversionBlocker`
+    // porte la règle : la cible doit savoir porter ce que l'entrée contient
+    // déjà. Refuser en NOMMANT ce qui bloque laisse l'utilisateur vider
+    // lui-même le champ en cause ; convertir quand même perdrait une URL, un
+    // login ou un secret 2FA sans que rien ne le dise.
+    const bloque = conversionBlocker({
+      type: depuis,
+      url: existing.url,
+      username: existing.username,
+      hasTotpSecret: existing.encryptedTotpSecret !== null,
+      itemCount: existing.itemCount,
+    }, vers);
+    if (bloque) {
+      return NextResponse.json(
+        { error: `Cannot convert ${depuis} to ${vers}: it would drop ${bloque}`, blocker: bloque },
+        { status: 409 },
+      );
+    }
+
+    data.type = vers;
+
+    // ⚠️ EFFACER ce que la forme cible ne porte pas. Sans ça, une LOGIN
+    // convertie en SECRET garderait son `url` et son secret 2FA chiffrés en
+    // base — invisibles dans l'écran, bien présents dans un export et dans une
+    // sauvegarde. Du chiffré fantôme qu'on ne sait plus ni montrer ni effacer.
+    const porte = CARRIES[vers];
+    if (!porte.url) data.url = null;
+    if (!porte.username) data.username = null;
+    if (!porte.totp) {
+      data.encryptedTotpSecret = null;
+      data.totpSecretIv = null;
+      data.totpSecretTag = null;
+    }
+    if (!porte.password) {
+      data.encryptedPassword = null;
+      data.passwordIv = null;
+      data.passwordTag = null;
+    }
+
+    if (v.forme.payload === null) {
+      data.encryptedData = null;
+      data.dataIv = null;
+      data.dataTag = null;
+    } else {
+      const chiffre = encrypt(v.forme.payload);
+      data.encryptedData = chiffre.encryptedValue;
+      data.dataIv = chiffre.iv;
+      data.dataTag = chiffre.tag;
+    }
+    data.itemCount = v.forme.itemCount;
+  }
 
   // ─── Move vers une autre collection (same-scope) ────────────────────
   // Si targetCollectionId est present ET different de la collection

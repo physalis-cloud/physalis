@@ -116,8 +116,10 @@ la section **Rotation par hook (Webhook)** ci-dessous.
 
 ### Rappel (assisté)
 
-Physalis **ne change rien à la source**. À l'échéance, il **notifie** l'ADMIN /
-OWNER de l'org et pose un badge. Vous changez le credential chez le fournisseur,
+Physalis **ne change rien à la source**. À l'échéance, il envoie une
+**notification** (centre de notifications, e-mail et webhook selon les
+destinations d'alertes de l'org) et la pastille horloge de l'objet passe à
+l'orange « À roter ». Un préavis part aussi quelques jours avant (7 par défaut). Vous changez le credential chez le fournisseur,
 puis, via la **rotation immédiate** de la modale, vous **générez ou saisissez**
 la nouvelle valeur : Physalis l'enregistre et archive l'ancienne. Adapté aux
 clés tierces, tokens, mots de passe partagés.

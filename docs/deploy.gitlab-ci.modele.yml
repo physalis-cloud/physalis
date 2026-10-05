@@ -43,6 +43,9 @@ deploy:
   # champ « environment CI » de la Policy Physalis (ici "production").
   environment:
     name: production
+  # Le jeton OIDC expire avec le job (5 min si aucun timeout n'est fixé) : le
+  # rapport de fin (after_script) doit tenir dans cette durée.
+  timeout: 15 minutes
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   # ID token OIDC. `aud` doit exactement matcher `OIDC_AUDIENCE` côté Physalis
@@ -127,3 +130,20 @@ deploy:
     - rm -rf "$TMP"
   after_script:
     - rm -rf "${TMP:-/tmp/none}" 2>/dev/null || true
+    # ── Rapport à Physalis (suivi des déploiements) ───────────────────────
+    # Dit tout de suite à Physalis comment le déploiement s'est terminé
+    # (facultatif si la connexion CI de Physalis a un jeton : il lit alors
+    # lui-même l'issue du pipeline). `after_script`
+    # tourne même si `script` a échoué, et son échec ne change jamais le
+    # statut du job : Physalis indisponible = simple avertissement.
+    # Réutilise VAULT_OIDC_TOKEN : GitLab émet le jeton au DÉMARRAGE du job,
+    # valable le temps du `timeout` du job (d'où le timeout explicite plus haut).
+    - |
+      if command -v curl >/dev/null 2>&1; then
+        [ "$CI_JOB_STATUS" = "success" ] && STATUS=succeeded || STATUS=failed
+        curl -s -o /dev/null -w "Physalis report: HTTP %{http_code}\n" -X POST \
+          -H "Authorization: Bearer ${VAULT_OIDC_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "{\"project\":\"${VAULT_PROJECT}\",\"environment\":\"${VAULT_ENV}\",\"status\":\"${STATUS}\",\"detail\":\"job ${CI_JOB_STATUS}\"}" \
+          "${VAULT_URL}/api/deploy/report" || echo "WARNING: Physalis report failed"
+      fi

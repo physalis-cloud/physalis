@@ -13,7 +13,9 @@ import { parseTotpInput } from "@/lib/otpauth-parse";
 import {
   CARRIES,
   isVaultEntryType,
-  normalizeEntryType,
+  normalizePersonalEntryType,
+  normalizeVaultTags,
+  VAULT_TAGS_ERROR,
   typeHasPasswordStrength,
   validateListItems,
   validateNoteText,
@@ -28,23 +30,7 @@ const URL_MAX = 2048;
 const USERNAME_MAX = 200;
 const PASSWORD_MAX = 4096;
 const TOTP_SECRET_MAX = 512;
-const TAG_MAX = 50;
-const TAGS_MAX = 20;
 
-function normalizeTags(input: unknown): string[] | null {
-  if (input === undefined || input === null) return [];
-  if (!Array.isArray(input)) return null;
-  if (input.length > TAGS_MAX) return null;
-  const out: string[] = [];
-  for (const raw of input) {
-    if (typeof raw !== "string") return null;
-    const t = raw.trim();
-    if (!t) continue;
-    if (t.length > TAG_MAX) return null;
-    if (!out.includes(t)) out.push(t);
-  }
-  return out;
-}
 
 export async function GET(req: Request) {
   const userRes = await requireUser();
@@ -100,6 +86,8 @@ export async function GET(req: Request) {
       passwordStrength: true,
       encryptedTotpSecret: true,
       itemCount: true,
+      sshPublicKey: true,
+      sshFingerprint: true,
       collectionId: true,
       createdAt: true,
       updatedAt: true,
@@ -119,11 +107,12 @@ export async function GET(req: Request) {
 
   // Convertit encryptedTotpSecret en booleen pour le shape liste. Le `type`
   // est normalise ICI : le client indexe dessus (CARRIES, formulaires) et ne
-  // doit jamais recevoir une valeur hors des 4 formes connues.
+  // doit jamais recevoir une valeur hors des formes connues. SSH_KEY est gardé
+  // (coffre personnel seulement) : ses colonnes publiques sont en clair.
   const shaped = filtered.map(
     ({ encryptedTotpSecret, type, ...rest }) => ({
       ...rest,
-      type: normalizeEntryType(type),
+      type: normalizePersonalEntryType(type),
       hasTotpSecret: encryptedTotpSecret !== null,
     }),
   );
@@ -188,11 +177,11 @@ export async function POST(req: Request) {
     carries.username && typeof body.username === "string" && body.username.trim()
       ? body.username.trim().slice(0, USERNAME_MAX)
       : null;
-  const tags = normalizeTags(body.tags);
+  const tags = normalizeVaultTags(body.tags);
   if (tags === null) {
     return NextResponse.json(
       {
-        error: `tags must be a string array of <= ${TAGS_MAX} entries, each <= ${TAG_MAX} chars`,
+        error: VAULT_TAGS_ERROR,
       },
       { status: 400 },
     );

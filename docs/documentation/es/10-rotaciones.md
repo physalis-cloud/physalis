@@ -117,8 +117,10 @@ la sección **Rotación vía hook (Webhook)** abajo.
 
 ### Recordatorio (asistido)
 
-Physalis **no cambia nada en el origen**. Al vencer, **notifica** al ADMIN /
-OWNER de la org y muestra una insignia. Usted cambia la credencial en el
+Physalis **no cambia nada en el origen**. Al vencer, envía una
+**notificación** (centro de notificaciones, correo y webhook según los destinos
+de alertas de la org) y la insignia de reloj del objeto pasa a naranja («A
+rotar»). También se envía un aviso previo unos días antes (7 por defecto). Usted cambia la credencial en el
 proveedor y luego, mediante la **rotación inmediata** del modal, **genera o
 introduce** el nuevo valor: Physalis lo guarda y archiva el anterior. Adecuado
 para claves externas, tokens, contraseñas compartidas.

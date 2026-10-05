@@ -7,6 +7,7 @@ import { RiServerLine } from "@remixicon/react";
 import EmptyCard from "@/components/EmptyCard";
 import { useConfirm } from "@/components/ConfirmDialog";
 import ImmediateRotationSection from "@/components/ImmediateRotationSection";
+import RotationBadge from "@/components/RotationBadge";
 import { generatePassword } from "@/lib/generate-password";
 import { maskedInputProps } from "@/lib/masked-input";
 import TagsInput from "@/components/TagsInput";
@@ -60,6 +61,9 @@ type ServiceListItem = {
   url: string | null;
   tags: string[];
   updatedAt: string;
+  rotationEnabled: boolean;
+  rotationNextAt: string | null;
+  rotationLastStatus: string | null;
   rotationWebhookUrl: string | null;
   rotationExecMode: string | null;
   dbType: string | null;
@@ -79,6 +83,10 @@ type AccountListItem = {
   linkName: string | null;
   environmentId: string | null;
   serviceId: string | null;
+  rotationEnabled: boolean;
+  rotationStrategy: string | null;
+  rotationNextAt: string | null;
+  rotationLastStatus: string | null;
 };
 
 export default function AccessPanel({
@@ -405,6 +413,7 @@ function ServicesSection({
                 onEdit={canEdit ? () => setEditId(s.id) : null}
                 onRemove={canEdit ? () => remove(s.id, s.name) : null}
                 onRotation={canEdit && rotationFeatureEnabled ? () => setRotationTarget({ id: s.id, name: s.name }) : null}
+                rotation={rotationFeatureEnabled && s.rotationEnabled ? { strategy: null, nextAt: s.rotationNextAt, lastStatus: s.rotationLastStatus } : null}
               />
             ),
           )}
@@ -418,6 +427,7 @@ function ServicesSection({
           id={rotationTarget.id}
           name={rotationTarget.name}
           onClose={() => setRotationTarget(null)}
+          onChanged={reload}
         />
       )}
     </section>
@@ -862,6 +872,7 @@ function AccountsSection({
                 onEdit={canEdit ? () => setEditId(a.id) : null}
                 onRemove={canEdit ? () => remove(a.id, a.name) : null}
                 onRotation={canEdit && rotationFeatureEnabled ? () => setRotationTarget({ id: a.id, name: a.name }) : null}
+                rotation={rotationFeatureEnabled && a.rotationEnabled ? { strategy: a.rotationStrategy, nextAt: a.rotationNextAt, lastStatus: a.rotationLastStatus } : null}
               />
             ),
           )}
@@ -875,6 +886,7 @@ function AccountsSection({
           id={rotationTarget.id}
           name={rotationTarget.name}
           onClose={() => setRotationTarget(null)}
+          onChanged={reload}
         />
       )}
     </section>
@@ -1071,6 +1083,7 @@ function CredentialsRow({
   onEdit,
   onRemove,
   onRotation,
+  rotation,
 }: {
   name: string;
   url: string | null;
@@ -1079,13 +1092,20 @@ function CredentialsRow({
   onEdit: (() => void) | null;
   onRemove: (() => void) | null;
   onRotation?: (() => void) | null;
+  /** Rotation configurée → pastille à côté du nom ; null = aucune. */
+  rotation?: { strategy: string | null; nextAt: string | null; lastStatus: string | null } | null;
 }) {
   const t = useTranslations("projects");
   return (
     <div className="row">
       <div className="row-icon">{initials(name)}</div>
       <div className="row-info">
-        <div className="row-name">{name}</div>
+        <div className="row-name" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {name}
+          {rotation && (
+            <RotationBadge strategy={rotation.strategy} nextAt={rotation.nextAt} lastStatus={rotation.lastStatus} />
+          )}
+        </div>
         <div className="row-meta">
           {url && (
             <a href={url} target="_blank" rel="noreferrer noopener">
@@ -1151,12 +1171,15 @@ function CredentialRotationDialog({
   id,
   name,
   onClose,
+  onChanged,
 }: {
   slug: string;
   kind: "services" | "accounts";
   id: string;
   name: string;
   onClose: () => void;
+  /** Recharger la liste (la pastille de rotation suit la config). */
+  onChanged?: () => void;
 }) {
   const t = useTranslations("projects");
   const confirm = useConfirm();
@@ -1231,6 +1254,7 @@ function CredentialRotationDialog({
         setError(data?.error ?? t("access.saveError"));
         return;
       }
+      onChanged?.();
       onClose();
     });
   }
@@ -1247,6 +1271,7 @@ function CredentialRotationDialog({
         setError(data?.error ?? t("access.saveError"));
         return;
       }
+      onChanged?.();
       onClose();
     });
   }
@@ -1333,7 +1358,7 @@ function CredentialRotationDialog({
               {/* Rotation immédiate (assistée) seulement en REMINDER ; en WEBHOOK/
                   DATABASE la rotation est automatique (cron / agent / ALTER DB). */}
               {!isAuto && (
-                <ImmediateRotationSection endpoint={`/api/projects/${slug}/${kind}/${id}/rotation`} payloadKey="newPassword" />
+                <ImmediateRotationSection endpoint={`/api/projects/${slug}/${kind}/${id}/rotation`} payloadKey="newPassword" onDone={onChanged} />
               )}
               {savedAuto && (
                 <div className="field" style={{ borderTop: "1px solid var(--border, rgba(0,0,0,0.1))", paddingTop: 12, marginTop: 4 }}>

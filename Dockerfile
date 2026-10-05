@@ -44,6 +44,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Version rendue par /api/health. Injectée au build : l'image publiée passe
+# --build-arg depuis le workflow CI. Une construction locale (`docker compose
+# up --build`) ne la passe pas ⇒ l'endpoint répond "unknown", comme avant.
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION:-unknown}
+
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
 
@@ -60,6 +66,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modul
 COPY --chown=nextjs:nodejs prisma ./prisma
 COPY --chown=nextjs:nodejs package.json ./package.json
 COPY --chown=nextjs:nodejs scripts ./scripts
+# Modèles de workflow pré-remplis par l'onglet Installation (C-0051). Copiés
+# explicitement en plus du tracing de next.config.ts : l'image ne dépend pas
+# du seul tracing standalone (même garantie que le Dockerfile SaaS).
+COPY --chown=nextjs:nodejs docs/*.modele.yml ./docs/
 
 USER nextjs
 EXPOSE 3000

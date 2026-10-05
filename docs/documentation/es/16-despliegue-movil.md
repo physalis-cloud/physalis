@@ -92,9 +92,45 @@ API que sirve de entrada.
 
 Dos límites del lado de Apple: el **App ID debe estar ya registrado** en tu
 cuenta de desarrollador, y Apple limita los certificados de distribución (2 o 3
-por cuenta). Regenerar consume uno y **los perfiles ligados al certificado
-anterior dejan de firmar** — el material antiguo sigue consultable en el
-historial de la aplicación.
+por cuenta). Regenerar **todo** consume uno y hace que los perfiles ligados al
+certificado anterior dejen de firmar.
+
+> ⚠️ **La sustitución no tiene vuelta atrás.** Physalis conserva el valor
+> anterior, pero **hoy ninguna pantalla permite restaurarlo**: guarda una copia
+> local de tu `.p12` y de tu perfil antes de regenerar.
+
+### Regenerar solo el perfil
+
+Es el caso más frecuente, y el que conviene preferir: un perfil dura un año, un
+certificado también, pero **sus fechas no coinciden**. Cuando solo caduca el
+perfil, regenerarlo todo consumiría un certificado para nada — y llegarías al
+límite a la segunda.
+
+**Regenerar solo el perfil** reutiliza el certificado ya en uso: no consume
+ninguna plaza y no toca ni el certificado ni la clave privada. Physalis
+encuentra el certificado correcto comparando **huellas**, no nombres — dos
+certificados de una misma cuenta suelen llevar el mismo rótulo.
+
+> El perfil regenerado puede mostrar la caducidad del **certificado** en lugar de
+> un año: Apple limita la validez de un perfil a la del certificado que incrusta.
+> No es una anomalía.
+
+### El límite, y la revocación
+
+**Ver los certificados de Apple** lista los certificados de distribución de la
+cuenta y marca el que está **en uso** — aquel cuya clave privada está en la caja
+fuerte y, por tanto, el que firma tus builds. Sin ese dato, revocar es jugar a
+los dados.
+
+Al llegar al límite hay que revocar antes de generar. **Revocar** llama a la API
+de Apple por ti, desde Physalis, y lo registra en el diario de auditoría: es lo
+que sustituye al `match nuke` de fastlane, conservando la traza.
+
+> ⚠️ Physalis **se niega** a revocar el certificado en uso, y solo lo hace tras
+> una confirmación explícita. Hacerlo igualmente rompe tus publicaciones hasta
+> que se genere un certificado nuevo. La entrada de auditoría lleva entonces
+> `forced: true`: es la traza que hay que buscar el día en que una firma falle
+> sin motivo aparente.
 
 ## Verificar el material
 
@@ -161,6 +197,20 @@ Las plantillas de workflow incluidas llaman a `/report` al final de la
 ejecución, incluso cuando esta falla — un fallo posterior a la entrega del
 material es precisamente lo que quieres ver.
 
+### ⚠️ «Publicado» significa «publicado en el canal», no «aprobado»
+
+Dos límites de API que conviene conocer, porque parecen errores:
+
+- **Google Play no expone en ninguna parte el estado de la revisión.** Una
+  versión puede estar `completed` en su canal — y por tanto aparecer aquí como
+  **publicada** — y haber sido **rechazada** por la revisión de conformidad de
+  Play. Solo la consola lo muestra. No existe ningún endpoint para leerlo; en
+  caso de duda, manda la Play Console.
+- **En Apple, `VALID` significa «binario procesado»**, no «a la venta». La
+  revisión y la puesta a la venta están en otra parte de la API, que Physalis no
+  lee — por eso mostramos `subido`, nunca `publicado`, en lugar de anunciar una
+  puesta a la venta que no hemos constatado.
+
 ## El número de versión
 
 Apple y Google rechazan un número de build que no crece. Physalis lo lleva por
@@ -183,6 +233,69 @@ concreto `(repo, workflow, rama)` a recuperar el material. Dos tipos:
 necesita sus secretos de build. Por tanto necesita **las dos** policies, en el
 mismo `(repo, workflow, rama)`. Una app nativa pura solo necesita la policy
 móvil.
+
+## Proyecto nativo o híbrido: el delta
+
+Se incluyen cuatro plantillas, dos por plataforma:
+
+| Proyecto | Plantillas |
+|---|---|
+| **Híbrido** (Capacitor, Cordova, Ionic) | `deploy-mobile-android-capacitor.modele.yml`, `deploy-mobile-ios-capacitor.modele.yml` |
+| **Nativo** (Gradle/Kotlin, Xcode/Swift) | `deploy-mobile-android-native.modele.yml`, `deploy-mobile-ios-native.modele.yml` |
+
+Un **único `fastlane/Fastfile`** sirve para las cuatro: lo que separa a las dos
+familias es lo que hace el *workflow* antes de llamar a la lane, no la lane.
+
+⚠️ **Las plantillas Capacitor han publicado de verdad** (Google Play y TestFlight,
+desde el CI, sin secretos). Las nativas son su transposición y **aún no se han
+ejecutado** en condiciones reales: su cabecera lo indica. Las partes sensibles
+(obtención del bundle, verificación de huella, aviso de entrega, lane de
+fastlane) se reutilizan tal cual; lee los dos puntos siguientes antes del primer
+run.
+
+### Lo que el nativo hace de menos
+
+- **Ninguna llamada a `/api/deploy`.** Sin capa web no hay secretos de compilación
+  que inyectar: basta con **una sola policy móvil** (véase la sección anterior).
+- **Ni `npm ci` ni `npx cap sync`.** El proyecto nativo está en tu repositorio,
+  versionado; no se regenera en cada compilación.
+- **Ninguna etapa de iconos ni de permisos.** Viven en el proyecto, en git.
+
+### El punto que de verdad cambia: la versión
+
+Physalis manda sobre el número de build, pero **la forma de aplicarlo difiere**,
+y no es cosmético.
+
+**Android.** Las plantillas parchean el `build.gradle` del módulo de aplicación y
+luego **releen el archivo** para comprobar que la sustitución ha surtido efecto.
+La plantilla nativa acepta ambas sintaxis: `versionCode 12` (Groovy) y
+`versionCode = 12` (DSL de Kotlin). Si tu proyecto **calcula** su versión (número
+de commits, archivo de propiedades, plugin de versionado), la sustitución no
+encontrará nada: el workflow se detiene y lo dice, en lugar de publicar un número
+erróneo. Sustituye entonces esa etapa por lo que tu proyecto espere.
+
+**iOS.** Aquí es donde ambas familias más divergen:
+
+- **Capacitor** genera un `Info.plist` con valores **literales**, que `agvtool` no
+  sabe leer. Por eso la plantilla escribe directamente con `plutil -replace`.
+- **Un proyecto Xcode nativo** escribe `CFBundleVersion = $(CURRENT_PROJECT_VERSION)`
+  y guarda el valor en sus *build settings*. Poner ahí un literal con `plutil`
+  **desconectaría el plist de los ajustes del proyecto**: el número realmente
+  incrustado volvería a ser el de los build settings en la siguiente compilación.
+  La plantilla nativa usa por tanto `agvtool new-version -all`, que es el método
+  correcto aquí.
+
+⚠️ `agvtool` exige el versionado **«Apple Generic»** (`VERSIONING_SYSTEM =
+apple-generic`), que es el valor por defecto de los proyectos Xcode recientes. La
+plantilla lo comprueba **antes** de compilar y se detiene si no es el caso: una
+compilación de 20 minutos que acaba en un rechazo por «redundant build version»
+cuesta más que un fallo inmediato.
+
+### Qué hay que adaptar
+
+En ambas plantillas nativas, un recuadro `À ADAPTER POUR VOTRE PROJET` enumera las
+variables: identificador de la app, módulo Gradle (`app` por convención), carpeta
+del proyecto Xcode y nombre del *scheme*.
 
 ## Interruptor de emergencia
 

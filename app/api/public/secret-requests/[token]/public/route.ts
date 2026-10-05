@@ -25,11 +25,16 @@ import {
 
 type Params = { params: Promise<{ token: string }> };
 
-const NOT_FOUND = NextResponse.json({ error: "Not found" }, { status: 404 });
+// ⚠️ Porté depuis la route SaaS le 2026-09-17 — ce fichier en est un jumeau
+// mono-tenant tenu à la main, et il portait le même défaut. Une `Response`
+// déclarée au niveau du module est le MÊME objet pour toutes les requêtes, et
+// son corps est un flux qui ne se consomme qu'une fois : premier appel → le
+// JSON, tous les suivants → corps vide, même statut.
+const notFound = () => NextResponse.json({ error: "Not found" }, { status: 404 });
 
 export async function GET(_req: Request, { params }: Params) {
   const { token } = await params;
-  if (!isSecretRequestTokenFormat(token)) return NOT_FOUND;
+  if (!isSecretRequestTokenFormat(token)) return notFound();
 
   const sr = await prisma.secretRequest.findUnique({
     where: { tokenHash: hashSecretRequestToken(token) },
@@ -43,11 +48,11 @@ export async function GET(_req: Request, { params }: Params) {
       expiresAt: true,
     },
   });
-  if (!sr) return NOT_FOUND;
+  if (!sr) return notFound();
   // Même 404 indifférencié que la source : révoquée, déjà soumise et expirée
   // ne se distinguent pas de « n'existe pas ».
   if (sr.revokedAt || sr.submittedAt || sr.expiresAt <= new Date()) {
-    return NOT_FOUND;
+    return notFound();
   }
 
   return NextResponse.json({

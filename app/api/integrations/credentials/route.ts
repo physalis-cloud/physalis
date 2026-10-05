@@ -12,9 +12,14 @@
 // Query params :
 //   project (req)  slug du projet
 //   env            nom de l'environnement — REQUIRED si type=secret
-//   type (req)     "secret" | "service" | "account"
+//   type (req)     "secret" | "service" | "account" | "team_vault"
 //   tag            filtre par tag exact (single)
-//   key            filtre par nom de clé (secrets seulement)
+//   key            filtre par nom de clé (secrets et team_vault)
+//   collection     slug de la collection — REQUIRED si type=team_vault
+//
+// `team_vault` lit le COFFRE D'ÉQUIPE : les secrets qui n'appartiennent à aucun
+// projet (webhooks, clés de veille, jetons partagés). Cf. lib/integrations/
+// coffre-equipe.ts pour le pourquoi et les règles d'accès.
 //
 // Réponse : `{ type, items: [{...}] }` — la valeur/password est en clair
 // (le caller détient déjà la "racine de confiance" via le Bearer token).
@@ -32,8 +37,43 @@ import {
 import { withTenantSchema } from "@/lib/tenant";
 import { logAction } from "@/lib/audit";
 import { machineFetchRateLimited } from "@/lib/machine-rate-limit";
+import { lireCoffreEquipe } from "@/lib/integrations/coffre-equipe";
 
-type ItemType = "secret" | "service" | "account";
+type ItemType = "secret" | "service" | "account" | "team_vault";
+
+/**
+ * L'ancienneté et l'échéance de rotation d'un item, sérialisées.
+ *
+ * ⚠️ **Ce que les objectifs 18 et 19 de [T-0257] attendaient — et le manque
+ * n'était PAS dans le nœud npm.** La feuille de route disait « que le nœud
+ * Physalis rende la date d'expiration d'une entrée » ; le nœud relaie les items
+ * TELS QUELS, c'est cette réponse qui ne les portait pas, alors que les modèles
+ * les stockent depuis la phase B de la rotation. Rien à publier sur npm.
+ *
+ * ⚠️ **`null` et non « absent » quand la rotation n'est pas réglée.** Absent,
+ * `$json.rotationNextAt` vaut `undefined` dans une expression n8n et toute
+ * comparaison est fausse **en silence** — un gabarit d'alerte n'alerterait
+ * jamais sans se plaindre. `null` se teste ; l'absence se traverse.
+ *
+ * ⚠️ **Sérialisé ici, pas laissé au `JSON.stringify` de la réponse** : le
+ * contrat doit dire ce que le workflow reçoit.
+ *
+ * ⚠️ Ce sont des dates, pas des secrets — cette réponse rend déjà la valeur
+ * déchiffrée, les exposer n'élargit rien.
+ */
+function rotationDe(e: {
+  rotationEnabled: boolean;
+  rotationLastAt: Date | null;
+  rotationNextAt: Date | null;
+  updatedAt: Date;
+}) {
+  return {
+    rotationEnabled: e.rotationEnabled,
+    rotationLastAt: e.rotationLastAt ? e.rotationLastAt.toISOString() : null,
+    rotationNextAt: e.rotationNextAt ? e.rotationNextAt.toISOString() : null,
+    updatedAt: e.updatedAt.toISOString(),
+  };
+}
 
 type ServiceCreds = { user?: string; password?: string };
 
@@ -71,19 +111,71 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const projectSlug = url.searchParams.get("project");
+  const collectionSlug = url.searchParams.get("collection");
   const envName = url.searchParams.get("env");
   const type = url.searchParams.get("type") as ItemType | null;
   const tag = url.searchParams.get("tag");
   const keyFilter = url.searchParams.get("key");
 
-  if (!projectSlug) {
-    return NextResponse.json({ error: "project query param is required" }, { status: 400 });
-  }
-  if (!type || !["secret", "service", "account"].includes(type)) {
+  if (!type || !["secret", "service", "account", "team_vault"].includes(type)) {
     return NextResponse.json(
-      { error: "type query param must be one of: secret, service, account" },
+      { error: "type query param must be one of: secret, service, account, team_vault" },
       { status: 400 },
     );
+  }
+
+  // ── Coffre d'équipe : chemin SÉPARÉ ────────────────────────────────────
+  // Traité ici plutôt que greffé sur la suite : il n'a ni projet ni
+  // environnement, et sa RBAC n'a rien de commun avec celle des secrets de
+  // projet. L'entrelacer aurait rendu les deux illisibles — et ce chemin-ci
+  // sert déjà des intégrations en production.
+  if (type === "team_vault") {
+    if (!collectionSlug) {
+      return NextResponse.json(
+        { error: "collection query param is required when type=team_vault" },
+        { status: 400 },
+      );
+    }
+    // ⚠️ **Aucune garde de plan ici, et c'est délibéré.** `lib/vault-access.ts`
+    // pose la règle : la feature `team_vault` ne se vérifie que sur les verbes
+    // d'ÉCRITURE — « après un downgrade, une collection d'équipe reste
+    // consultable ; on ne prend pas des données en otage ». Une lecture est une
+    // lecture, y compris par une intégration.
+    //
+    // ⚠️ Accessoirement, importer `requireFeature` ICI casserait le build
+    // self-host : cette route est SYNCHRONISÉE, `lib/feature-guard.ts` est
+    // DENYLISTÉ, et l'import ne résoudrait pas là-bas. Les fichiers qui gatent
+    // par plan ont tous un jumeau overlay (vault-access en a un) ; celui-ci
+    // n'en a pas, et n'a pas à en avoir.
+    const res = await lireCoffreEquipe(ctx, {
+      collection: collectionSlug, tag, key: keyFilter,
+    });
+    if (res.kind === "not_found") {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (res.kind === "forbidden") {
+      return NextResponse.json({ error: res.raison }, { status: 403 });
+    }
+    logAction({
+      action: "INTEGRATION_CREDENTIALS_FETCH",
+      actor:
+        ctx.kind === "user"
+          ? { kind: "user", userId: ctx.userId, email: ctx.userEmail }
+          : { kind: "token", tokenId: ctx.tokenId, tokenName: ctx.tokenName },
+      organizationId: res.organizationId,
+      projectId: res.projectId,
+      targetType: "TeamVaultEntry",
+      metadata: {
+        tokenKind: ctx.kind, type, collection: collectionSlug,
+        tag, keyFilter, count: res.items.length,
+      },
+      req,
+    });
+    return NextResponse.json({ type, items: res.items });
+  }
+
+  if (!projectSlug) {
+    return NextResponse.json({ error: "project query param is required" }, { status: 400 });
   }
   if (type === "secret" && !envName) {
     return NextResponse.json(
@@ -163,6 +255,12 @@ export async function GET(req: Request) {
           tag: true,
           category: true,
           tags: true,
+          // ⚠️ `Secret` n'a PAS les champs de rotation — ils vivent sur
+          // `Service`, `AppAccount` et `TeamVaultEntry`. Un secret de projet
+          // n'expose donc que son ancienneté, et le gabarit d'alerte vise le
+          // coffre d'équipe. Rendre ici un `rotationNextAt: null` toujours nul
+          // laisserait croire à un réglage qui n'existe pas.
+          updatedAt: true,
         },
       });
       const items = secrets.map((s) => ({
@@ -174,6 +272,7 @@ export async function GET(req: Request) {
         }),
         category: s.category,
         tags: s.tags,
+        updatedAt: s.updatedAt.toISOString(),
       }));
       return {
         kind: "ok" as const,
@@ -198,6 +297,10 @@ export async function GET(req: Request) {
           iv: true,
           tag: true,
           tags: true,
+          rotationEnabled: true,
+          rotationLastAt: true,
+          rotationNextAt: true,
+          updatedAt: true,
         },
       });
       const items = services.map((s) => {
@@ -209,6 +312,7 @@ export async function GET(req: Request) {
           username: creds.user,
           password: creds.password,
           tags: s.tags,
+          ...rotationDe(s),
         };
       });
       return {
@@ -232,6 +336,10 @@ export async function GET(req: Request) {
         iv: true,
         tag: true,
         tags: true,
+        rotationEnabled: true,
+        rotationLastAt: true,
+        rotationNextAt: true,
+        updatedAt: true,
       },
     });
     const items = accounts.map((a) => {
@@ -242,6 +350,7 @@ export async function GET(req: Request) {
         username: creds.user,
         password: creds.password,
         tags: a.tags,
+        ...rotationDe(a),
       };
     });
     return {

@@ -9,13 +9,7 @@
 
 [Français](README.md) · [English](README.en.md) · **Español**
 
-> **Versión 1.6.1** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
-
-> ⚠️ **¿Actualizas desde una versión anterior?** El puerto ya no se publica en
-> todas las interfaces, sino en `127.0.0.1`. Si accedes a tu instancia
-> **directamente por la IP del servidor, sin proxy inverso**, dejará de ser
-> accesible hasta que definas `BIND_IP` en tu `.env`. Consulta el
-> [registro de versiones](CHANGELOG.md).
+> **Versión 1.7.0** · Versión alojada y gestionada: [physalis.cloud](https://physalis.cloud) · Errores y comentarios: [abrir una issue](https://github.com/physalis-cloud/physalis/issues)
 
 ---
 

@@ -18,9 +18,17 @@
 
 import { describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const REPO_ROOT = resolve(__dirname, "../..");
+
+// Ce test part tel quel dans le build self-host, d'où les surfaces SaaS sont
+// denylistées (ex. lib/notification-destinations.ts). Là-bas, une entrée dont
+// le fichier est ABSENT est un site exclu, pas une entrée morte. Dans la
+// SOURCE, un fichier absent reste une entrée morte (site supprimé) et échoue.
+// Même idiome que masked-input-static.test.ts.
+const IS_PUBLIC_BUILD = existsSync(resolve(REPO_ROOT, ".physalis-build"));
 
 function grepCode(pattern: string): string[] {
   try {
@@ -121,6 +129,11 @@ const ALLOWED_TABLE_READS: Record<string, string> = {
   "app/api/integrations/projects/route.ts":
     "RESTRICTION DÉLIBÉRÉE — un UserToken ne liste pas les projets masqués " +
     "pour son porteur.",
+  "lib/notification-destinations.ts":
+    "RESTRICTION DÉLIBÉRÉE — AUDIENCE d'une alerte, pas une décision d'accès : " +
+    "seuls les OWNER EXPLICITES du projet, lignes `hidden` exclues (C-0048). " +
+    "effectiveProjectRole y ajouterait tout OrgADMIN (OWNER implicite) — " +
+    "élargirait la liste de diffusion sans que l'org l'ait choisi.",
 
   // ── LECTURE LÉGITIME qui ALIMENTE la source unique ──
   // Ces sites lisent la table pour PASSER la ligne à effectiveProjectRole /
@@ -192,7 +205,9 @@ describe("Static analysis — règles d'accès projet non re-dérivées (§4)", 
       grepCode("(prisma|tx)\\.projectMember\\.").map(fileOf),
     );
     const dead = Object.keys(ALLOWED_TABLE_READS).filter(
-      (f) => !filesWithReads.has(f),
+      (f) =>
+        !filesWithReads.has(f) &&
+        !(IS_PUBLIC_BUILD && !existsSync(resolve(REPO_ROOT, f))),
     );
     expect(
       dead,

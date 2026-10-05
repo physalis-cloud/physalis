@@ -16,6 +16,7 @@ import ExportButton from "./export-button";
 import SecurityPanel from "./security-panel";
 import UserTokensPanel from "./user-tokens-panel";
 import PluginSessionsPanel from "./plugin-sessions-panel";
+import CliSessionsPanel from "./cli-sessions-panel";
 import DeleteMyAccountPanel from "./delete-my-account-panel";
 import pkg from "@/package.json";
 
@@ -150,6 +151,7 @@ export default async function AccountPage({
             )}
             <UserTokensPanel />
             <PluginSessionsPanel />
+            <CliSessionsPanel />
           </div>
         </section>
 
