@@ -54,6 +54,10 @@ modifiée, à une exception près, voulue — les projets existants sont marqué
 
 - `/api/health` renvoie la version de l'image (`"version": "X.Y.Z+sha"`), pour
   savoir quelle version tourne réellement.
+- Chaque image publiée est d'abord testée de bout en bout (Playwright) : la CI
+  la lance avec le `docker-compose.yml` du dépôt sur une base neuve, puis joue
+  les parcours de `e2e/` (connexion, projets, secrets, installation, session
+  CLI). Un échec bloque la publication.
 
 ### Sécurité
 

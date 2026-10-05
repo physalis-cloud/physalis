@@ -31,6 +31,8 @@ export default async function ProjectPage({
       ciConnectionId: true,
       ciRepo: true,
       mobileEnabled: true,
+      setupGuide: true,
+      setupCompletedAt: true,
       organizationId: true,
       members: { where: { userId: session.user.id } },
       organization: {
@@ -135,6 +137,8 @@ export default async function ProjectPage({
           role={role}
           orgRole={orgRole}
           mobileProjectEnabled={project.mobileEnabled}
+          setupGuide={project.setupGuide}
+          setupCompletedAt={project.setupCompletedAt?.toISOString() ?? null}
         />
       </div>
     </div>

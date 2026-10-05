@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { RiSmartphoneLine } from "@remixicon/react";
 import type { ProjectRole } from "@prisma/client";
@@ -14,6 +14,11 @@ import MembersPanel from "./members-panel";
 import MobilePanel from "./mobile-panel";
 import SettingsDialog from "./settings-dialog";
 import TeamVaultPanel from "../../team-vault-panel";
+import DeploymentsPanel, { phaseBadgeClass } from "./deployments-panel";
+import SetupPanel from "./setup-panel";
+import { isSetupTabVisible } from "@/lib/project-setup";
+import { useRouter } from "@/i18n/navigation";
+import type { DeploymentView } from "@/lib/deployment";
 
 type EnvSummary = {
   id: string;
@@ -76,6 +81,8 @@ export default function ProjectView({
   role,
   orgRole,
   mobileProjectEnabled,
+  setupGuide = null,
+  setupCompletedAt = null,
 }: {
   projectName: string;
   slug: string;
@@ -93,14 +100,51 @@ export default function ProjectView({
    *  réglé dans la modale Paramètres. Pas de second verrou ici : le gate de
    *  plan `mobile_deploy` du SaaS n'a pas d'équivalent en mono-tenant. */
   mobileProjectEnabled: boolean;
+  /** Onglet « Installation » (C-0051) : choix d'affichage et date du premier
+   *  déploiement réussi, passés par le jumeau de page.tsx. */
+  setupGuide?: string | null;
+  setupCompletedAt?: string | null;
 }) {
   const t = useTranslations("projects");
   const sortedEnvs = [...environments].sort(sortEnvs);
+  // Pas de plans en mono-tenant : le déploiement OIDC et la CI/CD sont
+  // toujours disponibles. Les `hasOidc` / `hasCiCd` du source valent `true`,
+  // d'où l'onglet « Installation » soumis à la seule règle de lib/project-setup.
+  const showSetup = isSetupTabVisible({ setupGuide, setupCompletedAt });
+  const router = useRouter();
   const [tab, setTab] = useState<MainTab>({ kind: "access" });
+  // « Déploiements » est le sous-onglet par défaut d'un environnement.
   const [envSubTab, setEnvSubTab] = useState<
-    "secrets" | "tokens" | "compose"
-  >("secrets");
+    "secrets" | "tokens" | "compose" | "deployments"
+  >("deployments");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const tDeploy = useTranslations("projects.deployments");
+
+  // Dernier déploiement par environnement (C-0051) : pastille sur les onglets
+  // d'environnement. Rechargé par le panneau Déploiements à chaque lecture, et
+  // toutes les 60 s tant qu'un déploiement attend son rapport.
+  const [latestDeploy, setLatestDeploy] = useState<Record<string, DeploymentView>>({});
+  const loadLatestDeploy = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${slug}/deployments`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { latest: Record<string, DeploymentView> };
+      setLatestDeploy(data.latest);
+    } catch {
+      // Pastille purement indicative : une erreur ne mérite pas de bandeau.
+    }
+  }, [slug]);
+  useEffect(() => {
+    loadLatestDeploy();
+  }, [loadLatestDeploy]);
+  const deployWaiting = Object.values(latestDeploy).some(
+    (d) => d.phase === "running" || d.phase === "long" || d.phase === "abnormal",
+  );
+  useEffect(() => {
+    if (!deployWaiting) return;
+    const id = setInterval(loadLatestDeploy, 60_000);
+    return () => clearInterval(id);
+  }, [deployWaiting, loadLatestDeploy]);
 
   // Gestion des membres : reste OWNER-only (gestion d'acces).
   const canManageMembers = role === "OWNER";
@@ -152,6 +196,19 @@ export default function ProjectView({
               <span className="text-muted" style={{ fontSize: 11 }}>
                 ({env.secretCount})
               </span>
+              {latestDeploy[env.name] && (
+                <span
+                  className={phaseBadgeClass(latestDeploy[env.name].phase)}
+                  role="img"
+                  aria-label={tDeploy("badgeTitle", {
+                    phase: tDeploy(`phase.${latestDeploy[env.name].phase}`),
+                  })}
+                  title={tDeploy("badgeTitle", {
+                    phase: tDeploy(`phase.${latestDeploy[env.name].phase}`),
+                  })}
+                  style={{ marginLeft: 6, padding: "2px 3px", gap: 0 }}
+                />
+              )}
             </button>
           ))}
         </div>
@@ -210,6 +267,24 @@ export default function ProjectView({
           role={role}
           environments={sortedEnvs}
           rotationFeatureEnabled={false}
+          setup={
+            showSetup ? (
+              <SetupPanel
+                slug={slug}
+                orgSlug={orgSlug}
+                canEdit={canEditProjectSettings}
+                nav={{
+                  openSettings: () => setSettingsOpen(true),
+                  openPolicies: () => setTab({ kind: "policies" }),
+                  openEnv: (envName, sub) => {
+                    setTab({ kind: "env", envName });
+                    if (sub) setEnvSubTab(sub);
+                  },
+                }}
+                onHidden={() => router.refresh()}
+              />
+            ) : undefined
+          }
         />
       ) : tab.kind === "vault" ? (
         <TeamVaultPanel
@@ -235,6 +310,13 @@ export default function ProjectView({
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="subtab-bar">
+              <button
+                type="button"
+                className={`subtab ${envSubTab === "deployments" ? "active" : ""}`}
+                onClick={() => setEnvSubTab("deployments")}
+              >
+                {t("tabs.deployments")}
+              </button>
               <button
                 type="button"
                 className={`subtab ${envSubTab === "secrets" ? "active" : ""}`}
@@ -281,6 +363,14 @@ export default function ProjectView({
           {envSubTab === "compose" && (
             <ComposePanel slug={slug} env={activeEnv.name} role={role} />
           )}
+          {envSubTab === "deployments" && (
+            <DeploymentsPanel
+              slug={slug}
+              env={activeEnv.name}
+              canRerun={canRedeploy}
+              onChange={loadLatestDeploy}
+            />
+          )}
         </div>
       ) : (
         <div className="empty-state">
@@ -301,6 +391,9 @@ export default function ProjectView({
           ciConnectionId={ciConnectionId}
           ciRepo={ciRepo}
           environments={sortedEnvs}
+          setupGuideAvailable
+          setupGuide={setupGuide}
+          setupCompletedAt={setupCompletedAt}
           onClose={() => setSettingsOpen(false)}
         />
       )}

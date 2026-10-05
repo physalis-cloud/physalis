@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { OrgRole } from "@prisma/client";
 import { RiSafe2Line } from "@remixicon/react";
@@ -51,7 +52,13 @@ export default function OrgPanels({
 
   // Les ADMIN+ atterrissent sur « Infos » (réglages org) — l'onglet visé par
   // « Paramètres » du header. Les autres sur le coffre d'équipe.
-  const [tab, setTab] = useState<Tab>(canManage ? "infos" : "vault");
+  // `?tab=cicd` / `?tab=servers` : lien profond depuis l'onglet « Installation »
+  // d'un projet (C-0051). Seuls ces deux onglets, et seulement s'ils sont
+  // visibles pour ce rôle — sinon on retombe sur le défaut.
+  const requested = useSearchParams().get("tab");
+  const deepLink: Tab | null =
+    (requested === "cicd" || requested === "servers") && canRead ? requested : null;
+  const [tab, setTab] = useState<Tab>(deepLink ?? (canManage ? "infos" : "vault"));
 
   return (
     <div className="flex flex-col gap-6">

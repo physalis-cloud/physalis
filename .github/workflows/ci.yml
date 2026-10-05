@@ -50,9 +50,101 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+  # e2e contre une instance JETABLE (DEP-020/027) : l'image est construite
+  # depuis ce commit, lancée par le docker-compose.yml PUBLIÉ (durcissement
+  # compris : read_only, cap_drop) sur une base neuve, puis Playwright joue les
+  # parcours de e2e/. C'est ce qu'un self-hébergeur obtient en vrai : tsc et
+  # les tests unitaires ne voient ni un fichier absent de l'image, ni un écran
+  # jamais rendu. Le job bloque la publication (needs: de `publish`).
+  e2e:
+    name: E2E (instance jetable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Même cache que `publish` : la seconde construction y est quasi gratuite.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: physalis:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      # Secrets générés pour ce run seulement : l'instance meurt avec le job.
+      - name: Generate .env
+        run: |
+          ADMIN_PASSWORD="e2e-$(openssl rand -hex 16)"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          {
+            echo "DB_PASSWORD=$(openssl rand -hex 16)"
+            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+            echo "AUTH_SECRET=$(openssl rand -base64 32)"
+            echo "NEXTAUTH_SECRET=$(openssl rand -base64 32)"
+            echo "NEXTAUTH_URL=http://localhost:3001"
+            echo "ADMIN_EMAIL=admin@example.com"
+            echo "ADMIN_PASSWORD=$ADMIN_PASSWORD"
+            echo "ALLOW_REGISTRATION=false"
+            echo "PORT=3001"
+          } > .env
+          echo "E2E_ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$GITHUB_ENV"
+
+      # `docker-compose.build.yml` remplace l'image épinglée par `physalis:local`,
+      # celle construite ci-dessus ; `--no-build` interdit de la reconstruire.
+      - name: Start instance
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-build
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/api/health > /dev/null; then
+              curl -s http://localhost:3001/api/health; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::L'instance n'a pas répondu sur /api/health en 120 s"
+          docker compose -f docker-compose.yml -f docker-compose.build.yml logs --no-color
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run e2e
+        env:
+          E2E_BASE_URL: http://localhost:3001
+          E2E_ADMIN_EMAIL: admin@example.com
+
+      - name: Instance logs
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.build.yml logs --no-color
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
   publish:
     name: Build & Push
-    needs: test
+    needs: [test, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
